@@ -17,6 +17,14 @@ function on<T>(channel: string, cb: (v: T) => void): () => void {
 }
 
 const api: ReelApi = {
+  support: {
+    capture: () => call('support:capture'),
+    prepare: (d) => call('support:prepare', d),
+    send: (id) => call('support:send', id),
+    discard: () => call('support:discard'),
+    copy: (id) => call('support:copy', id),
+    email: (id) => call('support:email', id)
+  },
   app: {
     info: () => call('app:info'),
     finishFirstRun: () => call('app:finishFirstRun'),

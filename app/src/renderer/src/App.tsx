@@ -7,6 +7,7 @@ import { draggingOut } from './components/Player'
 import { Icon, type IconName } from './components/icons'
 import { ErrorBoundary } from './components/ErrorBoundary'
 import { UpdateNotice } from './components/UpdateNotice'
+import { REPORT_PROBLEM_EVENT, ReportProblem, openReportProblem } from './components/ReportProblem'
 import { Home } from './screens/Home'
 import { NewVideo } from './screens/NewVideo'
 import { Working } from './screens/Working'
@@ -46,6 +47,8 @@ export function App() {
   const [dragging, setDragging] = useState(false)
   const [overNote, setOverNote] = useState(false) // a drag over the note box (Reel.tsx): it attaches, no overlay
   const [libraryTick, setLibraryTick] = useState(0)
+  const [report, setReport] = useState<{ context?: string; screenshotAvailable: boolean; hasKey: boolean } | null>(null)
+  const reportOpen = useRef(false)
   const notify = useCallback<Notify>((text, kind) => setToast({ text, kind, id: Date.now() }), [])
   const closeToast = useCallback(() => setToast(null), [])
   // A toast belongs to the screen it was said on: every screen change clears it (critique 1.1).
@@ -66,6 +69,27 @@ export function App() {
     reel.ai.active().then(setProvider).catch(() => {})
   }, [screen, info?.firstRunDone])
 
+  // "Report a problem" from anywhere (Settings, the Help menu, error screens and toasts). The window's screenshot is
+  // taken before the form is drawn, so it shows what went wrong.
+  useEffect(() => {
+    const open = (e: Event) => {
+      if (reportOpen.current) return
+      reportOpen.current = true
+      const context = (e as CustomEvent<{ context?: string }>).detail?.context
+      setToast(null)
+      reel.support
+        .capture()
+        .catch(() => ({ available: false, hasKey: false }))
+        .then((c) => setReport({ context, screenshotAvailable: c.available, hasKey: c.hasKey }))
+    }
+    window.addEventListener(REPORT_PROBLEM_EVENT, open)
+    return () => window.removeEventListener(REPORT_PROBLEM_EVENT, open)
+  }, [])
+  const closeReport = useCallback(() => {
+    reportOpen.current = false
+    setReport(null)
+  }, [])
+
   // Menu items (macOS) and notification clicks.
   useEffect(
     () =>
@@ -75,6 +99,7 @@ export function App() {
         else if (c.type === 'library') go({ name: 'library' })
         else if (c.type === 'export') window.dispatchEvent(new Event(EXPORT_EVENT))
         else if (c.type === 'open-reel') go({ name: 'reel', slug: c.slug })
+        else if (c.type === 'report-problem') openReportProblem()
       }),
     [go]
   )
@@ -164,7 +189,10 @@ export function App() {
 
   if (!info) return null
   const platform = `platform-${info.platform}`
-  const toastEl = toast && <Toast key={toast.id} text={toast.text} kind={toast.kind} onClose={closeToast} />
+  const toastEl = toast && (
+    <Toast key={toast.id} text={toast.text} kind={toast.kind} onClose={closeToast} action={toast.kind === 'error' ? { label: 'Report a problem', run: () => openReportProblem(toast.text) } : undefined} />
+  )
+  const reportEl = report && <ReportProblem key="report" context={report.context} screenshotAvailable={report.screenshotAvailable} hasKey={report.hasKey} onClose={closeReport} />
 
   if (!info.firstRunDone) {
     return (
@@ -180,6 +208,7 @@ export function App() {
           />
         </div>
         {toastEl}
+        {reportEl}
       </NotifyCtx.Provider>
     )
   }
@@ -257,6 +286,7 @@ export function App() {
         </div>
       )}
       {toastEl}
+      {reportEl}
     </NotifyCtx.Provider>
   )
 }

@@ -61,6 +61,7 @@ import { checkNoteAttachments, forChat, pickClipboardType, registerAttachmentIpc
 import { createUpdateService } from './update-check'
 import { PROTOCOL, createUpdateKeyService } from './update-key'
 import { setupPosting } from './posting-ipc'
+import { createSupport, encodeScreenshot, supportUrl } from './support'
 import { createJobFeedback, createMainWindow, feedbackLog, installMenu, startDragOut, titleBarOverlay, windowStateFile, type AppCommand } from './window'
 
 const TEST = process.env.REELSTUDIO_TEST === '1'
@@ -268,8 +269,9 @@ async function readLogTail(): Promise<string> {
   }
 }
 
-/** Puts the diagnostics text on the clipboard. Only the state, version and plan kind of each CLI go in, never a path. */
-async function copyDiagnostics(): Promise<void> {
+/** The redacted diagnostics text (Copy diagnostics, and Report a problem when ticked). Only the state, version and plan
+ * kind of each CLI go in, never a path. */
+async function diagnosticsText(): Promise<string> {
   const settled = <T>(p: Promise<T> | undefined): Promise<T | null> => (p ?? Promise.resolve(null)).catch(() => null)
   const [active, claude, codex, model, logTail] = await Promise.all([
     settled(ai.active()),
@@ -311,9 +313,30 @@ async function copyDiagnostics(): Promise<void> {
     new Date()
   )
   // One pass over the whole text: the log and every fact above (a CPU name or a plan kind cannot carry a path, but cheap).
-  clipboard.writeText(redactDiagnostics(text, app.getPath('home')))
+  return redactDiagnostics(text, app.getPath('home'))
+}
+
+async function copyDiagnostics(): Promise<void> {
+  // Electron 44's clipboard calls return promises.
+  await clipboard.writeText(await diagnosticsText())
   log('[diagnostics] copied to the clipboard')
 }
+
+/** "Report a problem" (main/support.ts). */
+function osLine(): string {
+  const osName = process.platform === 'darwin' ? 'macOS' : process.platform === 'win32' ? 'Windows' : process.platform
+  return `${osName} ${process.getSystemVersion()} ${process.arch}`
+}
+const support = createSupport({
+  url: supportUrl(process.env, log),
+  appVersion: app.getVersion(),
+  os: osLine(),
+  fetch: (url, init) => fetch(url, init), // Node's fetch: no Electron session, so no cookies
+  getKey: () => updateKey.get(),
+  diagnostics: diagnosticsText,
+  capture: async () => (win && !win.isDestroyed() ? encodeScreenshot(await win.webContents.capturePage()) : null),
+  log
+})
 
 async function appInfo(): Promise<AppInfo> {
   const s = await loadSettings()
@@ -468,6 +491,16 @@ function registerIpc(): void {
   })
   handle('app:copyText', (_e, t: string) => clipboard.writeText(String(t)))
   handle('app:copyDiagnostics', () => copyDiagnostics())
+  handle('support:capture', () => support.capture())
+  handle('support:prepare', (_e, d) => support.prepare(d))
+  handle('support:send', (_e, id: unknown) => support.send(id))
+  handle('support:discard', () => support.discard())
+  handle('support:copy', async (_e, id: unknown) => {
+    const text = support.asText(id)
+    if (!text) throw { code: 'SUPPORT_STALE', userMessage: 'Nothing to copy yet.' }
+    await clipboard.writeText(text)
+  })
+  handle('support:email', (_e, id: unknown) => shell.openExternal(support.mailto(id)))
   handle('app:dimTitleBar', (_e, on: boolean) => {
     if (process.platform !== 'darwin' && win && !win.isDestroyed()) win.setTitleBarOverlay(titleBarOverlay(on === true))
   })

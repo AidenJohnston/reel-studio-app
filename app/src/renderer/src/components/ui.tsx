@@ -29,7 +29,7 @@ export function Thinking() {
  * Toasts: a success line goes away by itself after 4 s and has no button to press. An error stays
  * until it is closed or the screen changes (App clears toasts on every screen change).
  */
-export function Toast({ text, kind, onClose }: { text: string; kind?: 'error' | 'info'; onClose: () => void }) {
+export function Toast({ text, kind, onClose, action }: { text: string; kind?: 'error' | 'info'; onClose: () => void; action?: { label: string; run: () => void } }) {
   useEffect(() => {
     if (kind === 'error') return
     const t = setTimeout(onClose, 4000)
@@ -38,6 +38,11 @@ export function Toast({ text, kind, onClose }: { text: string; kind?: 'error' | 
   return (
     <div className={`toast${kind === 'error' ? ' error' : ''}`} role={kind === 'error' ? 'alert' : 'status'} data-testid="toast">
       <span>{text}</span>
+      {action && (
+        <button className="link inline on-dark" style={{ color: '#fff', whiteSpace: 'nowrap' }} onClick={action.run} data-testid="toast-action">
+          {action.label}
+        </button>
+      )}
       {kind === 'error' && (
         <button className="icon-btn on-dark" onClick={onClose} aria-label="Close" title="Close">
           <Icon name="x" />

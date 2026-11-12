@@ -8,6 +8,7 @@ import { FOLDER_APP } from '../components/ui'
 import { PostingSettings } from '../components/PostingSettings'
 import { Icon } from '../components/icons'
 import { useNotify } from '../App'
+import { openReportProblem } from '../components/ReportProblem'
 
 export function Settings({ info, onInfo }: { info: AppInfo; onInfo: (i: AppInfo) => void; go?: Go }) {
   const notify = useNotify()
@@ -177,11 +178,14 @@ export function Settings({ info, onInfo }: { info: AppInfo; onInfo: (i: AppInfo)
             <strong>Something not working?</strong>
           </p>
           <p className="muted-sm" style={{ margin: '2px 0 0' }}>
-            Copy diagnostics and paste them into your bug report. They say which version you have, what computer it runs on,
+            Report a problem to send it to the Reel Studio team; you see everything before it goes. Or copy diagnostics and paste them into your bug report. They say which version you have, what computer it runs on,
             how your AI editor answered and what the app did recently. Your user name, e-mail addresses and keys are taken
             out; your videos' file names can still show.
           </p>
           <div className="row" style={{ marginTop: 8 }}>
+            <button className="btn ghost" onClick={() => openReportProblem()} data-testid="report-problem-open">
+              Report a problem
+            </button>
             <button className="btn ghost" onClick={() => void copyDiagnostics()} disabled={diagnostics === 'busy'} data-testid="copy-diagnostics">
               {diagnostics === 'copied' ? 'Copied' : diagnostics === 'busy' ? 'Copying…' : 'Copy diagnostics'}
             </button>

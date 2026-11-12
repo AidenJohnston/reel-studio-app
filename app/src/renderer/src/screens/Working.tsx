@@ -6,6 +6,7 @@ import { Icon } from '../components/icons'
 import { PhonePlayer } from '../components/Player'
 import { useNotify } from '../App'
 import { ModelDownload } from '../components/connect'
+import { openReportProblem } from '../components/ReportProblem'
 import { STAGES, stageIndex } from '../../../shared/progress'
 import { EMPTY_LIVE, PREVIEW_LABEL, liveFromDetail, reduceLive, timeLeftWords, type LiveState } from '../../../shared/live'
 
@@ -238,6 +239,9 @@ export function Working({ slug, go }: { slug: string; go: Go }) {
                 </button>
                 <button className="btn ghost danger" onClick={() => setConfirmDelete(true)}>
                   Delete this video
+                </button>
+                <button className="link" onClick={() => openReportProblem(`${state.message}${state.code ? ` (${state.code})` : ''}`)} data-testid="failed-report">
+                  Report a problem
                 </button>
               </div>
             </div>
