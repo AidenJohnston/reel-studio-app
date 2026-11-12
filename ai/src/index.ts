@@ -803,11 +803,11 @@ export function createAI(opts: CreateAIOptions) {
   async function helperFor(editorProvider: ModelProvider): Promise<Helper> {
     if (editorProvider.id === 'claude-cli') {
       const other = await localCodex();
-      if (other.state === 'ready' && other.bin) return { label: 'Your Codex app', make: async () => new CodexCliProvider({ env: env(), bin: other.bin }) };
+      if (other.state === 'ready' && other.bin) return { label: 'ChatGPT', make: async () => new CodexCliProvider({ env: env(), bin: other.bin }) };
     }
     if (editorProvider.id === 'codex-cli') {
       const other = await localClaude();
-      if (other.state === 'ready' && other.bin) return { label: 'Your Claude Code app', make: async () => new ClaudeCliProvider({ env: env(), bin: other.bin }) };
+      if (other.state === 'ready' && other.bin) return { label: 'Claude', make: async () => new ClaudeCliProvider({ env: env(), bin: other.bin }) };
     }
     return { label: 'Your editor', make: () => modelProvider('editor') };
   }

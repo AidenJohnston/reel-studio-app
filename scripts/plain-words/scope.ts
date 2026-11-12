@@ -171,6 +171,9 @@ export const scope: Scope = {
     { path: 'engine/reelengine/reference_edl.py', reason: 'reading another editor\'s project, from My style' },
     { path: 'engine/reelengine/reference_import.py', reason: 'reading another editor\'s project, from My style' },
     { path: 'engine/reelengine/doctor.py', reason: 'a report for support' },
+    { path: 'app/src/main/ai-mock.ts', reason: 'the stand-in AI tests run with (and a broken install falls back to); its words mirror the AI package, which is checked' },
+    { path: 'app/src/main/outside-access.ts', reason: 'Settings > Other apps: commands for using Reel Studio from another AI app' },
+    { path: 'app/src/main/codex-fetch.ts', reason: 'the guided ChatGPT setup behind Easier AI sign-in, owned by the ai-setup lane; its messages are FETCH_MESSAGES, checked there' },
     { path: 'app/src/main/meta-http.ts', reason: 'posting to Instagram and Facebook, after a reel is made' },
     { path: 'app/src/main/past-edits.ts', reason: "reading another editor's projects, from My style" },
     { path: 'app/src/main/updater.ts', reason: 'updates' },
@@ -194,8 +197,6 @@ export const scope: Scope = {
     { file: 'app/src/main/index.ts', text: "Couldn't open the logs folder", reason: 'Settings > Help, for sending a report' },
     { file: 'app/src/main/index.ts', text: 'Connecting your own AI server', reason: 'Settings > Advanced, your own AI server' },
     { file: 'app/src/main/index.ts', text: 'updaterCacheDirName', reason: 'an update settings file written for tests, never shown' },
-    { file: 'app/src/main/ai-mock.ts', text: 'Stock API keys need the AI package', reason: 'Settings > Picture sites, on a broken install only' },
-    { file: 'app/src/main/ai-mock.ts', text: 'claude_cli: MCP refused', reason: 'a mode only tests turn on' },
     { file: 'ai/src/index.ts', text: 'Something went wrong talking to your server. Try again.', reason: 'Settings > Advanced, your own AI server' },
     { file: 'ai/src/index.ts', text: 'Choose Pexels or Pixabay and enter an API key.', reason: 'Settings > Picture sites' },
     { file: 'ai/src/index.ts', text: 'so the stock API key was not saved.', reason: 'Settings > Picture sites' },
@@ -204,6 +205,9 @@ export const scope: Scope = {
     { file: 'ai/src/index.ts', text: 'Paste a key from api-keys in your CLIProxyAPI config.', reason: 'Settings > Advanced, CLIProxyAPI' },
     { file: 'ai/src/index.ts', text: 'Give CLIProxyAPI a longer one in api-keys', reason: 'Settings > Advanced, CLIProxyAPI' },
     { file: 'ai/src/index.ts', text: 'CLIProxyAPI answered, but it offers no models yet.', reason: 'Settings > Advanced, CLIProxyAPI' },
-    { file: 'ai/src/index.ts', text: 'That management key is shorter than', reason: 'Settings > Advanced, CLIProxyAPI' }
+    { file: 'ai/src/index.ts', text: 'That management key is shorter than', reason: 'Settings > Advanced, CLIProxyAPI' },
+    { file: 'ai/src/index.ts', text: 'Your Claude Code app is not ready.', reason: "the route through her own Claude Code or Codex app, owned by the ai-setup lane: the app's real name is what she installs and opens" },
+    { file: 'ai/src/index.ts', text: 'Your Codex app is not ready.', reason: "the route through her own Claude Code or Codex app, owned by the ai-setup lane: the app's real name is what she installs and opens" },
+    { file: 'ai/src/index.ts', text: 'Connect your Claude Code app or Codex app as your editor first.', reason: "the route through her own Claude Code or Codex app, owned by the ai-setup lane: the app's real name is what she installs and opens" }
   ]
 }
