@@ -10,6 +10,7 @@ import { EditorDetails, StageModels, useStages } from './editor-limits'
 import { SETTINGS } from './settings-index'
 import { SearchHits } from './settings-rows'
 import { GuidedChoices, useEasyAi } from './AiSetup'
+import { Logo } from './brand'
 import './connect.css'
 
 /** What Reel Studio makes with no editor connected. Nobody says "I" here: no editor is there to say it. */
@@ -124,7 +125,7 @@ export function ConnectAI({ onConnected, advanced = true, stagesOpen = false }: 
     <ProviderRow
       key="other"
       id={active.id}
-      mark={<Icon name={active.id === 'claude' ? 'key' : 'server'} size={20} />}
+      mark={active.id === 'custom' && active.label === REEL_STUDIO_AI ? <Logo size={20} /> : <Icon name={active.id === 'claude' ? 'key' : 'server'} size={20} />}
       name={active.id === 'claude' ? SETTINGS['api-key'].label : active.label}
       status={<ConnectedMark testid="ai-connected" />}
       tone="ok"

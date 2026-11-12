@@ -172,6 +172,10 @@ export const createMockAI: CreateAI = ({ host, managedCodex }) => {
   // moments.ts does: the engine's `moments` stills and window, then its draft, while the editor "thinks". A note about
   // the music changes nothing on screen, so it draws nothing, as the real package starts no run for one.
   const mockMoments = process.env.REELSTUDIO_MOCK_MOMENTS === '1'
+  // Tests only (REELSTUDIO_MOCK_EDITS=1, e2e/easy-ai.spec.ts): the editor a test connected (the Codex app, or a saved
+  // connection) answers a note with a new version, as the practice editor does, without replacing the editor in use.
+  const mockEdits = process.env.REELSTUDIO_MOCK_EDITS === '1'
+  const EDIT_MS = 300
   const PRACTICE: ProviderStatus = { id: 'replay', connected: true, label: 'Practice editor (test)' }
   async function slowNote(dir: string, note: string, onEvent: (e: AgentEvent) => void, signal?: AbortSignal, opts?: { id?: string; owner?: string; steer?: NoteSteer; base?: number; mergeParent?: number }): Promise<AgentResult> {
     const id = opts?.id ?? randomUUID()
@@ -195,7 +199,7 @@ export const createMockAI: CreateAI = ({ host, managedCodex }) => {
       if (r?.draft?.file) onEvent({ type: 'render', version: Number(r.draft.version ?? 0), draft: true, file: String(r.draft.file) })
     }
     await new Promise<void>((resolve, reject) => {
-      const t = setTimeout(resolve, noteMs)
+      const t = setTimeout(resolve, noteMs || EDIT_MS)
       signal?.addEventListener('abort', () => (clearTimeout(t), reject({ code: 'CANCELLED', userMessage: 'Stopped.' })), { once: true })
     })
     // like the real package: words added while it worked are read before it can finish (ai steer.ts)
@@ -481,7 +485,7 @@ export const createMockAI: CreateAI = ({ host, managedCodex }) => {
         fellBack = { app, reason: 'claude_cli: MCP refused', at: new Date().toISOString() }
         onEvent({ type: 'status', phase: 'edit', message: `${app} self-test failed (claude_cli: MCP refused). Using the text-protocol provider for this session.` })
       }
-      if (noteMs > 0) return slowNote(projectDir, note, onEvent, signal, opts)
+      if (noteMs > 0 || (mockEdits && (chosen === 'custom' || (chosen === 'codex-cli' && state.chatgpt === 'ready')))) return slowNote(projectDir, note, onEvent, signal, opts)
       onEvent({ type: 'status', message: 'Reading your note', pct: 10, phase: 'edit' })
       const p = await readProject(projectDir)
       // Tests only: REELSTUDIO_MOCK_CLAUDE=ready, and the mock Claude Code app chosen in Settings. Then act like the real

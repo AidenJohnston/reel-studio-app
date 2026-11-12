@@ -136,6 +136,7 @@ test('Sign in with ChatGPT on a computer with no Codex: one press gets it ready,
     REELSTUDIO_USER_DATA: p.userData,
     REELSTUDIO_ROOT: p.root,
     REELSTUDIO_EASY_AI: '1',
+    REELSTUDIO_MOCK_EDITS: '1',
     REELSTUDIO_MOCK_CODEX: 'missing',
     REELSTUDIO_TEST_CODEX_PACKAGE: JSON.stringify({ url: `${origin}/codex.tar.gz`, sha256, bytes: pkg.length })
   })
@@ -155,8 +156,9 @@ test('Sign in with ChatGPT on a computer with no Codex: one press gets it ready,
     await expect(row).toHaveAttribute('data-step', 'getting')
     await expect(row).toContainText('Getting ChatGPT ready on this computer')
     await shot(page, 'easy-ai-02-chatgpt-getting')
+    // the sentence first: if the row failed instead, this assertion prints what it said
+    await expect(row).toContainText('A ChatGPT page opened in your browser', { timeout: 30_000 })
     await expect(row).toHaveAttribute('data-step', 'waiting')
-    await expect(row).toContainText('A ChatGPT page opened in your browser')
     await shot(page, 'easy-ai-03-chatgpt-waiting')
     // the sign-in finishes on its own; the editor is ChatGPT and the first run's button says Continue
     await expect(page.getByTestId('editor-continue')).toBeVisible({ timeout: 20_000 })
@@ -181,6 +183,7 @@ test('Use Reel Studio’s AI: publik’s page, then this computer’s key connec
     REELSTUDIO_USER_DATA: p.userData,
     REELSTUDIO_ROOT: p.root,
     REELSTUDIO_EASY_AI: '1',
+    REELSTUDIO_MOCK_EDITS: '1',
     REELSTUDIO_TEST_PUBLIK_ORIGIN: origin,
     REELSTUDIO_TEST_PUBLIK_TOKEN: PAT
   })
@@ -192,8 +195,8 @@ test('Use Reel Studio’s AI: publik’s page, then this computer’s key connec
 
     await page.getByTestId('guided-start-publik').click()
     const row = page.getByTestId('guided-publik')
-    await expect(row).toHaveAttribute('data-step', 'waiting')
     await expect(row).toContainText('A page opened in your browser. Sign in there')
+    await expect(row).toHaveAttribute('data-step', 'waiting')
     await expect(page.getByTestId('guided-reopen-publik')).toBeVisible()
     await shot(page, 'easy-ai-07-publik-waiting')
     expect(publik.installs.at(-1)).toMatchObject({ app_token: PAT, app_slug: 'reel-studio' })

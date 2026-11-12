@@ -109,6 +109,22 @@ async function statfsFree(dir: string): Promise<number> {
   return Number(s.bavail) * Number(s.bsize)
 }
 
+/**
+ * Windows: renaming a folder whose new .exe an antivirus is still scanning fails with EPERM, EBUSY or EACCES for a
+ * moment. Tries for about 5 s before giving up.
+ */
+async function moveIntoPlace(from: string, to: string, signal: AbortSignal): Promise<void> {
+  for (let i = 0; ; i++) {
+    try {
+      return await fs.rename(from, to)
+    } catch (e) {
+      const code = String((e as NodeJS.ErrnoException)?.code)
+      if (signal.aborted || i >= 25 || !['EPERM', 'EBUSY', 'EACCES'].includes(code)) throw e
+      await new Promise((r) => setTimeout(r, 200))
+    }
+  }
+}
+
 const isDiskFull = (e: unknown): boolean => ['ENOSPC', 'EDQUOT'].includes(String((e as NodeJS.ErrnoException)?.code))
 
 /**
@@ -174,7 +190,7 @@ export async function ensureCodex(d: CodexFetchDeps, signal: AbortSignal, onProg
     if (d.platform !== 'win32') await fs.chmod(codexBinIn(stage, d.platform), 0o755)
     await fs.writeFile(join(stage, '.complete'), `${pkg.sha256}\n`)
     await fs.rm(release, { recursive: true, force: true })
-    await fs.rename(stage, release)
+    await moveIntoPlace(stage, release, signal)
     onProgress?.(100)
     return codexBinIn(release, d.platform)
   } catch (e) {
