@@ -33,6 +33,7 @@ try:  # share A1's error type so render/cli handle compositing errors like their
     from .proto import EngineError as _BaseError
 except ImportError:  # pragma: no cover
     _BaseError = Exception
+from .proto import NO_SPACE_MESSAGE, out_of_space
 
 
 class EngineError(_BaseError):
@@ -87,6 +88,8 @@ def run(cmd: list, timeout: float = 600, what: str = "ffmpeg", binary: bool = Fa
                           "A video tool is missing. Reinstall Reel Studio.") from None
     if proc.returncode != 0:
         err = proc.stderr if not binary else proc.stderr.decode("utf-8", "replace")
+        if out_of_space(err):
+            raise EngineError("NO_SPACE", f"{what} failed: {err[-1500:]}", NO_SPACE_MESSAGE)
         raise EngineError("FFMPEG_FAILED", f"{what} failed: {err[-1500:]}",
                           "Something went wrong while making your video. Try again.")
     return proc

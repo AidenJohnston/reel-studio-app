@@ -105,9 +105,9 @@ function parseReady(r: unknown): EngineReady | null {
 }
 
 export const GENERIC_ERROR =
-  'Something went wrong while working on your reel. Please try again. If it keeps happening, restart Reel Studio.'
+  'Something went wrong while working on your reel, so try again, and restart Reel Studio if it keeps happening.'
 export const MISSING_ENGINE =
-  'Reel Studio is missing a part it needs to make reels. Please reinstall the app.'
+  'Reel Studio is missing a part it needs to make reels, so reinstall the app.'
 
 export interface RunnerConfig {
   python: () => string

@@ -427,7 +427,7 @@ export function PickFiles({
   accept?: string
   onFiles: (p: string[]) => void
   kind?: 'primary' | 'secondary'
-  size?: 'small'
+  size?: 'small' | 'big'
   icon?: ReactNode
   /** the button's test id */
   testid?: string

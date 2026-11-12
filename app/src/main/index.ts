@@ -797,6 +797,15 @@ function startFirstEdit(slug: string, initArgs: { title: string; files: string[]
     // a reel from a pick across the footage archive: its spans become its cut (again on a resume, until they are in)
     await seedFromArchive(slug)
     startProxy(slug, dir)
+    // A video picked on the welcome can come before the listening download is in (FirstRun.tsx starts it): Version 1
+    // waits for that download, or starts it, rather than failing on a missing model (engine transcribe.py MODEL_MISSING).
+    if (!models.status().installed && !existsSync(join(dir, 'work', 'transcript.json'))) {
+      emit({ type: 'status', message: 'Getting ready to listen', pct: 0, phase: 'listen' })
+      const ready = await models.download()
+      if (signal.aborted) throw { code: 'CANCELLED', userMessage: 'Stopped.' }
+      if (!ready.installed)
+        throw { code: 'MODEL_MISSING', userMessage: ready.error ?? "Reel Studio couldn't get ready to listen, so check your internet connection and try again." }
+    }
     const provider = basic ? null : await ai.active().catch(() => null)
     editor = editorName(provider)
     // A render event with firstLook = the quick no-AI draft is ready while the AI keeps editing; the

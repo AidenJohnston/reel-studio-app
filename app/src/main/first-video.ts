@@ -32,7 +32,7 @@ export async function clearFailedCopy(dir: string): Promise<void> {
 
 /** Version 1 was stopped during its copy and the file it copied from can't be opened any more: its card and its stage
  * say so (store.ts summary), and another video on the same reel starts it again. */
-export const COPY_GONE = { code: 'COPY_GONE', userMessage: 'Your video was only partly copied, and the file you dropped can’t be opened any more.' }
+export const COPY_GONE = { code: 'COPY_GONE', userMessage: 'Your video was only partly copied and the file you dropped can’t be found any more, so drop it again from where it is now.' }
 
 /**
  * Whether a copy stopped partway can be made again from `files`: each still a video file that opens, as a fresh drop

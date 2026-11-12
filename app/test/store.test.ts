@@ -621,7 +621,7 @@ describe('a reel planned before it has a video', () => {
     expect([there?.status, there?.failedCode, there?.take]).toEqual(['interrupted', null, null])
     await fs.rm(dropped)
     const gone = await summary('half-copied')
-    expect([gone?.status, gone?.failedCode, gone?.failedWhy]).toEqual(['failed', 'COPY_GONE', 'Your video was only partly copied, and the file you dropped can’t be opened any more.'])
+    expect([gone?.status, gone?.failedCode, gone?.failedWhy]).toEqual(['failed', 'COPY_GONE', 'Your video was only partly copied and the file you dropped can’t be found any more, so drop it again from where it is now.'])
     expect((await detail('half-copied')).lastError?.code).toBe('COPY_GONE')
   })
 

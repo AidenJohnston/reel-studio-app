@@ -76,6 +76,7 @@ export const scope: Scope = {
     'app/src/renderer/src/components/ShareStrip.tsx',
     'app/src/renderer/src/components/SharePlatforms.tsx',
     'app/src/renderer/src/components/SendToPhone.tsx',
+    'app/src/renderer/src/components/AiSetupSlot.tsx',
     'app/src/main/jobs.ts',
     'app/src/main/engine.ts',
     'app/src/main/first-video.ts',
@@ -86,6 +87,8 @@ export const scope: Scope = {
     'app/src/main/platform-export.ts',
     'app/src/main/phone-share.ts',
     'app/src/main/window.ts',
+    'app/src/main/pause.ts',
+    'app/src/main/note-intake.ts',
     'app/src/shared/describe.ts',
     'app/src/shared/notes.ts',
     'app/src/shared/notes-log.ts',
@@ -94,6 +97,9 @@ export const scope: Scope = {
     'app/src/shared/live.ts',
     'app/src/shared/composer.ts',
     'app/src/shared/share.ts',
+    'app/src/shared/pause.ts',
+    'app/src/shared/edit-score.ts',
+    'app/src/shared/posting.ts',
     'ai/src/editor.ts',
     'ai/src/agent.ts',
     'engine/reelengine/proto.py',
@@ -103,7 +109,10 @@ export const scope: Scope = {
     'engine/reelengine/analyze.py',
     'engine/reelengine/render.py',
     'engine/reelengine/cover.py',
-    'engine/reelengine/cli.py'
+    'engine/reelengine/cli.py',
+    'engine/reelengine/compose_util.py',
+    'engine/reelengine/tools.py',
+    'engine/reelengine/broll.py'
   ],
 
   offPath: [

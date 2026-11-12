@@ -112,12 +112,15 @@ test('make a reel end to end', async () => {
   await expect(page.getByTestId('version-on-screen')).toContainText('Version 2', { timeout: 120_000 })
   await shot(page, '11-reel-v2')
 
-  // ---- no AI connected: no way to ask for a change, one way to connect ----
+  // ---- no AI connected: the note box is there; the first note asks for an AI in its place and keeps the note ----
   if (aiSource === 'mock') {
-    await expect(page.getByTestId('composer-connect')).toBeVisible()
-    await expect(page.getByTestId('composer-connect')).toContainText('Connect an editor to leave notes')
-    await expect(page.getByTestId('note-input')).toHaveCount(0)
+    await expect(page.getByTestId('composer-connect')).toHaveCount(0)
+    await page.getByTestId('note-input').fill('make the start faster')
+    await page.getByTestId('send').click()
+    await expect(page.getByTestId('composer-connect')).toContainText('To make changes from a note, connect an AI once. Your note is kept.')
     await expect(page.getByTestId('change-at')).toHaveCount(0)
+    await page.getByTestId('ai-setup-skip').click()
+    await expect(page.getByTestId('note-input')).toHaveValue('make the start faster')
   }
   await shot(page, '12-reel-no-ai')
 

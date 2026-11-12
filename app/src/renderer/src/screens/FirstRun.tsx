@@ -1,7 +1,9 @@
-// The first run, staged in the Reel screen's own layout (ux-foundation-b.md section 4): a welcome; then the sample
-// is made in the player and the notes column the way an editor makes Version 1, so it shows everything the product
-// does; on a Mac, then, the one thing it asks about (notifications); then the editor is chosen beside it; then the app
-// opens on a new reel with no video yet.
+// The first run. The welcome is where the first reel starts: Choose a video (or a drop anywhere on it) makes that reel
+// straight away, the first of the three choices to a first reel (the manifesto, rule 1). Nothing is asked first: a
+// first reel needs no AI (docs/architecture.md section 1), the note box offers one when a note needs it, and the Reel
+// screen asks about notifications while Version 1 is made. "See how it works" is the tour for those who want it,
+// staged in the Reel screen's own layout (ux-foundation-b.md section 4): the sample is made in the player and the notes
+// column the way an editor makes Version 1; on a Mac, then, notifications; then the editor; then a new reel.
 import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { ProviderInfo } from '../../../shared/api'
 import { place, type Shape } from '../../../shared/phone-shapes'
@@ -21,7 +23,7 @@ import { NotifyRow, markNotifyAsked } from '../components/permissions'
 import { EDIT, RAW_LEN, TRANSCRIPT, tokens } from '../components/first-run/sample'
 import { sound } from '../components/first-run/sound'
 import { byKeyboard, reducedMotion } from '../components/motion'
-import { Button } from '../components/ui'
+import { Button, PickFiles, useFileDrop } from '../components/ui'
 import rawUrl from '../assets/sample/raw.mp4'
 import aiUrl from '../assets/sample/ai.mp4'
 import posterUrl from '../assets/sample/raw-poster.jpg'
@@ -47,8 +49,23 @@ const LEADS: Record<Pane, string> = {
   editor: 'Your editor picks your best takes, adds pictures and makes the changes you ask for, on your own Claude or ChatGPT plan.'
 }
 
-export function FirstRun({ onDone, platform }: { onDone: () => Promise<void>; platform: string }) {
+const VIDEO_TYPES = 'video/*,.mov,.mp4,.m4v'
+
+export function FirstRun({ onDone, onVideo, platform }: { onDone: () => Promise<void>; onVideo: (paths: string[]) => Promise<boolean>; platform: string }) {
   const computer = platform === 'darwin' ? 'Mac' : 'PC'
+  // A video picked or dropped on the welcome makes the first reel; false (not a video) leaves the welcome as it was.
+  const [making, setMaking] = useState(false)
+  const take = async (paths: string[]) => {
+    if (making || !paths.length) return
+    setMaking(true)
+    if (!(await onVideo(paths).catch(() => false))) setMaking(false)
+  }
+  const drop = useFileDrop((paths) => void take(paths))
+  // The listening download starts with the welcome, so a video picked at once is heard as soon as it can be; a first
+  // edit that starts before it is in waits for it (main index.ts startFirstEdit).
+  useEffect(() => {
+    void reel.model.download().catch(() => {})
+  }, [])
   const [start, setStart] = useState<Start | null>(null)
   const [welcomeGone, setWelcomeGone] = useState(false)
   const [shape] = usePhoneShape()
@@ -63,21 +80,31 @@ export function FirstRun({ onDone, platform }: { onDone: () => Promise<void>; pl
       {/* mounted under the welcome, so Get started only starts things: its frame is not the stage's mount */}
       <Stage computer={computer} shape={shape} start={start} video={player} onLanded={() => setWelcomeGone(true)} onDone={onDone} />
       {!welcomeGone && (
-        <main className={`fr-welcome${stage ? ' leaving' : ''}${start?.flight ? ' flying' : ''}`} aria-hidden={stage || undefined} inert={stage || undefined}>
+        <main
+          className={`fr-welcome${stage || making ? ' leaving' : ''}${start?.flight ? ' flying' : ''}${drop.over ? ' over' : ''}`}
+          aria-hidden={stage || undefined}
+          inert={stage || making || undefined}
+          {...(!stage && drop.props)}
+          data-testid="welcome"
+        >
           <span className="w-logo" aria-hidden>
             <Logo size={36} />
           </span>
           <h1>Welcome to Reel Studio</h1>
-          <p className="w-lead">Drop in a raw video of you talking. Your editor keeps your best takes, adds subtitles, pictures and a cover.</p>
+          <p className="w-lead">Pick a video of you talking. Reel Studio cuts out the pauses and retakes, and adds subtitles and a cover.</p>
           <div className="reels" aria-hidden>
             <img src={loafUrl} alt="" />
             <img src={posterUrl} alt="" ref={center} />
             <img src={kneadUrl} alt="" />
           </div>
-          <Button kind="primary" size="big" onClick={begin} data-testid="get-started">
-            Get started
-          </Button>
-          <p className="w-foot">Free, no account. Your videos stay on this {computer}.</p>
+          <PickFiles kind="primary" size="big" label="Choose a video" accept={VIDEO_TYPES} onFiles={(paths) => void take(paths)} disabled={making} testid="welcome-choose" />
+          <p className="w-drop">or drop it anywhere here</p>
+          <p className="w-foot">
+            Free, no account. Your videos stay on this {computer}.{' '}
+            <button className="w-how" onClick={begin} data-testid="get-started">
+              See how it works
+            </button>
+          </p>
         </main>
       )}
     </div>

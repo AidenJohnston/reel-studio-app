@@ -74,7 +74,7 @@ test('stopped during the copy with the dropped file gone, the reel says so and t
 
     await page.getByTestId('nav-home').click()
     await expect(card(page)).toHaveAttribute('data-state', 'failed')
-    await expect(page.getByTestId('card-status')).toContainText('Your video was only partly copied, and the file you dropped can’t be opened any more.')
+    await expect(page.getByTestId('card-status')).toContainText('Your video was only partly copied and the file you dropped can’t be found any more, so drop it again from where it is now.')
     await expect(page.getByRole('button', { name: /^Resume:/ })).toHaveCount(0)
     await expect(page.getByRole('button', { name: /^Choose another video:/ })).toBeVisible()
     expect(await page.evaluate(() => window.reel.projects.list().then((l) => l.length))).toBe(1)
@@ -82,7 +82,7 @@ test('stopped during the copy with the dropped file gone, the reel says so and t
     // the reel itself says the same where the video would be, and takes the video there
     await card(page).click()
     const stage = page.getByTestId('stage-failed')
-    await expect(stage).toContainText('Your video was only partly copied, and the file you dropped can’t be opened any more.')
+    await expect(stage).toContainText('Your video was only partly copied and the file you dropped can’t be found any more, so drop it again from where it is now.')
     await expect(page.getByTestId('first-paused')).toHaveCount(0)
     await slowCopy(app, '0')
     await stage.getByTestId('file-input').setInputFiles([media.video])

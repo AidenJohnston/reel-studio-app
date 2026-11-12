@@ -1,10 +1,11 @@
 // The main window and everything around it that belongs to the operating system: title bar per
 // platform, remembered size/position, the macOS application menu (Edit roles, so copy and paste work
 // in text fields), Dock / taskbar progress, and the "your reel is ready" notification.
-import { app, BrowserWindow, Menu, nativeImage, Notification, shell, type MenuItemConstructorOptions, type WebContents } from 'electron'
+import { app, BrowserWindow, Menu, nativeImage, Notification, screen, shell, type MenuItemConstructorOptions, type WebContents } from 'electron'
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { isStrictlyInsideFolder } from './inside-folder'
+import { DEFAULT, MIN, placeWindow, type Placement, type SavedBounds } from './window-bounds'
 import type { AppCommand, JobEvent } from '../shared/api'
 import { productName } from '../shared/channel'
 import { titlebarHeight } from '../shared/chrome'
@@ -49,27 +50,21 @@ const lightsAt = (zoom: number) => ({ x: 16, y: Math.round((titlebarHeight('darw
 
 export type { AppCommand }
 
-interface Bounds {
-  x?: number
-  y?: number
-  width: number
-  height: number
-  maximized?: boolean
-}
-
-const MIN = { width: 1100, height: 720 }
-const DEFAULT: Bounds = { width: 1280, height: 820 }
-
-function readBounds(file: string): Bounds {
+function readBounds(file: string): SavedBounds | null {
   try {
-    const b = JSON.parse(readFileSync(file, 'utf8')) as Bounds
-    if (typeof b.width === 'number' && typeof b.height === 'number') {
-      return { ...b, width: Math.max(MIN.width, b.width), height: Math.max(MIN.height, b.height) }
-    }
+    const b = JSON.parse(readFileSync(file, 'utf8')) as SavedBounds
+    if (typeof b.width === 'number' && typeof b.height === 'number') return b
   } catch {
     /* first start, or a broken file: use the default */
   }
-  return DEFAULT
+  return null
+}
+
+/** Where the window opens now: on a display that is still connected, no bigger than its work area (window-bounds.ts). */
+function placement(file: string): Placement {
+  const primary = screen.getPrimaryDisplay().id
+  const displays = screen.getAllDisplays().map((d) => ({ workArea: d.workArea, primary: d.id === primary }))
+  return placeWindow(existsSync(file) ? readBounds(file) : null, displays, titlebarHeight(process.platform))
 }
 
 function saveBounds(file: string, w: BrowserWindow): void {
@@ -86,11 +81,11 @@ function saveBounds(file: string, w: BrowserWindow): void {
 export function createMainWindow(opts: { preload: string; stateFile: string; test: boolean }): BrowserWindow {
   const mac = process.platform === 'darwin'
   // Tests always get the same size so screenshots compare.
-  const b = opts.test || !existsSync(opts.stateFile) ? DEFAULT : readBounds(opts.stateFile)
+  const p: Placement = opts.test ? { bounds: { x: 0, y: 0, ...DEFAULT }, min: MIN, maximized: false } : placement(opts.stateFile)
   const win = new BrowserWindow({
-    ...b,
-    minWidth: MIN.width,
-    minHeight: MIN.height,
+    ...(opts.test ? DEFAULT : p.bounds),
+    minWidth: p.min.width,
+    minHeight: p.min.height,
     show: false,
     title: productName(app.getVersion()),
     backgroundColor: PAPER,
@@ -110,7 +105,7 @@ export function createMainWindow(opts: { preload: string; stateFile: string; tes
   })
   // The page's <title> says Reel Studio; the window (Windows taskbar, Mission Control) keeps the channel's name.
   win.on('page-title-updated', (e) => e.preventDefault())
-  if (b.maximized && !opts.test) win.maximize()
+  if (p.maximized && !opts.test) win.maximize()
   if (!opts.test) {
     win.on('close', () => saveBounds(opts.stateFile, win))
   }

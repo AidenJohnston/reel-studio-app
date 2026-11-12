@@ -230,6 +230,15 @@ export function App() {
           <div className="titlebar first-titlebar" aria-hidden />
           <FirstRun
             platform={info.platform}
+            onVideo={async (paths) => {
+              // the welcome's video: its reel is made first, so a file that isn't a video leaves the welcome up with
+              // the reason; then the first run is done and the window slides in on that reel, Version 1 under way
+              if (!(await createFromFiles(paths, go, notify))) return false
+              await reel.app.finishFirstRun()
+              setArriving(true)
+              setInfo(await reel.app.info())
+              return true
+            }}
             onDone={async () => {
               // it ends on a new reel with no video yet, and the window around it slides in (first-run.css)
               await reel.app.finishFirstRun()

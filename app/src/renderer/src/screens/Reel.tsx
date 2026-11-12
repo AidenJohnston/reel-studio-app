@@ -39,7 +39,8 @@ import { soundPack } from './edit/SoundTab'
 import { Outs } from '../components/Outs'
 import { PopMenu } from '../components/PopMenu'
 import { TitleBarSlot } from '../components/titlebar'
-import { ConnectAI, ModelDownload } from '../components/connect'
+import { ModelDownload } from '../components/connect'
+import { AiSetupSlot } from '../components/AiSetupSlot'
 import { PlanCard, PlanChip, PlanEmpty, PlannedStage, columnVideoDrop, markPlanConnect, usePlanAfterConnect } from '../components/Plan'
 import { ReelsFound } from '../components/ReelsFound'
 import { ChangePicture, ChangeTag, useChangeMoment } from '../components/ChangeMoments'
@@ -406,6 +407,17 @@ export function Reel({ slug, at, go, draft: startDraft }: { slug: string; at?: n
 
   const aiOff = providerChecked && (!provider || !provider.connected || provider.id === 'none')
   const canPoint = !!version && !aiOff && !compare && !drawer && !full
+  // With no AI the note box is still there (manifesto rule 5): the first note sent opens AI setup in its place, the note
+  // kept in the box, and goes as soon as an AI is on (architecture section 1: a first reel needs none).
+  const [setup, setSetup] = useState(false)
+  const sendAfterSetup = useRef(false)
+  const sendNow = useRef<() => void>(() => {})
+  useEffect(() => {
+    if (aiOff || !sendAfterSetup.current) return
+    sendAfterSetup.current = false
+    setSetup(false)
+    sendNow.current()
+  }, [aiOff])
 
   // Hold O for the original; C points at a spot; Esc stops pointing, then comparing.
   useEffect(() => {
@@ -544,6 +556,11 @@ export function Reel({ slug, at, go, draft: startDraft }: { slug: string; at?: n
     const text = draft.trim()
     const files = att.chips
     if ((!text && !files.length) || att.busy || !providerChecked) return
+    if (aiOff) {
+      sendAfterSetup.current = true
+      setSetup(true)
+      return
+    }
     setAlert(null)
     if (planned) {
       setDraft('')
@@ -588,6 +605,8 @@ export function Reel({ slug, at, go, draft: startDraft }: { slug: string; at?: n
       setAlert(userMessage(e))
     }
   }
+
+  sendNow.current = () => void send()
 
   const retry = (e: LogEntry) => {
     if (e.ask.kind !== 'note') return
@@ -742,7 +761,7 @@ export function Reel({ slug, at, go, draft: startDraft }: { slug: string; at?: n
   // a note making the next version can take more words (Add now); a change made by hand or Version 1 cannot
   const running = d.queue.find((q) => q.attempt && !q.hand)
   const addable = d.job?.kind === 'note' && making !== null && !!running && running.branch === undefined
-  const placeholder = notePlaceholder({
+  const placeholder = aiOff && hasVersions && !job ? 'Say what to change…' : notePlaceholder({
     planned,
     hasPlan: !!d.plan,
     answering: planAnswering,
@@ -848,7 +867,7 @@ export function Reel({ slug, at, go, draft: startDraft }: { slug: string; at?: n
           version={version}
           post={d.project.post}
           disabled={!version || (!!job && !shareWork)}
-          quiet={!!compare || !!drawer || aiOff}
+          quiet={!!compare || !!drawer || (aiOff && setup)}
           why={job ? (d.job?.kind === 'propose' ? 'Wait for your editor to finish looking.' : 'Wait for this version to finish.') : undefined}
           onSaveCaption={savePost}
           // Change opens Cover in the edit already open, so a waiting hand edit stays the one being changed (openDrawer
@@ -1257,11 +1276,15 @@ export function Reel({ slug, at, go, draft: startDraft }: { slug: string; at?: n
                     heldWhy={heldWhy}
                     alert={alert}
                     connect={
-                      aiOff ? (
-                        <div className="connect-cin" data-testid="composer-connect">
-                          <p>Connect an editor to leave notes</p>
-                          <ConnectAI onConnected={setProvider} />
-                        </div>
+                      aiOff && setup ? (
+                        <AiSetupSlot
+                          onDone={setProvider}
+                          onSkip={() => {
+                            sendAfterSetup.current = false
+                            setSetup(false)
+                            requestAnimationFrame(() => noteField.current?.focus())
+                          }}
+                        />
                       ) : null
                     }
                     onSend={() => void send()}

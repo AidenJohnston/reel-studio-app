@@ -21,7 +21,7 @@ import time
 from pathlib import Path
 from typing import Callable, Optional
 
-from .proto import EngineError, log
+from .proto import NO_SPACE_MESSAGE, EngineError, log, out_of_space
 
 PKG_DIR = Path(__file__).resolve().parent
 ENGINE_DIR = PKG_DIR.parent
@@ -117,6 +117,8 @@ def text_run(cmd: list, timeout: float, what: str, check: bool = True, cwd=None,
                           "Reel Studio is missing a part it needs. Please reinstall the app.")
     if check and proc.returncode != 0:
         tail = (proc.stderr or proc.stdout or "")[-2000:]
+        if out_of_space(tail):
+            raise EngineError("NO_SPACE", f"{what} failed (exit {proc.returncode}):\n{tail}", NO_SPACE_MESSAGE)
         raise EngineError("FFMPEG_FAILED", f"{what} failed (exit {proc.returncode}):\n{tail}",
                           user_message or "Something went wrong while working on your video. "
                                           "Please try again.")

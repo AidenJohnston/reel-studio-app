@@ -77,6 +77,7 @@ export function createModelManager(deps: ModelDeps) {
     error: null
   }
   let download: AbortController | null = null
+  let inflight: Promise<ModelStatus> | null = null
   let finding: Promise<ModelStatus> | null = null
   let timing: Promise<void> | null = null
 
@@ -170,25 +171,10 @@ export function createModelManager(deps: ModelDeps) {
       finding ??= findOnComputer().finally(() => (finding = null))
       return finding
     },
-    async download(): Promise<ModelStatus> {
-      await this.find()
-      if (modelInstalled()) return set({ installed: true, downloading: false, pct: 100, error: null })
-      if (download) return state
-      const dir = join(modelsDir(), modelName())
-      if (existsSync(join(dir, '.fake')) && engineMode() === 'real') await fs.rm(dir, { recursive: true, force: true })
-      download = new AbortController()
-      set({ downloading: true, error: null, pct: 0, bytes: 0 })
-      try {
-        // The engine's percent is bytes / total of the pinned files, so it converts back to MB exactly.
-        await runEngine('download-model', ['--name', modelName()], (p) => set({ pct: Math.round(p.pct), bytes: Math.round((p.pct / 100) * total()) }), download.signal)
-        void checkInBackground()
-        return set({ installed: modelInstalled(), downloading: false, pct: 100, bytes: total() })
-      } catch (e) {
-        const err = toUserError(e)
-        return set({ downloading: false, error: err.code === 'CANCELLED' ? null : err.userMessage })
-      } finally {
-        download = null
-      }
+    /** The download, or the one already under way: a first edit waits on the same one the welcome started. */
+    download(): Promise<ModelStatus> {
+      inflight ??= fetchModel().finally(() => (inflight = null))
+      return inflight
     },
     cancel(): void {
       download?.abort()
@@ -197,6 +183,26 @@ export function createModelManager(deps: ModelDeps) {
     async savedThreads(): Promise<number | null> {
       const r = await deps.loadCheck()
       return r?.machine === thisMachine() ? r.threads : null
+    }
+  }
+
+  async function fetchModel(): Promise<ModelStatus> {
+    await (finding ??= findOnComputer().finally(() => (finding = null)))
+    if (modelInstalled()) return set({ installed: true, downloading: false, pct: 100, error: null })
+    const dir = join(modelsDir(), modelName())
+    if (existsSync(join(dir, '.fake')) && engineMode() === 'real') await fs.rm(dir, { recursive: true, force: true })
+    download = new AbortController()
+    set({ downloading: true, error: null, pct: 0, bytes: 0 })
+    try {
+      // The engine's percent is bytes / total of the pinned files, so it converts back to MB exactly.
+      await runEngine('download-model', ['--name', modelName()], (p) => set({ pct: Math.round(p.pct), bytes: Math.round((p.pct / 100) * total()) }), download.signal)
+      void checkInBackground()
+      return set({ installed: modelInstalled(), downloading: false, pct: 100, bytes: total() })
+    } catch (e) {
+      const err = toUserError(e)
+      return set({ downloading: false, error: err.code === 'CANCELLED' ? null : err.userMessage })
+    } finally {
+      download = null
     }
   }
 }

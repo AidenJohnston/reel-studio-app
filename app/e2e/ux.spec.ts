@@ -67,23 +67,23 @@ test('no AI: honest first version, one connect prompt, caption controls, a song 
   await page.getByTestId('drawer-close').click()
   await expect(page.getByTestId('drawer')).toHaveCount(0)
 
-  // ---- 3. no AI: nothing offers an AI change; the editor picker sits where the note box was ----
-  await expect(page.getByTestId('note-input')).toHaveCount(0)
+  // ---- 3. no AI: the note box is there, and a note asks for an AI where the box was, keeping the note ----
   await expect(page.getByTestId('moment-suggest')).toHaveCount(0)
   await page.keyboard.press('c') // pointing at a spot opens nothing either
   await expect(page.getByTestId('pointer')).toHaveCount(0)
+  await expect(page.getByTestId('note-input')).toHaveAttribute('placeholder', 'Say what to change…')
+  await page.getByTestId('note-input').fill('bigger words')
+  await page.keyboard.press('Enter')
   const picker = page.getByTestId('composer-connect')
-  await expect(picker).toContainText('Connect an editor to leave notes')
+  await expect(picker).toContainText('To make changes from a note, connect an AI once. Your note is kept.')
   // no Codex app on this computer: its row links to OpenAI's install page (Reel Studio installs nothing)
   await expect(picker.getByTestId('vendor-install-page-chatgpt')).toBeVisible()
   await expect(picker.getByTestId('without-ai')).toHaveText('Without an editor, Reel Studio makes a basic version: pauses and retakes removed, subtitles and a cover.')
-  await expect(picker.getByTestId('claude-key-toggle')).toBeHidden()
+  // a key or a server of your own is for Settings, not the way to a first reel
+  await expect(picker.getByTestId('ai-advanced')).toHaveCount(0)
   await shot(page, 'ux-03-no-ai-connect')
-  await picker.getByTestId('ai-advanced').click()
-  await expect(picker.getByTestId('claude-key-toggle')).toHaveText('Add key')
-  await picker.getByTestId('claude-key-toggle').click()
-  await expect(picker.getByTestId('claude-key-input')).toBeVisible()
-  await shot(page, 'ux-06-connect-claude-key')
+  await page.keyboard.press('Escape')
+  await expect(page.getByTestId('note-input')).toHaveValue('bigger words')
 
   // ---- 4. subtitles under Edit it myself: a quick preview first, then the version, said in plain words ----
   await page.getByTestId('edit-myself').click()

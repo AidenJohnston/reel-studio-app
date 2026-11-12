@@ -128,8 +128,8 @@ describe('the words of a pause', () => {
     expect(pausedWords({ reason: 'limit', until: new Date(2026, 9, 24, 9).toISOString(), editor: null }, now, 'Mac')).toBe('Continues tomorrow')
     expect(pausedWords({ reason: 'offline', until: null, editor: null }, now, 'Mac')).toBe('Waiting for internet')
     expect(pausedWords({ reason: 'sleep', until: null, editor: null }, now, 'PC')).toBe('Continues when your PC wakes')
-    expect(pausedSentence({ reason: 'limit', until: at, editor: 'Claude' }, now, 'Mac')).toBe(`Your Claude plan is at its limit. It resets at ${time}, and this continues then.`)
-    expect(pausedSentence({ reason: 'limit', until: null, editor: null }, now, 'Mac')).toBe('Your plan is at its limit. This continues when it resets.')
+    expect(pausedSentence({ reason: 'limit', until: at, editor: 'Claude' }, now, 'Mac')).toBe(`Your Claude plan is at its limit, so this continues when it resets at ${time}.`)
+    expect(pausedSentence({ reason: 'limit', until: null, editor: null }, now, 'Mac')).toBe('Your plan is at its limit, so this continues when it resets.')
   })
   // fails if a paused card says only that it is paused, without why or what happens next
   it('on a card, say why it stopped and what happens next, for each reason', () => {

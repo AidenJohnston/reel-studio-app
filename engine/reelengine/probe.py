@@ -117,7 +117,7 @@ def ffprobe_json(path: Path) -> dict:
                           f"ffprobe {path.name}", check=False)
     if proc.returncode != 0:
         raise EngineError("UNREADABLE", f"ffprobe could not read {path}: {proc.stderr[-500:]}",
-                          "I couldn't open this file. It may not be a video, or it may be damaged.")
+                          "This file can't be opened as a video, so try another one.")
     return json.loads(proc.stdout or "{}")
 
 
@@ -128,7 +128,7 @@ def probe(path: Path, quick: bool = False, cadence: bool = False) -> dict:
     path = Path(path)
     if not path.exists():
         raise EngineError("NOT_FOUND", f"no such file: {path}",
-                          "I couldn't find that file. It may have been moved or deleted.")
+                          "That file was moved or deleted, so drop it again from where it is now.")
     ext = path.suffix.lower()
     info = ffprobe_json(path)
     fmt = info.get("format", {}) or {}

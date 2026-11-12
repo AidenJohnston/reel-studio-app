@@ -22,6 +22,17 @@ _LOCK = threading.Lock()
 _LAST = {"t": 0.0, "pct": -1.0, "stage": None}
 
 
+NO_SPACE_MESSAGE = "Your computer is out of space, so free some up and try again."
+# What ffmpeg and the OS say when a disk fills (POSIX ENOSPC/EDQUOT, Windows ERROR_DISK_FULL 112)
+_NO_SPACE = ("no space left on device", "disk quota exceeded", "not enough space on the disk")
+
+
+def out_of_space(text: str) -> bool:
+    """Whether a tool's error output says the disk is full."""
+    t = (text or "").lower()
+    return any(s in t for s in _NO_SPACE)
+
+
 class EngineError(Exception):
     """An error the app can show. `user_message` is plain, warm, tells the user what to do."""
 

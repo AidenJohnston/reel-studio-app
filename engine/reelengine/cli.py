@@ -6,6 +6,7 @@ Exit code 0 on done, 1 on error.
 from __future__ import annotations
 
 import argparse
+import errno
 import hashlib
 import json
 import sys
@@ -756,6 +757,10 @@ def build_parser() -> argparse.ArgumentParser:
     return p
 
 
+# errno values for a full disk; Windows has no EDQUOT
+_DISK_FULL = {e for e in (errno.ENOSPC, getattr(errno, "EDQUOT", None)) if e is not None}
+
+
 def main(argv=None) -> int:
     proto.capture_stdout()
     try:
@@ -778,17 +783,27 @@ def main(argv=None) -> int:
     except KeyboardInterrupt:
         proto.error("CANCELLED", "interrupted", "Stopped.")
         return 1
+    except OSError as exc:
+        # a full disk while writing (errno ENOSPC, EDQUOT; Windows ERROR_DISK_FULL): say what to do, not "unexpected"
+        if exc.errno not in _DISK_FULL and getattr(exc, "winerror", None) != 112:
+            tb = traceback.format_exc()
+            proto.log(tb)
+            proto.error("INTERNAL", f"{type(exc).__name__}: {exc}\n{tb[-1500:]}",
+                        "Something unexpected went wrong, so try again, and restart Reel Studio if it keeps happening.")
+            return 1
+        proto.error("NO_SPACE", repr(exc), proto.NO_SPACE_MESSAGE)
+        return 1
     except MemoryError as exc:
         proto.error("OUT_OF_MEMORY", repr(exc),
-                    "Your computer ran out of memory working on this video. Close other apps "
+                    "Your computer ran out of memory working on this video, so close other apps "
                     "and try again.")
         return 1
     except Exception as exc:   # noqa: BLE001 -- never die without telling the app why
         tb = traceback.format_exc()
         proto.log(tb)
         proto.error("INTERNAL", f"{type(exc).__name__}: {exc}\n{tb[-1500:]}",
-                    "Something unexpected went wrong. Please try again; if it keeps happening, "
-                    "restart Reel Studio.")
+                    "Something unexpected went wrong, so try again, and restart Reel Studio if it "
+                    "keeps happening.")
         return 1
 
 

@@ -50,13 +50,13 @@ export function pausedSentence(p: PausedFor, now: Date, computer: string): strin
   switch (p.reason) {
     case 'limit': {
       const plan = p.editor ? `Your ${p.editor} plan` : 'Your plan'
-      return p.until ? `${plan} is at its limit. It resets ${when(p.until, now)}, and this continues then.` : `${plan} is at its limit. This continues when it resets.`
+      return `${plan} is at its limit, so this continues when it resets${p.until ? ` ${when(p.until, now)}` : ''}.`
     }
     case 'offline':
-      return "There's no internet. This continues when you're back online."
+      return "There's no internet, so this continues when you're back online."
     case 'sleep':
-      return `Your ${computer} went to sleep. This continues when it wakes.`
+      return `Your ${computer} went to sleep, so this continues when it wakes.`
     case 'quit':
-      return 'Reel Studio closed while this was being made. It continues now.'
+      return 'Reel Studio closed while this was being made, so it continues now.'
   }
 }

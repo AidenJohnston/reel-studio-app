@@ -1,8 +1,9 @@
-import { mkdirSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { expect, it } from 'vitest'
 import { createEngineRunner } from '../src/main/engine'
-import { createModelManager, type SpeechCheckResult } from '../src/main/models'
+import { createModelManager, modelInstalled, type SpeechCheckResult } from '../src/main/models'
 import { engineEnv, modelsDir } from '../src/main/paths'
 import { isAlive } from '../src/main/proctree'
 import { createWorkGate } from '../src/main/work-gate'
@@ -70,3 +71,33 @@ it('a result saved by the check from before the GPU was proved runs again once; 
   expect(await checkWith({ machine: current.machine, threads: null })).toHaveLength(1)
   expect(await checkWith(current)).toHaveLength(0)
 }, 60_000)
+
+// A video picked on the welcome starts Version 1 while the welcome's listening download runs; the first edit waits on
+// download() (main index.ts startFirstEdit), so a second call must answer only once the files are in.
+it('fails if a download asked for while one is under way answers before the listening files are in', async () => {
+  setupPaths()
+  const hub = process.env.HF_HUB_CACHE
+  process.env.HF_HUB_CACHE = mkdtempSync(join(tmpdir(), 'rs-hf-')) // no copy on this computer to reuse
+  try {
+    const runEngine = createEngineRunner({ python: () => PYTHON, env: () => ({ ...engineEnv(), PYTHONPATH: FAKE_ENGINE, FAKE_ENGINE_DOWNLOAD_STEP: '0.05' }) })
+    const models = createModelManager({
+      runEngine,
+      onChange: () => undefined,
+      loadCheck: async () => null,
+      saveCheck: async () => undefined,
+      useThreads: () => undefined,
+      gate: createWorkGate(),
+      checkDeadlineMs: 5000,
+      log: () => undefined
+    })
+    const welcome = models.download()
+    const firstEdit = models.download()
+    expect((await firstEdit).installed).toBe(true)
+    expect(modelInstalled()).toBe(true)
+    expect((await welcome).installed).toBe(true)
+    await models.checkInBackground()
+  } finally {
+    if (hub === undefined) delete process.env.HF_HUB_CACHE
+    else process.env.HF_HUB_CACHE = hub
+  }
+}, 20_000)
