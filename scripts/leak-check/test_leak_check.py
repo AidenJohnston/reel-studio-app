@@ -182,10 +182,11 @@ class GitHooks(Kit):
 
 
 class AgentHook(Kit):
-    def call(self, command: str, tool: str = "Bash", cwd: Path | None = None) -> subprocess.CompletedProcess:
-        payload = {"tool_name": tool, "tool_input": {"command": command}, "cwd": str(cwd or self.root)}
+    def call(self, command: str, tool: str = "Bash") -> subprocess.CompletedProcess:
+        payload = {"tool_name": tool, "tool_input": {"command": command}, "cwd": str(self.root)}
         return subprocess.run([sys.executable, "scripts/leak-check/agent_hook.py"], cwd=self.root,
-                              input=json.dumps(payload).encode(), capture_output=True)
+                              input=json.dumps(payload).encode(), capture_output=True,
+                              env={**os.environ, "GH_CONFIG_DIR": str(self.root / "ghconfig")})
 
     def assertBlocked(self, r, why: str = "private material"):
         err = r.stderr.decode()
@@ -202,6 +203,17 @@ class AgentHook(Kit):
         self.assertBlocked(self.call(f"gh pr comment 5 --body 'see {PLANTED}'", tool="PowerShell"))
         self.assertBlocked(self.call(f"gh pr create --title Fix --body \"$(cat <<'EOF'\nBody\n{PLANTED}\nEOF\n)\""))
 
+    def test_blocks_gh_however_it_is_named(self):
+        # fails if a full path to gh, Windows' any-case GH, a repo flag or a gh alias hides a publishing command
+        self.write("ghconfig/config.yml", "git_protocol: https\naliases:\n    submit: pr create\n"
+                                          "    say: '!gh pr comment \"$1\" --body hi'\n")
+        for command in (f'"C:\\Program Files\\GitHub CLI\\gh.exe" pr create -t x --body {PLANTED}',
+                        f"GH pr create -t x --body {PLANTED}",
+                        f"gh -R o/r pr create -t x --body {PLANTED}",
+                        f"gh submit -t x --body {PLANTED}"):
+            self.assertBlocked(self.call(command))
+        self.assertBlocked(self.call("gh say 5"), why="alias")
+
     def test_blocks_a_body_file_with_a_planted_term(self):
         # fails if --body-file / -F contents go unchecked, or a path after `cd` resolves against the wrong folder
         self.write("sub/body.md", f"## Why\nThe {PLANTED} build.\n")
@@ -215,19 +227,71 @@ class AgentHook(Kit):
         self.write("payload.json", json.dumps({"body": PLANTED}))
         self.assertBlocked(self.call(f"gh api repos/o/r/issues/1/comments -f body='{PLANTED}'"))
         self.assertBlocked(self.call("gh api -X PATCH repos/o/r/pulls/1 --input payload.json"))
+        self.assertBlocked(self.call(f'gh api repos/o/r/issues/1/comments -X "$METHOD" -f body={PLANTED}'))
 
     def test_blocks_text_it_cannot_see(self):
-        # fails if a body from a variable, a non-heredoc stdin or --fill is waved through unchecked
+        # fails if text the hook can't read is waved through: a variable, a piped or device stdin, --fill, a flag
+        # whose value is on the next line, or a pipe hiding behind another command's heredoc
         for command in ('gh pr create --title Fix --body "$BODY"',
                         "cat notes.md | gh pr create --title Fix --body-file -",
-                        "gh pr create --fill"):
+                        "gh pr create --title Fix --body-file /dev/stdin",
+                        'gh pr create --title Fix --body "$(cat /dev/stdin)"',
+                        "gh pr create --fill",
+                        "gh pr create --body-file - <<EOF\nclean\nEOF\ncat notes.md | gh pr create --body-file -"):
             self.assertBlocked(self.call(command), why="can't")
-        self.assertBlocked(self.call("gh pr comment 3 --body $body", tool="PowerShell"), why="can't")
+        for command in ("gh pr comment 3 --body $body", "gh pr create -t x --body `\r\n$body"):
+            self.assertBlocked(self.call(command, tool="PowerShell"), why="can't")
 
     def test_allows_clean_text_and_commands_that_publish_nothing(self):
         # fails if the hook blocks clean PR text, or blocks commands other than publishing gh calls
         self.assertAllowed(self.call("gh pr create --title 'feat: presets' --body \"$(cat <<'EOF'\nAdds presets.\nEOF\n)\""))
         self.assertAllowed(self.call(f"grep -rn {PLANTED} docs && gh pr view 5 && gh api repos/o/r/pulls/5"))
+
+
+class Fallbacks(Kit):
+    def test_agent_hook_without_python_blocks_only_gh(self):
+        # fails if, with no Python, a gh command runs unchecked, or every other command is blocked
+        if os.name == "nt":
+            exec_path = subprocess.run(["git", "--exec-path"], capture_output=True, text=True).stdout.strip()
+            usr_bin = Path(exec_path).parents[2] / "usr" / "bin"     # Git's own tools, with no Python among them
+            sh, path = str(usr_bin / "sh.exe"), str(usr_bin)
+        else:
+            bin_dir = self.root / "bin"
+            bin_dir.mkdir()
+            os.symlink(shutil.which("cat"), bin_dir / "cat")
+            sh, path = "/bin/sh", str(bin_dir)
+
+        def run(command: str) -> int:
+            payload = {"tool_name": "Bash", "tool_input": {"command": command, "description": "Push it through"}}
+            return subprocess.run([sh, "scripts/leak-check/with-python.sh", "--agent-hook",
+                                   "scripts/leak-check/agent_hook.py"], cwd=self.root,
+                                  input=json.dumps(payload).encode(), capture_output=True,
+                                  env={**os.environ, "PATH": path}).returncode
+
+        self.assertEqual(run("gh -R o/r pr create -t x -b y"), 2)
+        self.assertEqual(run("git push fork HEAD"), 0)
+
+    def test_npm_install_step_sets_up_hooks_without_overriding_or_failing(self):
+        # fails if the prepare script breaks `npm install` outside a git checkout, doesn't set core.hooksPath in a
+        # fresh clone, or overwrites a hooksPath the contributor chose
+        node = shutil.which("node")
+        if not node:
+            self.skipTest("no node")
+        script = str(HERE / "install-hooks.mjs")
+        plain = self.root / "not-a-repo"
+        plain.mkdir()
+        outside = {**os.environ, "GIT_CEILING_DIRECTORIES": str(self.root)}
+        self.assertEqual(subprocess.run([node, script], cwd=plain, env=outside, capture_output=True).returncode, 0)
+
+        self.git("config", "--unset", "core.hooksPath")
+        self.assertEqual(subprocess.run([node, script], cwd=self.root, capture_output=True).returncode, 0)
+        self.assertEqual(self.git("config", "--local", "core.hooksPath").stdout.strip(), ".githooks")
+
+        self.git("config", "core.hooksPath", "custom-hooks")
+        r = subprocess.run([node, script], cwd=self.root, capture_output=True, text=True)
+        self.assertEqual(r.returncode, 0)
+        self.assertIn("not active", r.stderr)
+        self.assertEqual(self.git("config", "--local", "core.hooksPath").stdout.strip(), "custom-hooks")
 
 
 class HookConfigs(Kit):

@@ -53,15 +53,22 @@ before each shell command. It does nothing unless the command publishes text wit
 
 - `gh pr create|edit|comment|review` and `gh issue create|edit|comment`
 - `gh api` calls that send fields or a request body (`-f`, `-F`, `--field`, `--raw-field`, `--input`, or a
-  `POST`, `PUT`, `PATCH` or `DELETE` method)
+  `POST`, `PUT`, `PATCH` or `DELETE` method, or a method set at run time)
+
+It finds them however gh is named: a full path to `gh.exe`, any letter case, `-R owner/repo` before the
+subcommand, or a gh alias from `gh alias set`, which it reads from gh's `config.yml`.
 
 For those, it checks the whole command (so text in a flag, a heredoc or a here-string is covered) and every file
 the command reads text from: `--body-file` / `-F`, `--input`, `-F key=@file`, `$(cat file)` and `$(<file)`.
 Relative paths resolve from the agent's folder, or from a `cd` earlier in the same command.
 
 It blocks, with the reason, when it finds private material, and also when it can't see the text: a shell
-variable or command substitution (`--body "$BODY"`), stdin that isn't a heredoc or here-string in the same
-command, or `gh pr create --fill`. The fix is to put the text in a file and pass `--body-file FILE`.
+variable or command substitution (`--body "$BODY"`), stdin that isn't a heredoc or here-string feeding that same
+`gh` call, a device such as `/dev/stdin`, a flag whose value is on the next line, a gh shell alias that publishes,
+or `gh pr create --fill`. The fix is to put the text in a file and pass `--body-file FILE`.
+
+Without Python 3, the hook can't check anything, so it blocks every command that mentions `gh` as a word and lets
+the rest run. Installing Python fixes it.
 
 Claude Code runs the hook through `sh`, which on Windows comes with Git for Windows. If the hook can't start at
 all (no `sh`), `"onFailure": "continue"` lets the command run rather than blocking every shell command; CI still

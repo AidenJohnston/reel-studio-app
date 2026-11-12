@@ -6,7 +6,8 @@
 # matters on Windows, where python3 is often a Store shortcut that prints a message and exits instead of running.
 #
 # Without Python the git hooks fail closed: the commit stops. --agent-hook is for the agent hook, which sees every
-# shell command an agent runs: it then blocks only gh commands that publish text, and lets everything else run.
+# shell command an agent runs: it then blocks every command that may call gh (it can't tell which ones publish),
+# and lets everything else run.
 
 agent=
 if [ "$1" = "--agent-hook" ]; then
@@ -23,8 +24,8 @@ done
 if [ -n "$agent" ]; then
   input=$(cat)
   case $input in
-    *"gh pr "*|*"gh issue "*|*"gh api "*|*"gh.exe "*)
-      echo "Leak check: this gh command publishes text, and checking it needs Python 3 on PATH (python3, python or py). Install Python 3 and run the command again." >&2
+    *[!A-Za-z0-9_-][Gg][Hh][!A-Za-z0-9_-]*)       # gh as a word, as in the JSON's command text
+      echo "Leak check: this command may call gh, and checking what gh publishes needs Python 3 on PATH (python3, python or py). Install Python 3 and run the command again." >&2
       exit 2 ;;
   esac
   exit 0

@@ -6,11 +6,13 @@ call as JSON on stdin. Exit 0 lets the command run; exit 2, with the reason on s
 exit 2 as "block".
 
 It acts only on gh commands that publish text: `gh pr create|edit|comment|review`, `gh issue create|edit|comment`,
-and `gh api` calls that send fields or a request body. For those it checks, with check.py's text rules:
+and `gh api` calls that send fields or a request body, also through a gh alias or a full path to gh. For those it
+checks, with check.py's text rules:
   * the whole command, so text inline in a flag, a heredoc or a here-string is covered without parsing the shell;
   * every file the command names as text (--body-file / -F, --input, -F key=@file, $(cat FILE), $(<FILE)).
 Text it can't read is not waved through: stdin that isn't a heredoc or here-string, a shell variable or command
-substitution, and --fill (which copies commit messages) all block, with what to do instead.
+substitution, a device such as /dev/stdin, a flag whose value is on another line, and --fill (which copies commit
+messages) all block, with what to do instead.
 
 Shell parsing here is deliberately small: only enough to find those flags and their files. A private term anywhere
 in the command still blocks it, whatever the parser made of the rest.
@@ -26,9 +28,17 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import check  # noqa: E402  (check.py sits next to this file)
 
-GH = re.compile(r"(?<![\w./\\-])gh(?:\.exe)?\s+(?:(?:-R|--repo)[\s=]\S+\s+)?"
-                r"(pr\s+(?:create|edit|comment|review)|issue\s+(?:create|edit|comment)|api)(?![\w-])")
-HEREDOC = re.compile(r"<<-?\s*['\"]?[A-Za-z_]|@['\"]\s*$", re.M)   # bash heredoc, PowerShell here-string
+# `gh` as a command: bare, a full path ending in gh or gh.exe (quoted or not), in any case, since Windows ignores it.
+EXE = r"(?:^|(?<=[\s;&|(`'\"/\\]))gh(?:\.exe)?['\"]?\s+(?:(?:-R|--repo)[\s=]\S+\s+)?"
+GH = re.compile(EXE + r"(pr\s+(?:create|edit|comment|review)|issue\s+(?:create|edit|comment)|api)(?![\w-])", re.I)
+GH_WORD = re.compile(EXE + r"([A-Za-z][\w-]*)", re.I)
+BUILTIN = {"accessibility", "agent-task", "alias", "api", "attestation", "auth", "browse", "cache", "co", "codespace",
+           "completion", "config", "copilot", "extension", "gist", "gpg-key", "help", "issue", "label", "licenses",
+           "org", "pr", "preview", "project", "release", "repo", "ruleset", "run", "search", "secret", "ssh-key",
+           "status", "variable", "version", "workflow"}
+HEREDOC = re.compile(r"<<-?\s*['\"]?[A-Za-z_]")                 # a bash heredoc starts on the gh line
+HERESTRING = re.compile(r"['\"]@\s*\|\s*$")                     # a PowerShell here-string piped into gh
+DEVICE = re.compile(r"^(?:/dev/|/proc/)")   # /dev/stdin and friends: the hook's own stdin, not the command's
 CD = re.compile(r"(?:^|[;&|(\n]\s*)(?:cd|pushd|Set-Location|sl|Push-Location)\s+(\"[^\"]*\"|'[^']*'|[^\s;&|)]+)", re.I)
 CAT = re.compile(r"^\$\(\s*(?:cat|type|gc|Get-Content)\s+(?:-Raw\s+)?([^\s()$`]+)(?:\s+-Raw)?\s*\)$", re.I)
 SLURP = re.compile(r"^\$\(<\s*([^\s()$`]+)\s*\)$")
@@ -102,7 +112,10 @@ def flag_value(words: list[tuple[str, bool]], i: int, names: set[str]) -> tuple[
     word, dyn = words[i]
     for name in names:
         if word == name:
-            return (words[i + 1] if i + 1 < len(words) else ("", False)), 2
+            if i + 1 == len(words):
+                raise Blocked(f"`{name}` has no value on its line, so this hook can't tell what it sends; put the "
+                              "value on the same line")
+            return words[i + 1], 2
         if word.startswith(name + "="):
             return (word[len(name) + 1:], dyn), 1
         if len(name) == 2 and word.startswith(name) and not word.startswith("--"):
@@ -122,22 +135,76 @@ def unquote(s: str) -> str:
     return s[1:-1] if len(s) >= 2 and s[0] == s[-1] and s[0] in "'\"" else s
 
 
+def gh_aliases() -> dict[str, str]:
+    """gh's own aliases (`gh alias set`), read from the config.yml where gh keeps them."""
+    if os.environ.get("GH_CONFIG_DIR"):
+        base = Path(os.environ["GH_CONFIG_DIR"])
+    elif os.name == "nt" and os.environ.get("APPDATA"):
+        base = Path(os.environ["APPDATA"]) / "GitHub CLI"
+    else:
+        base = Path(os.environ.get("XDG_CONFIG_HOME") or Path.home() / ".config") / "gh"
+    try:
+        lines = (base / "config.yml").read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return {}
+    aliases: dict[str, str] = {}
+    inside = False
+    for line in lines:
+        if not line.strip() or line.lstrip().startswith("#"):
+            continue
+        if not line[0].isspace():
+            inside = line.split("#")[0].strip() == "aliases:"
+        elif inside and (m := re.match(r"\s+([\w-]+):\s*(.*)$", line)):
+            aliases[m.group(1)] = unquote(m.group(2).strip())
+    return aliases
+
+
+def normalize(command: str, powershell: bool) -> str:
+    """The command with line continuations joined and gh aliases expanded, for finding gh calls and their flags."""
+    command = command.replace("\r\n", "\n")
+    command = command.replace("`\n", " ") if powershell else command.replace("\\\n", " ")
+    aliases: dict[str, str] | None = None
+
+    def expand(m: re.Match) -> str:
+        nonlocal aliases
+        word = m.group(1)
+        if word.lower() in BUILTIN:
+            return m.group(0)
+        if aliases is None:
+            aliases = gh_aliases()
+        expansion = aliases.get(word)
+        if expansion is None:
+            return m.group(0)                               # an extension, or not a gh command at all
+        if expansion.startswith("!"):                       # a shell alias: gh runs it with sh
+            if GH.search(expansion[1:]):
+                raise Blocked(f"`gh {word}` is a gh shell alias that publishes text, which this hook can't "
+                              "follow; run the gh command it stands for")
+            return m.group(0)
+        return m.group(0)[:m.start(1) - m.start()] + expansion
+
+    return GH_WORD.sub(expand, command)
+
+
 def inputs(command: str, powershell: bool, cwd: Path) -> tuple[list[tuple[str, Path]], list[str]] | None:
     """The files each publishing gh command reads its text from, and the raw spellings of their paths. None when
     the command publishes nothing."""
-    joined = command.replace("`\n", " ") if powershell else command.replace("\\\n", " ")   # line continuations
-    heredoc = bool(HEREDOC.search(command))
+    joined = normalize(command, powershell)
     files: list[tuple[str, Path]] = []
     spellings: list[str] = []
     found = False
     for m in GH.finditer(joined):
-        sub = m.group(1).split()[0]
-        is_api, is_create = sub == "api", m.group(1).split()[-1] == "create" and sub == "pr"
+        sub, verb = m.group(1).lower().split()[0], m.group(1).lower().split()[-1]
+        is_api, is_create = sub == "api", sub == "pr" and verb == "create"
         base = cwd
         for cd in CD.finditer(joined, 0, m.start()):
             base = local_path(unquote(cd.group(1)), base)
+        line_start = joined.rfind("\n", 0, m.start()) + 1
         line_end = joined.find("\n", m.end())
-        words = lex(joined[m.end():] if line_end < 0 else joined[m.end():line_end], powershell)
+        line_end = len(joined) if line_end < 0 else line_end
+        words = lex(joined[m.end():line_end], powershell)
+        # Text on stdin is visible only when this gh call's own stdin is a heredoc or a here-string in the command.
+        heredoc = bool(HEREDOC.search(joined, m.end(), line_end)
+                       or (powershell and HERESTRING.search(joined[line_start:m.start()])))
         sources: list[tuple[str, str, bool, bool]] = []      # (flag, value, dynamic, value is a file)
         method = None
         i = 0
@@ -146,7 +213,7 @@ def inputs(command: str, powershell: bool, cwd: Path) -> tuple[list[tuple[str, P
             if is_api:
                 value, used = flag_value(words, i, {"-X", "--method"})
                 if value is not None:
-                    method = value[0].upper()
+                    method = "POST" if value[1] else value[0].upper()     # a method set at run time may write
                     i += used
                     continue
                 for names, kind in ((API_RAW, "raw"), (API_TYPED, "typed"), ({"--input"}, "file")):
@@ -188,7 +255,11 @@ def inputs(command: str, powershell: bool, cwd: Path) -> tuple[list[tuple[str, P
             elif text.startswith("<("):
                 raise Blocked(f"`{word}` reads a process substitution, which this hook can't see; pass a file")
             else:
-                files.append((text, local_path(text, base)))
+                path = local_path(text, base)
+                if DEVICE.match(text.replace("\\", "/")) or (path.exists() and not path.is_file()):
+                    raise Blocked(f"`{word}` reads {text}, which is not a regular file, so this hook can't see the "
+                                  "text; pass --body-file FILE")
+                files.append((text, path))
                 spellings.append(text)
     return (files, spellings) if found else None
 
@@ -222,15 +293,15 @@ def main() -> int:
         command = call.get("tool_input", {}).get("command", "")
         if isinstance(command, list):
             command = " ".join(command)
-        if not isinstance(command, str) or not GH.search(command.replace("\\\n", " ").replace("`\n", " ")):
+        powershell = call.get("tool_name") == "PowerShell"
+        if not isinstance(command, str) or not GH.search(normalize(command, powershell)):
             return 0
-        findings = scan(command, call.get("tool_name") == "PowerShell", Path(call.get("cwd") or "."),
-                        check.load_terms())
+        findings = scan(command, powershell, Path(call.get("cwd") or "."), check.load_terms())
     except Blocked as e:
         print(f"Leak check blocked this gh command: {e}. See docs/leak-check.md.", file=sys.stderr)
         return 2
     except Exception as e:                      # a broken check must not let a publishing command through
-        if b"gh" not in raw:
+        if b"gh" not in raw.lower():
             return 0
         print(f"Leak check blocked this gh command because the check itself failed ({type(e).__name__}: {e}).",
               file=sys.stderr)
