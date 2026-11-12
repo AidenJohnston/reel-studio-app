@@ -14,6 +14,7 @@
     "typecheck": "npm run typecheck --workspaces --if-present",
     "test": "npm run test --workspaces --if-present",
     "e2e": "npm run build -w ai && npm run e2e -w app",
-    "check:changed": "node scripts/ci/changes.mjs --run"
+    "check:changed": "node scripts/ci/changes.mjs --run",
+    "prepare": "node scripts/leak-check/install-hooks.mjs"
   }
 }
