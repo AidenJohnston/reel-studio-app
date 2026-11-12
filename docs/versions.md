@@ -3,11 +3,16 @@
 Decided 2026-10-17 (polish stream). Goal: the user sees v1, v2, v3 for edits they can export,
 never a pile of preview-only folders an AI run left behind.
 
+Changed 2026-11-12: a version is saved from its draft. Notes and hand edits end at the draft, and the
+full-quality file is made once, when the person exports (a 2 s nitpick no longer waits for a full render).
+
 ## On disk
 
 ```
 <project>/versions/
-  v1/            a VERSION: export.mp4 + cover.png + verify.json + render.json + project.json (+ notes.md)
+  v1/            a VERSION: project.json + draft.mp4 + cover.png (+ notes.md), saved from its draft;
+                 once exported: export.mp4 + cover.png + verify.json + render.json + assets.json instead
+                 of draft.mp4
   v2/
   preview/       the ONE scratch folder for previews, overwritten every time:
                  draft.mp4, window_<a>-<b>.mp4 (only the latest window), cover.png, verify.json,
@@ -21,13 +26,20 @@ run finishes.
 
 Rules:
 
-1. **Only a final render (`render` without `--draft`/`--window`) creates or fills `versions/vN/`.**
+1. **Only `save-version` and a final render (`render` without `--draft`/`--window`, run by `export`)
+   create or fill `versions/vN/`.** `save-version` links the draft of this edit from `preview/` (rendering
+   it first when `preview/` shows another edit) with its cover and the project snapshot, and records
+   the moments base (the screen now shows this version).
 2. **Every `render --draft` and every `render --window a:b` writes into `versions/preview/`**,
    replacing what was there (a new window deletes the previous `window_*.mp4`). It never creates a
    `vN` folder and never changes `project.json`'s `version`.
-3. `project.json` `version` = the last FINAL version number.
-4. A final render re-uses `vN` when the edit is unchanged since `vN` was rendered (re-rendering the
-   same edit overwrites it); otherwise it makes `v(N+1)`.
+3. `project.json` `version` = the last SAVED version number (saved from its draft or exported).
+4. `save-version` and a final render re-use `vN` when the edit is unchanged since `vN` was saved;
+   otherwise they make `v(N+1)` (`render.pick_version`). `export` renders only when `vN` has no whole
+   `export.mp4` (its `render.json` written after it) for this edit, and otherwise hands that file back.
+   `export --version K` hands back an earlier version's `export.mp4`, and refuses (`ONLY_A_PREVIEW`)
+   when K was only ever a draft. Its result carries `facts` read from the file with ffprobe: width,
+   height, fps, bytes, duration and `fullResolution` (the project's format).
 5. `cover` (cover only) writes into `vN` when that edit already has its `export.mp4`, else into
    `preview/`.
 6. `frames` reads the newest full render, preview or final (never a window slice), whose manifest
@@ -46,19 +58,21 @@ Rules:
 
 ## What the app shows
 
-- **Version chips** = folders matching `^v\d+$` that contain `export.mp4`, sorted by number.
-  Folders without `export.mp4` (from older builds, or an AI run whose final render failed) are
-  not shown.
+- **Version chips** = folders matching `^v\d+$` that contain `export.mp4` or `draft.mp4`, sorted by
+  number. A chip with only `draft.mp4` plays its draft and says it is a quick preview; Export makes its
+  full-quality file. Folders with neither are not shown.
 - **While an AI run is working**, the player may show `versions/preview/draft.mp4` (the `render`
   event with `draft: true`).
-- **`AgentResult.version`** is the version to select after a run. In the rare case its folder has
-  no `export.mp4` (the final render failed and the run fell back to its preview), show
-  `versions/preview/draft.mp4` and offer to try the final render again.
+- **`AgentResult.version`** is the version to select after a run: saved from its draft, so its folder
+  has `draft.mp4` until it is exported.
+- **Export, Send to my phone and posting** all start with `export`, as a job with progress; the file
+  copied into Library › Finished videos is that version's `export.mp4`.
 - `versions/vN/notes.md` (written by the ai package) is the note text for that chip.
 
 ## ai package
 
 - `render_draft` = engine `render --draft` (preview). The agent caps previews per task (3 per first
   edit, 2 per note).
-- After the agent calls `finish`, the loop runs one final `render`: that is the only step that adds a
-  version.
+- After the agent calls `finish`, the task renders a draft only when the last one does not show the
+  edit (a moments run of this edit counts), then runs `save-version`: that is the only step that adds a
+  version. No AI task renders a full-quality file.
