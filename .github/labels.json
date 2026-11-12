@@ -25,6 +25,91 @@
     "description": "Not ready to merge. State what must change before it is ready."
   },
   {
+    "name": "type:feat",
+    "color": "1d76db",
+    "description": "Set from the PR title: a new capability."
+  },
+  {
+    "name": "type:fix",
+    "color": "d73a4a",
+    "description": "Set from the PR title: a bug fix."
+  },
+  {
+    "name": "type:perf",
+    "color": "5319e7",
+    "description": "Set from the PR title: faster or lighter."
+  },
+  {
+    "name": "type:refactor",
+    "color": "bfdadc",
+    "description": "Set from the PR title: same behavior, better code."
+  },
+  {
+    "name": "type:docs",
+    "color": "0075ca",
+    "description": "Set from the PR title: documentation only."
+  },
+  {
+    "name": "type:test",
+    "color": "bfd4f2",
+    "description": "Set from the PR title: tests only."
+  },
+  {
+    "name": "type:build",
+    "color": "fef2c0",
+    "description": "Set from the PR title: packaging, dependencies or the build."
+  },
+  {
+    "name": "type:ci",
+    "color": "ededed",
+    "description": "Set from the PR title: workflows and repo tooling."
+  },
+  {
+    "name": "type:chore",
+    "color": "ededed",
+    "description": "Set from the PR title: upkeep that changes nothing a user sees."
+  },
+  {
+    "name": "type:revert",
+    "color": "ededed",
+    "description": "Set from the PR title: undoes an earlier change."
+  },
+  {
+    "name": "area:ai",
+    "color": "1f6feb",
+    "description": "Set from changed files: the AI editor (ai/)."
+  },
+  {
+    "name": "area:app",
+    "color": "1a7f37",
+    "description": "Set from changed files: the desktop app (app/)."
+  },
+  {
+    "name": "area:engine",
+    "color": "8250df",
+    "description": "Set from changed files: the render engine (engine/)."
+  },
+  {
+    "name": "area:templates",
+    "color": "bf8700",
+    "description": "Set from changed files: animation templates (templates/)."
+  },
+  {
+    "name": "area:packaging",
+    "color": "bc4c00",
+    "description": "Set from changed files: installers, signing and icons (packaging/)."
+  },
+  {
+    "name": "area:docs",
+    "color": "57606a",
+    "description": "Set from changed files: docs/ and top-level Markdown."
+  },
+  {
+    "name": "area:ci",
+    "color": "db61a2",
+    "description": "Set from changed files: .github/ and scripts/."
+  },
+  {
     "name": "vouch:trusted",
     "color": "1f883d",
     "description": "PR author is listed as trusted in .github/VOUCHED.td."
