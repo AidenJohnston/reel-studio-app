@@ -8,7 +8,7 @@ import { AssetCandidate, AssetKind, FrozenAsset, MediaEngine, PendingAsset, ASSE
 import { StockSearch, StockProvider } from './stock';
 import { readAttachment } from './attachments';
 import {
-  Analysis, Broll, CaptionStyle, ClipItem, CutItem, LIBRARY_FOLDERS, LibraryKind, MusicFrozen, MusicLevel, Project, Sfx, Transcript, TREATMENTS, Word, WordAnchor, Zoom,
+  Analysis, Broll, CaptionStyle, ClipItem, CutItem, ITEM_TREATMENTS, LIBRARY_FOLDERS, LibraryKind, MusicFrozen, MusicLevel, Project, Sfx, TEXT_TREATMENTS, Transcript, TREATMENTS, Word, WordAnchor, Zoom,
   anchorText, anchorWords, approxDuration, approxOutputTimes, keptWords, loadAnalysis, loadProject, loadTranscript,
   captionsUnderInstagram, nextBrollId, clipProblem, normalizeKeep, captionCorrectionProblem, saveProject, validateProject, wordIndex, anchorProblem, PROJECT_FILE, versionDir, JOIN_TRANSITIONS, SEARCHED_JOINS, listVersions, versionLine, withWordsBack,
 } from './project';
@@ -146,7 +146,7 @@ export async function noteBase(ctx: ToolContext, live: Project, n: number): Prom
     if (problems.length) throw invalid(problems.join('; '));
     const refs = [
       ...snapshot.sources.map((s) => s.path), snapshot.music.track,
-      ...snapshot.broll.flatMap((b) => [b.asset, ...(['post-wall', 'icon-wall'].includes(b.treatment) && Array.isArray(b.params?.items) ? b.params.items.filter((x): x is string => typeof x === 'string') : [])]),
+      ...snapshot.broll.flatMap((b) => [b.asset, ...(ITEM_TREATMENTS.includes(b.treatment) && Array.isArray(b.params?.items) ? b.params.items.filter((x): x is string => typeof x === 'string') : [])]),
     ];
     for (const ref of refs) {
       if (!ref) continue;
@@ -1390,13 +1390,22 @@ function readPage(content: unknown, args: { offset?: number | null; limit?: numb
   return { text: text.slice(offset, end), page: { offset, limit, total: text.length, nextOffset: end < text.length ? end : null } };
 }
 
+const BOX = S.arr(S.num(undefined, { minimum: 0, maximum: 1 }), undefined, { minItems: 4, maxItems: 4 });
+
 const PARAMS = S.obj({
   side: S.opt(S.enum(['left', 'right', 'auto'], 'side-card / phone-card: which side of the face (auto = the roomier side)')),
   tilt: S.opt(S.num('degrees, e.g. -2.5 (cards and text-pop); 0 for the square hook title')),
   scale: S.opt(S.num('1.0 = default size')),
-  text: S.opt(S.str('words shown by text-pop: the 3-7 word hook title, or the 1-4 key words of the line; from what is said')),
+  text: S.opt(S.str('words shown by text-pop, title-card or a text panel-card: the 3-7 word hook title, or the 1-4 key words of the line; from what is said. receipt: its source. logo-row: a lone logo\'s name')),
   iconic: S.opt(S.bool('true when the picture is a logo or icon (it reads at a smaller size); null = guess')),
   style: S.opt(S.enum(['pop', 'label'], 'text-pop look: label = dark words on a white box, as written (the hook title, a step label "2: Editing"); pop = big outlined capitals (one key word or number). Default pop')),
+  items: S.opt(S.arr(S.str(), 'logo-row, phone-row, post-wall, icon-wall: picture (or phone clip) paths, in the order said')),
+  hook: S.opt(S.bool('title-card: true = the opening hook, square (null = square only in the first second)')),
+  join: S.opt(S.bool('true = stack on the card just before instead of replacing it; they leave together')),
+  circle: S.opt({ ...BOX, description: 'circle-callout: the spot to circle' }),
+  circleAt: S.opt(S.str('circle-callout: word id the loop is drawn on (null = the second word)')),
+  cropBox: S.opt({ ...BOX, description: 'any picture: show only this part' }),
+  blurBoxes: S.opt(S.arr(BOX, 'any picture: parts to blur (names, faces, numbers)')),
 });
 
 // What sets a caption look in Edit it myself apart (app/src/shared/caption-presets.ts). Size, Position, Colour
@@ -1428,6 +1437,27 @@ type FootageResult = {
 
 function isFootageResult(value: unknown): value is FootageResult {
   return validate(FOOTAGE_RESULT, value).length === 0;
+}
+
+// the cards ai/prompts/system.md doesn't describe yet; boxes on a picture are [x, y, w, h] fractions of it
+const TREATMENT_HELP = 'Boxes are [x, y, w, h] fractions of the picture. title-card: the hook or a title, words filling a white label. '
+  + 'panel-card: a screenshot framed on a white panel, or sentences on one. logo-row: real logos in a row. phone-row: 2-4 phones side by side (may cover the face). '
+  + 'circle-callout: a screenshot, then a red loop around params.circle. wide-clip: borrowed footage in its own framing over a blur of itself. '
+  + 'receipt: a screenshot as proof, labelled with its source (params.text).';
+
+/** params.items as placed files, each frozen as it is placed like `asset` (placementAsset), or the problem. */
+async function resolveItems(ctx: ToolContext, params: Record<string, any> | null | undefined): Promise<string[] | undefined> {
+  if (!Array.isArray(params?.items)) return undefined;
+  const out: string[] = [];
+  for (const it of params!.items as string[]) {
+    try {
+      out.push(await placementAsset(ctx, it));
+    } catch (e) {
+      if (e instanceof ToolInputError) throw new ToolInputError(`params.items: ${e.message} (use Library/... paths from list_library, or assetIds from resolve_asset)`);
+      throw e;
+    }
+  }
+  return out;
 }
 
 const tools: ToolDef[] = [
@@ -1934,10 +1964,10 @@ const tools: ToolDef[] = [
   },
   {
     name: 'add_broll',
-    description: 'Put a visual on screen over a word range. Give exactly one of asset or animation. asset is a Library/... picture or clip path from list_library (frozen as it is placed), or the assetId of a web or project picture or clip committed with resolve_asset. text-pop needs only params.text. text-behind draws one or two big words BEHIND the speaker, who stays in front of them (it needs only params.text; params.size and params.color as for text-pop).',
+    description: 'Put a visual on screen over a word range. Give exactly one of asset or animation. asset is a Library/... picture or clip path from list_library (frozen as it is placed), or the assetId of a web or project picture or clip committed with resolve_asset. text-pop needs only params.text. text-behind draws one or two big words BEHIND the speaker, who stays in front of them (it needs only params.text; params.size and params.color as for text-pop). title-card and a text panel-card need only words; logo-row and phone-row take params.items. A card that comes sooner than 2 s after the one on screen waits, unless params.join stacks it on that one.',
     parameters: S.obj({
       anchor: ANCHOR,
-      treatment: S.enum(TREATMENTS),
+      treatment: S.enum(TREATMENTS, TREATMENT_HELP),
       asset: S.opt(S.str('a Library/... picture or clip path, or a picture or video assetId from resolve_asset commit')),
       animation: S.opt(S.obj({
         template: S.enum(ANIMATION_IDS),
@@ -1956,14 +1986,15 @@ const tools: ToolDef[] = [
           { fullScreen: args.treatment === 'full-frame' });
         asset = made.asset;
         args.treatment = 'animation';                 // a finished full-frame layer, never a card
-      } else if (!WORD_TREATMENTS.has(args.treatment)) {
-        throw new ToolInputError('give a committed asset or animation (only text-pop and text-behind work with text alone)');
+      } else if (!TEXT_TREATMENTS.includes(args.treatment) && !(ITEM_TREATMENTS.includes(args.treatment) && args.params?.items?.length)) {
+        throw new ToolInputError(`give a committed asset or animation (only ${TEXT_TREATMENTS.join(', ')} work with words alone; ${ITEM_TREATMENTS.join(', ')} take params.items)`);
       }
       if (WORD_TREATMENTS.has(args.treatment) && !asset && !args.params?.text) throw new ToolInputError(`${args.treatment} needs params.text`);
+      const items = await resolveItems(ctx, args.params);
       let id = '';
       await mutate(ctx, 'broll', (p) => {
         id = nextBrollId(p);
-        const b: Broll = { id, anchor: { from: args.anchor.from, to: args.anchor.to }, leadIn: 0.13, treatment: args.treatment, asset, params: stripNulls(args.params ?? {}) };
+        const b: Broll = { id, anchor: { from: args.anchor.from, to: args.anchor.to }, leadIn: 0.13, treatment: args.treatment, asset, params: stripNulls({ ...(args.params ?? {}), ...(items ? { items } : {}) }) };
         checkBrollAssets(ctx, b);
         p.broll.push(b);
       });
@@ -2018,6 +2049,7 @@ const tools: ToolDef[] = [
           : `Re-timed the animation on "${says}"`;
         return { content: { ok: true, asset: made.asset, layout: made.layout, readable: made.readable, placement: ANIMATION_PLACEMENT }, summary };
       }
+      const items = await resolveItems(ctx, args.params);
       let says = '';
       await mutate(ctx, 'broll', (p) => {
         const b = p.broll.find((x) => x.id === args.id);
@@ -2025,7 +2057,7 @@ const tools: ToolDef[] = [
         if (args.anchor) b.anchor = { from: args.anchor.from, to: args.anchor.to };
         if (args.treatment) b.treatment = args.treatment;
         if (asset) b.asset = asset;
-        if (args.params) b.params = { ...b.params, ...stripNulls(args.params) };
+        if (args.params) b.params = { ...b.params, ...stripNulls({ ...args.params, ...(items ? { items } : {}) }) };
         checkBrollAssets(ctx, b);
         says = quote(t, b.anchor);
       });

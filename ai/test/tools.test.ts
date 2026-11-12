@@ -423,6 +423,29 @@ describe('tool implementations', () => {
     expect(p.broll[0]).toMatchObject({ treatment: 'side-card', params: { tilt: 0 } });
   });
 
+  it('b-roll: the everyday cards (words alone, several pictures, boxes, a card that joins)', async () => {
+    const { ctx, root, dir } = await ctxFor();
+    await fsp.writeFile(path.join(root, 'Library', 'Images', 'a.png'), tinyPng());
+    await fsp.writeFile(path.join(root, 'Library', 'Images', 'b.png'), tinyPng([30, 30, 200]));
+    const add = (treatment: string, params: Record<string, unknown>, asset: string | null = null) =>
+      executeTool(ctx, 'add_broll', { anchor: { from: 'w29', to: 'w30' }, treatment, asset, animation: null, params });
+    expect((await add('title-card', { text: 'I quit my job', hook: true })).isError).toBe(false);
+    expect((await add('panel-card', {})).isError).toBe(false);                       // words alone
+    const row = await add('logo-row', { items: ['a.png', 'b.png'] });
+    expect(row.isError, row.content).toBe(false);
+    expect((await add('logo-row', { items: ['missing.png'] })).content).toMatch(/not found: missing.png/);
+    expect((await add('phone-row', {})).isError).toBe(true);                         // needs its pictures
+    expect((await add('circle-callout', { circle: [0.1, 0.2, 0.3, 0.1], blurBoxes: [[0, 0, 0.5, 0.1]], join: true }, 'a.png')).isError).toBe(false);
+    expect((await add('receipt', { circle: [0.1, 0.2, 1.3, 0.1] }, 'a.png')).isError).toBe(true);   // a box is fractions
+    const p = await loadProject(dir);
+    expect(p.broll.map((b) => b.treatment)).toEqual(['title-card', 'panel-card', 'logo-row', 'circle-callout']);
+    // each picture is frozen into the project as it is placed, like a card's asset
+    const frozen = expect.stringMatching(/^work\/assets\/frozen\/image\/[0-9a-f]{64}\.png$/);
+    expect(p.broll[2].params.items).toEqual([frozen, frozen]);
+    expect(new Set(p.broll[2].params.items as string[]).size).toBe(2);
+    expect(p.broll[3].params).toEqual({ circle: [0.1, 0.2, 0.3, 0.1], blurBoxes: [[0, 0, 0.5, 0.1]], join: true });
+  });
+
   it('add_broll with a picture and no params places it', async () => {
     const { ctx, root, dir } = await ctxFor();
     await fsp.writeFile(path.join(root, 'Library', 'Images', 'flour.png'), tinyPng());

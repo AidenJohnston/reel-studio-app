@@ -52,8 +52,12 @@ export interface Music {
 
 export const TREATMENTS = [
   'card-above-head', 'full-frame', 'phone-card', 'side-card', 'text-pop', 'text-behind', 'post-wall', 'icon-wall', 'split-top',
-  'animation',
+  'animation', 'title-card', 'panel-card', 'logo-row', 'phone-row', 'circle-callout', 'wide-clip', 'receipt',
 ] as const;
+/** Treatments that show params.items (several pictures) rather than one asset. */
+export const ITEM_TREATMENTS: readonly string[] = ['post-wall', 'icon-wall', 'logo-row', 'phone-row'];
+/** Treatments that can show words alone, with no picture. */
+export const TEXT_TREATMENTS: readonly string[] = ['text-pop', 'text-behind', 'title-card', 'panel-card'];
 export type Treatment = (typeof TREATMENTS)[number];
 
 export interface BrollParams { tilt?: number | null; scale?: number | null; text?: string | null; [k: string]: unknown }
