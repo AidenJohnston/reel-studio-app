@@ -6,7 +6,7 @@ Please report security problems privately, never in a public issue, pull request
 
 - **On GitHub:** this repository's **Security** tab, **Report a vulnerability**. The report stays private, and we can
   work on a fix with you there.
-- **By e-mail:** the support address on [getreelstudio.com](https://getreelstudio.com). Say it is a security report.
+- **By e-mail:** support@getreelstudio.com, with "Security" in the subject.
 
 Include what you found and its security impact, how to reproduce it, the Reel Studio version and your operating
 system. Leave out anything private, such as your own videos or API keys.
