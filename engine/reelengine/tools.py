@@ -214,8 +214,7 @@ def filters() -> set:
         names = set()
         for line in (out.stdout or "").splitlines():
             parts = line.split()
-            # A filter line starts with its flag column: three characters up to FFmpeg 7 ("TSC", "..."), two from
-            # FFmpeg 8 ("TS", ".."). The legend above the list ("T.. = Timeline support") has more parts after "=".
+            # The flag column is 3 characters up to FFmpeg 7 and 2 from FFmpeg 8; legend lines have "=" second.
             if len(parts) >= 3 and _FILTER_FLAGS.fullmatch(parts[0]) and parts[1] != "=":
                 names.add(parts[1])
         _CACHE["filters"] = names

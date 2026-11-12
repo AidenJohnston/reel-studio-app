@@ -45,8 +45,6 @@ def test_ffmpeg7_listing(monkeypatch):
 
 
 def test_ffmpeg8_listing(monkeypatch):
-    # FFmpeg 8's two-character flag column: before the fix this found no filters at all, so doctor called a full
-    # build broken and renders skipped zscale (HDR) and scale_cuda.
     assert _parse(monkeypatch, FFMPEG8) == {"aap", "loudnorm", "zscale", "subtitles"}
 
 
