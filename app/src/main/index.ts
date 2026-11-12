@@ -1503,6 +1503,7 @@ function registerIpc(): void {
         return ai.saveConnection(c)
       },
       removeConnection: async (id) => void (await ai.removeConnection?.(id)),
+      connections: async () => (await ai.connections?.()) ?? [],
       active: () => ai.active()
     },
     // usage counting stops when the person said no to usage data in Reel Studio (Settings › Privacy)

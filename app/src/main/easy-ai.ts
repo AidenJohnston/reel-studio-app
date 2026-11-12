@@ -74,6 +74,7 @@ export interface EasyAiDeps {
   ai: {
     saveConnection(c: { id?: string; label: string; kind: 'openai'; baseURL: string; model: string; key: string }): Promise<{ status: { connected: boolean }; connection?: { id: string }; error?: { code?: string; userMessage: string } }>
     removeConnection(id: string): Promise<void>
+    connections(): Promise<{ id: string; baseURL: string }[]>
     active(): Promise<{ id: string; connected: boolean; connectionId?: string }>
   }
   /** usage data is on in Reel Studio (the person didn't turn it off) */
@@ -143,6 +144,10 @@ export function setupEasyAi(d: EasyAiDeps) {
       } finally {
         d.aiChanged()
       }
+    },
+    async ownConnections() {
+      const base = `${origin}/api/v1`.replace(/\/+$/, '')
+      return (await d.ai.connections()).filter((c) => c.baseURL.replace(/\/+$/, '') === base).map((c) => c.id)
     },
     async inUse(id) {
       const a = await d.ai.active()

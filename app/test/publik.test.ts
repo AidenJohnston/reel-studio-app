@@ -74,7 +74,7 @@ describe("publik's calls", () => {
 const ORIGIN = 'https://publikhq.com'
 const wallet = (w: Partial<Wallet> = {}): Wallet => ({ claim_state: 'anonymous', claim_url: `${ORIGIN}/claim/k1`, plan: { kind: 'none', label: null }, balance_micros: 0, top_up_url: `${ORIGIN}/top-up`, ...w })
 
-function publik(o: { claimed?: boolean; balance?: number; revoked?: string[]; offline?: boolean; claimUrl?: string; stored?: PublikCredential; counting?: boolean; sessionMs?: number; slowSave?: Promise<void>; dropFails?: boolean; saveFails?: (c: PublikCredential) => boolean } = {}) {
+function publik(o: { claimed?: boolean; balance?: number; revoked?: string[]; offline?: boolean; claimUrl?: string; stored?: PublikCredential; counting?: boolean; sessionMs?: number; slowSave?: Promise<void>; dropFails?: boolean | (() => boolean); saveFails?: (c: PublikCredential) => boolean } = {}) {
   const s = { claimed: !!o.claimed, balance: o.balance ?? 0, provisions: 0, events: [] as string[], revoked: new Set(o.revoked ?? []), counting: o.counting ?? true, saving: false }
   const fake: PublikApi = {
     async provision() {
@@ -115,10 +115,11 @@ function publik(o: { claimed?: boolean; balance?: number; revoked?: string[]; of
       return (active = id ?? 'c_publik')
     },
     async dropKey(id) {
-      if (o.dropFails) throw { code: 'locked', userMessage: 'Close other apps, then try again.' }
+      if (typeof o.dropFails === 'function' ? o.dropFails() : o.dropFails) throw { code: 'locked', userMessage: 'Close other apps, then try again.' }
       dropped.push(id)
       if (active === id) active = null
     },
+    ownConnections: async () => (active ? [active] : []),
     inUse: async (id) => active === id,
     countingAllowed: async () => s.counting,
     emit: (i) => steps.push(i),
@@ -270,6 +271,16 @@ describe('Sign in with publik: a credential that cannot be saved', () => {
     expect(await t.sign.start()).toMatchObject({ step: 'failed', problem: 'failed' })
     expect(t.dropped).toEqual(['c_publik'])
     expect(t.used).toHaveLength(1)
+  })
+
+  it('fails if Sign out cannot remove a connection whose id was never kept and whose removal failed once', async () => {
+    let failing = true
+    const t = publik({ claimed: true, balance: 1, saveFails: (c) => !!c.connection_id, dropFails: () => failing })
+    expect(await t.sign.start()).toMatchObject({ step: 'failed', message: PUBLIK_WORDS.stillOn })
+    expect(t.saved()?.connection_id).toBeUndefined()
+    failing = false
+    await t.sign.signOut()
+    expect(t.dropped).toEqual(['c_publik'])
   })
 })
 

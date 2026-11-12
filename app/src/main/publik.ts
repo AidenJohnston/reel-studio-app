@@ -236,6 +236,9 @@ export interface PublikDeps {
   useKey(key: string, connectionId?: string): Promise<string>
   /** removes the connection (sign out) */
   dropKey(connectionId: string): Promise<void>
+  /** every saved connection to publik's address: Sign out removes them all, so one whose id was never kept (a save
+   * that failed) is still found */
+  ownConnections(): Promise<string[]>
   /** is that connection still the editor? (a person may have chosen another since) */
   inUse(connectionId: string): Promise<boolean>
   /** usage counting may run: the person didn't turn off usage data, DO_NOT_TRACK isn't set */
@@ -432,8 +435,9 @@ export function createPublikSignIn(deps: PublikDeps) {
       await running?.done.catch(() => undefined)
       stopCounting()
       const c = await deps.store.load()
-      // if the connection can't be removed, the credential stays, so Sign out can be tried again
-      if (c?.connection_id) await deps.dropKey(c.connection_id)
+      // if a connection can't be removed, the credential stays, so Sign out can be tried again
+      const ids = new Set([...(c?.connection_id ? [c.connection_id] : []), ...(await deps.ownConnections())])
+      for (const id of ids) await deps.dropKey(id)
       await deps.store.clear()
       emit({ step: 'idle' })
     },

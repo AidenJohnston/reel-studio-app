@@ -115,6 +115,8 @@ async function statfsFree(dir: string): Promise<number> {
  */
 async function moveIntoPlace(from: string, to: string, signal: AbortSignal): Promise<void> {
   for (let i = 0; ; i++) {
+    // Cancel during a wait below stops here: nothing is moved into place after it
+    if (signal.aborted) throw new CodexFetchError('cancelled', 'Stopped.')
     try {
       return await fs.rename(from, to)
     } catch (e) {

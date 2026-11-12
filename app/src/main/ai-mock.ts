@@ -199,7 +199,7 @@ export const createMockAI: CreateAI = ({ host, managedCodex }) => {
       if (r?.draft?.file) onEvent({ type: 'render', version: Number(r.draft.version ?? 0), draft: true, file: String(r.draft.file) })
     }
     await new Promise<void>((resolve, reject) => {
-      const t = setTimeout(resolve, noteMs || EDIT_MS)
+      const t = setTimeout(resolve, noteMs || (mockEdits ? EDIT_MS : 0))
       signal?.addEventListener('abort', () => (clearTimeout(t), reject({ code: 'CANCELLED', userMessage: 'Stopped.' })), { once: true })
     })
     // like the real package: words added while it worked are read before it can finish (ai steer.ts)

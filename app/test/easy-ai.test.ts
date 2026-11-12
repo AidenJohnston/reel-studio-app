@@ -34,6 +34,7 @@ function setup(saved: boolean, env: NodeJS.ProcessEnv = {}, over: Partial<EasyAi
     ai: {
       saveConnection: async () => (calls.push('saveConnection'), { status: { connected: false } }),
       removeConnection: async () => void calls.push('removeConnection'),
+      connections: async () => (calls.push('connections'), []),
       active: async () => ({ id: 'none', connected: true })
     },
     usageAllowed: async () => true,
@@ -55,7 +56,7 @@ describe('signing out of Reel Studio’s AI', () => {
   it('fails if Sign out says it worked when the saved connection could not be removed, or loses what to remove', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'easy-out-'))
     await credentialStore(join(dir, 'publik.bin'), BOX).save({ key: 'pk_live_x', install_id: 'i1', claim_url: null, connection_id: 'c_publik' })
-    const t = setup(true, {}, { settingsDir: dir, secrets: BOX, ai: { saveConnection: async () => ({ status: { connected: false } }), removeConnection: async () => Promise.reject({ code: 'locked', userMessage: 'Close other apps, then try again.' }), active: async () => ({ id: 'custom', connected: true, connectionId: 'c_publik' }) } })
+    const t = setup(true, {}, { settingsDir: dir, secrets: BOX, ai: { saveConnection: async () => ({ status: { connected: false } }), removeConnection: async () => Promise.reject({ code: 'locked', userMessage: 'Close other apps, then try again.' }), connections: async () => [], active: async () => ({ id: 'custom', connected: true, connectionId: 'c_publik' }) } })
     await expect(t.call('ai:guidedSignOut', 'publik')).rejects.toMatchObject({ userMessage: 'Close other apps, then try again.' })
     expect(await credentialStore(join(dir, 'publik.bin'), BOX).load()).toMatchObject({ connection_id: 'c_publik' })
   })
