@@ -37,7 +37,8 @@ export const scope: Scope = {
     { name: 'error code', forms: ['error code', 'exit code', 'stack trace', 'stderr', 'stdout', 'logs', 'log file'], instead: 'say what happened and what to do' },
     { name: 'config', forms: ['config', 'configuration', 'runtime', 'schema', 'metadata', 'payload', 'pipeline', 'debug'], instead: 'leave it out' },
     { name: 'timestamp', forms: ['timestamp', 'timestamps'], instead: 'the time' },
-    { name: 'server', forms: ['server', 'servers'], instead: 'leave it out' }
+    { name: 'server', forms: ['server', 'servers'], instead: 'leave it out' },
+    { name: 'Codex app', forms: ['Codex', 'Codex app', 'Claude Code', 'Claude Code app'], instead: 'ChatGPT, Claude: the account she signed in with' }
   ],
 
   roots: ['app/src/renderer/src', 'app/src/main', 'app/src/shared', 'ai/src', 'engine/reelengine'],

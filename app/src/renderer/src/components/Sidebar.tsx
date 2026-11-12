@@ -381,7 +381,7 @@ export function Sidebar({
           className={`acct${inSettings ? ' on' : ''}`}
           aria-current={inSettings ? 'page' : undefined}
           aria-label={`${who}, ${name ? `editor ${name}` : 'no editor'}. Settings`}
-          title={!name ? 'Settings' : provider?.id === 'claude-cli' ? 'Editor: Claude (your Claude Code app). Settings' : provider?.id === 'codex-cli' ? 'Editor: ChatGPT (your Codex app). Settings' : 'Settings'}
+          title={!name ? 'Settings' : provider?.id === 'claude-cli' ? 'Editor: Claude. Settings' : provider?.id === 'codex-cli' ? 'Editor: ChatGPT. Settings' : 'Settings'}
           onClick={() => go({ name: 'settings' })}
           data-testid="account"
         >

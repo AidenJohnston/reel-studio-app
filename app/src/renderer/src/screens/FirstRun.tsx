@@ -46,7 +46,8 @@ const HEADINGS: Record<Pane, string> = { sample: 'How a reel gets made', mac: 'K
 const LEADS: Record<Pane, string> = {
   sample: 'A raw take of someone talking, made into Version 1 the way your editor makes yours.',
   mac: 'Your own videos take a few minutes. Your Mac can tell you when each one is ready, so you can leave it running.',
-  editor: 'Your editor picks your best takes, adds pictures and makes the changes you ask for, on your own Claude or ChatGPT plan.'
+  // true for every way to connect, so it names none of them
+  editor: 'Connect an AI once, and it picks your best takes, adds pictures and makes the changes you ask for.'
 }
 
 const VIDEO_TYPES = 'video/*,.mov,.mp4,.m4v'
