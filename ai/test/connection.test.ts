@@ -159,6 +159,15 @@ describe('plain-words errors from the person\'s own server', () => {
     expect(mapConnectionError(400, { error: { message: 'unknown provider for model x' } }, { kind: 'openai', model: 'x' }).code).toBe('connection_model');
   });
 
+  it('fails if an account out of credit (402) is not told so with its own top-up page, or is sent to another site', () => {
+    const ctx = { kind: 'openai' as const, model: 'publik-smart', baseURL: 'https://publikhq.com/api/v1' };
+    const own = mapConnectionError(402, { error: { message: 'Not enough publik API balance.', top_up_url: 'https://publikhq.com/wallet?topup=1' } }, ctx);
+    expect([own.code, own.userMessage, own.link]).toEqual(['connection_no_credit', 'Your AI account is out of credit. Add more at publikhq.com, then try again.', 'https://publikhq.com/wallet?topup=1']);
+    const elsewhere = mapConnectionError(402, { error: { top_up_url: 'https://evil.example/pay' } }, ctx);
+    expect([elsewhere.link, elsewhere.userMessage]).toEqual([undefined, 'Your AI account is out of credit. Add more, then try again.']);
+    expect(mapConnectionError(402, { error: { top_up_url: 'http://publikhq.com/wallet' } }, ctx).link).toBeUndefined();
+  });
+
   it('Anthropic-compatible errors name the server, not Claude\'s Console', async () => {
     const p = (o: { key?: string; model?: string; base?: string } = {}) => new AnthropicProvider({ id: 'custom', apiKey: o.key ?? KEY, model: o.model ?? 'mock-small', baseURL: o.base ?? mock.origin, maxRetries: 0 });
     expect((await p().complete(sayOk)).text).toBe('OK');

@@ -104,7 +104,7 @@ export class OpenAICompatibleProvider implements ModelProvider {
   }
 
   private async once(req: CompletionRequest): Promise<CompletionResponse> {
-    const ctx = { kind: 'openai' as const, model: this.model };
+    const ctx = { kind: 'openai' as const, model: this.model, baseURL: this.o.baseURL };
     const body: Record<string, unknown> = { model: this.model, messages: toChatMessages(req.system, req.messages) };
     if (req.tools.length && !req.jsonOnly) body.tools = toChatTools(req.tools);
     const signal = AbortSignal.any([...(req.signal ? [req.signal] : []), AbortSignal.timeout(this.o.timeoutMs ?? 300_000)]);

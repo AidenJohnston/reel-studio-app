@@ -10,7 +10,7 @@ export const CONNECTION_KINDS: Record<ConnectionKind, string> = {
   openai: 'OpenAI-compatible',
 };
 
-export interface ConnectionErrorContext { kind: ConnectionKind; model: string }
+export interface ConnectionErrorContext { kind: ConnectionKind; model: string; /** the server's address, for links an error may offer */ baseURL?: string }
 
 export function normalizeBaseURL(raw: string): string {
   const text = raw.trim();
@@ -64,6 +64,16 @@ function errorText(body: any): string {
   return [e?.message, e?.type, e?.code, e?.param, typeof body.detail === 'string' ? body.detail : ''].filter((x) => typeof x === 'string').join(' ');
 }
 
+function sameSite(url: string, base: string | undefined): boolean {
+  if (!base) return false;
+  try {
+    const u = new URL(url);
+    return u.protocol === 'https:' && u.hostname === new URL(base).hostname;
+  } catch {
+    return false;
+  }
+}
+
 export function mapConnectionError(status: number | undefined, body: unknown, ctx: ConnectionErrorContext, detail?: string): AIError {
   const text = errorText(body);
   const info = { status, detail: detail ?? `status=${status ?? '?'} ${text.slice(0, 300)}` };
@@ -78,6 +88,15 @@ export function mapConnectionError(status: number | undefined, body: unknown, ct
     return new AIError('connection_model', `The server has no model called "${ctx.model}". Check the model name, or pick one from the list.`, info);
   }
   if (status === 404 || status === 405) return wrongAddress(ctx, info.detail, status);
+  if (status === 402) {
+    // Out of credit (publik answers 402 with `error.top_up_url`, publikhq.com/llms.txt). The page to add more is only
+    // offered when it is an https address on the server's own site, never one an answer points elsewhere.
+    const top = (body as { error?: { top_up_url?: unknown } } | null)?.error?.top_up_url;
+    const link = typeof top === 'string' && sameSite(top, ctx.baseURL) ? top : undefined;
+    // the note screen shows words, not links, so the words name the site to add credit on
+    const where = link ? ` at ${new URL(link).hostname.replace(/^www\./, '')}` : '';
+    return new AIError('connection_no_credit', `Your AI account is out of credit. Add more${where}, then try again.`, { ...info, ...(link ? { link } : {}) });
+  }
   if (status === 429) {
     // a limit the server names (which accounts, when they reset) is said as such; a bare 429 stays "busy"
     const limit = serverLimit(body);

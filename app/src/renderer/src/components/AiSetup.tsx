@@ -81,7 +81,7 @@ export function GuidedChoices({ easy }: { easy: EasyAiInfo }) {
         ? already
           ? 'You’re already signed in to ChatGPT on this computer.'
           : 'Use the ChatGPT account you already have.'
-        : 'Free to start. You sign in with publik in your browser.'
+        : 'Sign in with publik in your browser. Nothing to install.'
     const tone: Tone = failed ? 'error' : running ? 'busy' : 'plain'
     const status = running ? (
       <span>
