@@ -73,25 +73,31 @@ never approves. Merging is a person's click.
 
 ## Daily queues
 
-Bookmark these GitHub searches, each with `repo:getcurate/reel-studio is:open` in front:
+Bookmark these GitHub searches, each with `repo:getcurate/reel-studio is:open` in front. The PR list shows each PR's
+checks as a tick or a cross.
 
 | Queue | Search |
 |---|---|
 | Review these | `is:pr draft:false review-requested:@me` |
 | Decide or act | `assignee:@me` |
 | Mine, sent back | `is:pr author:@me draft:false review:changes_requested` |
-| Mine, red | `is:pr author:@me draft:false status:failure` |
-| Reviewed and green: merge | `is:pr draft:false status:success review:approved no:assignee sort:created-asc` |
-| Mine, green, unreviewed | `is:pr author:@me draft:false status:success review:none no:assignee` (check it has no pending review request) |
+| Mine, ready | `is:pr author:@me draft:false` |
+| Reviewed: merge when green | `is:pr draft:false review:approved no:assignee sort:created-asc` |
 | Issues to triage | `is:issue no:assignee sort:created-asc` |
 
-Conflicting PRs have no search keyword. List them with (Bash):
+Search can't filter by check results: its `status:` qualifier reads GitHub's older commit statuses, which GitHub
+Actions doesn't set, so it never matches here. Filter by checks with `gh` instead (Bash):
 
 ```sh
+# mine, red
+gh pr list --author @me --limit 500 --json number,statusCheckRollup --jq '.[] | select(any(.statusCheckRollup[]?; .conclusion == "FAILURE" or .conclusion == "TIMED_OUT" or .conclusion == "CANCELLED")) | .number'
+# ready PRs whose checks all passed
+gh pr list --search "draft:false" --limit 500 --json number,statusCheckRollup --jq '.[] | select((.statusCheckRollup | length) > 0 and all(.statusCheckRollup[]; .conclusion == "SUCCESS" or .conclusion == "SKIPPED" or .conclusion == "NEUTRAL")) | .number'
+# conflicting, not drafts
 gh pr list --limit 500 --json number,mergeable,isDraft --jq '.[] | select(.mergeable == "CONFLICTING" and (.isDraft | not)) | .number'
 ```
 
-or in PowerShell:
+The same in PowerShell, for conflicts:
 
 ```powershell
 (gh pr list --limit 500 --json number,mergeable,isDraft | ConvertFrom-Json) | Where-Object { $_.mergeable -eq 'CONFLICTING' -and -not $_.isDraft } | Select-Object -ExpandProperty number
