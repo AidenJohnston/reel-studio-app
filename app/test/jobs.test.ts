@@ -4,7 +4,9 @@ import { describe, expect, it, vi } from 'vitest'
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { createJobManager } from '../src/main/jobs'
+import { OWNER_LOCK } from '../src/main/owner'
 import type { IpcMainInvokeEvent } from 'electron'
+import type { AttachResult } from '../src/shared/api'
 import { registerAttachmentIpc, type AttachIpcDeps } from '../src/main/attachments'
 import { takeNote } from '../src/main/note-intake'
 import { projectDir, readAppState, recoverInterrupted, updateAppState } from '../src/main/store'
@@ -51,6 +53,124 @@ async function stuckVideo() {
   return { slug, dir, partial, jobs, id, appJsonWhileRunning }
 }
 
+describe('project reservations', () => {
+  it('keeps a project closed when an attachment engine cannot stop', async () => {
+    setupPaths()
+    const slug = 'stuck-attachment'
+    const dir = projectDir(slug)
+    mkdirSync(join(dir, 'work'), { recursive: true })
+    writeFileSync(join(dir, 'project.json'), JSON.stringify({ broll: [] }))
+    const jobs = createJobManager(() => undefined, () => undefined)
+    const handlers = new Map<string, Parameters<AttachIpcDeps['handle']>[1]>()
+    registerAttachmentIpc({
+      handle: (ch, fn) => void handlers.set(ch, fn),
+      runEngine: async () => { throw STUCK },
+      log: () => undefined,
+      projectDir,
+      readProject: async () => ({ broll: [] }) as any,
+      reserve: (s, fn) => jobs.share(s, fn),
+      clipboardImage: async () => null,
+      choose: async () => null
+    })
+    await expect(handlers.get('notes:attachFiles')!({} as IpcMainInvokeEvent, slug, ['/tmp/a.png'])).rejects.toMatchObject(STUCK)
+    expect(existsSync(join(dir, OWNER_LOCK))).toBe(true)
+    expect(() => jobs.start(slug, 'rerender', async () => ({ summary: 'never' }))).toThrow(expect.objectContaining(STUCK))
+    await expect(jobs.hold(slug, async () => undefined)).rejects.toMatchObject(STUCK)
+  })
+  it('rejects an attachment admitted while a manual update holds the project', async () => {
+    setupPaths()
+    const slug = 'held-reel'
+    const dir = projectDir(slug)
+    mkdirSync(join(dir, 'work'), { recursive: true })
+    writeFileSync(join(dir, 'project.json'), JSON.stringify({ broll: [] }))
+    const jobs = createJobManager(() => undefined, () => undefined)
+    const handlers = new Map<string, Parameters<AttachIpcDeps['handle']>[1]>()
+    const engineCalls: string[][] = []
+    registerAttachmentIpc({
+      handle: (ch, fn) => void handlers.set(ch, fn),
+      runEngine: async (cmd, args) => {
+        engineCalls.push([cmd, ...args])
+        return null
+      },
+      log: () => undefined,
+      projectDir,
+      readProject: async () => ({ broll: [] }) as any,
+      reserve: (s, fn) => jobs.share(s, fn),
+      clipboardImage: async () => null,
+      choose: async () => null
+    })
+    let release: () => void = () => undefined
+    const held = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    let entered: () => void = () => undefined
+    const manualEntered = new Promise<void>((resolve) => {
+      entered = resolve
+    })
+    const manual = jobs.hold(slug, async () => {
+      entered()
+      await held
+    })
+    await manualEntered
+    const noEvent = {} as IpcMainInvokeEvent
+    await expect(handlers.get('notes:attachFiles')!(noEvent, slug, ['/tmp/a.png'])).rejects.toMatchObject({ code: 'BUSY' })
+    expect(engineCalls).toEqual([])
+    release()
+    await manual
+  })
+  // The note box sends every file of one drop or paste at once (NoteAttachments.tsx), and a second drop
+  // can land while the first is still being copied.
+  it('runs several attachments to one video at once, and keeps jobs and manual edits out until the last is done', async () => {
+    setupPaths()
+    const slug = 'two-screenshots'
+    const dir = projectDir(slug)
+    mkdirSync(join(dir, 'work', 'assets'), { recursive: true })
+    writeFileSync(join(dir, 'project.json'), JSON.stringify({ broll: [] }))
+    const jobs = createJobManager(() => undefined, () => undefined)
+    const handlers = new Map<string, Parameters<AttachIpcDeps['handle']>[1]>()
+    // the engine finishes only once both attachments are in it, and then each when this test says so
+    const inEngine = new Map<string, () => void>()
+    let bothIn: () => void = () => undefined
+    const both = new Promise<void>((resolve) => (bothIn = resolve))
+    registerAttachmentIpc({
+      handle: (ch, fn) => void handlers.set(ch, fn),
+      runEngine: async (_cmd, args) => {
+        const name = args[args.indexOf('--name') + 1]
+        const asset = `work/assets/attach-${String(inEngine.size).padStart(8, '0')}-shot.png`
+        writeFileSync(join(dir, ...asset.split('/')), '')
+        writeFileSync(join(dir, ...asset.split('/')) + '.attach.json', JSON.stringify({ asset, name, kind: 'image', bytes: 1 }))
+        await new Promise<void>((resolve) => {
+          inEngine.set(name, resolve)
+          if (inEngine.size === 2) bothIn()
+        })
+        return { asset }
+      },
+      log: () => undefined,
+      projectDir,
+      readProject: async () => ({ broll: [] }) as any,
+      reserve: (s, fn) => jobs.share(s, fn),
+      clipboardImage: async () => null,
+      choose: async () => null
+    })
+    // the handlers are registered as returning unknown (Electron's ipcMain.handle); attachData returns this
+    const shot = (name: string) => handlers.get('notes:attachData')!({} as IpcMainInvokeEvent, slug, { name, mime: 'image/png', bytes: new Uint8Array([1]) }) as Promise<AttachResult>
+    const first = shot('one.png')
+    const second = shot('two.png')
+    // a refused one ends the race with its error
+    await Promise.race([both, first, second])
+    expect(() => jobs.start(slug, 'rerender', async () => ({ summary: 'never' }))).toThrow(expect.objectContaining({ code: 'BUSY' }))
+    await expect(jobs.hold(slug, async () => undefined)).rejects.toMatchObject({ code: 'BUSY' })
+    inEngine.get('one.png')!()
+    expect((await first).attached).toHaveLength(1)
+    // the one still running keeps the lock that tells tools run by hand to stay out
+    expect(existsSync(join(dir, OWNER_LOCK))).toBe(true)
+    inEngine.get('two.png')!()
+    expect((await second).attached).toHaveLength(1)
+    expect(existsSync(join(dir, OWNER_LOCK))).toBe(false)
+    await expect(jobs.hold(slug, async () => 'edited')).resolves.toBe('edited')
+  })
+})
+
 describe('a job whose engine would not stop', () => {
   it('keeps the video closed, its partial version in place and app.json as the job left it', async () => {
     const { slug, dir, partial, jobs, id, appJsonWhileRunning } = await stuckVideo()
@@ -62,6 +182,8 @@ describe('a job whose engine would not stop', () => {
     expect(existsSync(join(partial, '.rendering'))).toBe(true)
     expect(readFileSync(join(dir, 'app.json'), 'utf8')).toBe(appJsonWhileRunning)
     expect(JSON.parse(appJsonWhileRunning).job.id).toBe(id)
+    // the job never lets go of the project, so the engine and AI CLIs run by hand stay out too
+    expect(existsSync(join(dir, OWNER_LOCK))).toBe(true)
     // other videos are not affected
     expect(jobs.isClosed('another-reel')).toBe(false)
   })
@@ -82,8 +204,7 @@ describe('a job whose engine would not stop', () => {
       readProject: async () => {
         throw new Error('a closed video is never read')
       },
-      busy: (s) => jobs.isClosed(s),
-      refuse: (s) => jobs.refuseIfBusy(s),
+      reserve: (s, fn) => jobs.share(s, fn),
       clipboardImage: async () => ({ mime: 'image/png', bytes: new Uint8Array([1]) }),
       choose: async () => ['/tmp/a.png']
     })

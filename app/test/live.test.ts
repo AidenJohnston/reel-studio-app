@@ -138,4 +138,27 @@ describe('job manager (main): the contract on the wire', () => {
     expect(statuses.some((e) => e.type === 'status' && typeof e.secondsLeft === 'number' && e.secondsLeft > 0)).toBe(true)
     expect(existsSync(projectDir(slug))).toBe(true)
   })
+
+  it('a manual edit and a note never run on one video at once', async () => {
+    setupPaths()
+    const slug = 'one-lane'
+    mkdirSync(projectDir(slug), { recursive: true })
+    const jobs = createJobManager(() => undefined, () => undefined)
+    let release!: () => void
+    let saving!: () => void
+    const inside = new Promise<void>((r) => (saving = r))
+    const editing = jobs.hold(slug, () => { saving(); return new Promise<void>((r) => (release = r)) })
+    await inside
+    expect(readFileSync(join(projectDir(slug), 'work', '.owner.lock'), 'utf8')).toBeTruthy()
+    expect(() => jobs.start(slug, 'note', async () => ({ summary: 'ok' }))).toThrow(expect.objectContaining({ code: 'BUSY' }))
+    release()
+    await editing
+    let finish!: (r: { summary: string }) => void
+    const note = new Promise<{ summary: string }>((r) => (finish = r))
+    jobs.start(slug, 'note', () => note)
+    await expect(jobs.hold(slug, async () => 'saved')).rejects.toMatchObject({ code: 'BUSY' })
+    finish({ summary: 'ok' })
+    await jobs.forSlug(slug)?.done
+    await expect(jobs.hold(slug, async () => 'saved')).resolves.toBe('saved')
+  })
 })
