@@ -1,0 +1,12 @@
+# The last matching line wins.
+*                         @SamGu-NRX
+
+/LICENSE                  @getcurate/legal
+/NOTICE.md                @getcurate/legal
+/CLA.md                   @getcurate/legal
+/THIRD_PARTY.md           @getcurate/legal
+/engine/THIRD_PARTY.md    @getcurate/legal
+/packaging/licenses/      @getcurate/legal
+/SECURITY.md              @getcurate/legal
+
+/.github/CODEOWNERS       @SamGu-NRX @getcurate/legal
