@@ -91,7 +91,7 @@ export function Reel({ slug, go, fresh }: { slug: string; go: Go; fresh?: boolea
     return reel.jobs.onEvent((e) => {
       if (e.slug !== slug) return
       if (e.type === 'status' || e.type === 'reply' || e.type === 'tool' || e.type === 'moment') setJob((cur) => reduceLive(cur ?? EMPTY_LIVE, e))
-      // a quick preview of the change: play it in the phone until the full-quality version is done
+      // a quick preview of the change: play it in the phone until its version is saved
       else if (e.type === 'render' && e.draft) {
         setJob((cur) => reduceLive(cur ?? EMPTY_LIVE, e))
         void load()
