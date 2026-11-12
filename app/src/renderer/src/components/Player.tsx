@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 import { clock } from '../../../shared/progress'
+import { BOX_PAD, SIZE_PER_EM, type Measure } from '../../../shared/caption-fit'
+import { fitLook, type SubtitleLook } from '../../../shared/caption-presets'
 import { Icon } from './icons'
 import { reel } from '../api'
 
@@ -18,54 +20,67 @@ export function markDraggingOut(): void {
 }
 export const draggingOut = (): boolean => !!(window as { __rsDraggingOut?: boolean }).__rsDraggingOut
 
-/** The subtitle look, in the engine's own units (1080 x 1920 frame). */
-export interface SubtitleLook {
-  size: number
-  position: number
-  color: string
-  outlineColor: string
-  outline: number
-  box: boolean
-  upper: boolean
+const ENGINE_WIDTH = 1080
+const SUB_FONT = "'Reel Subtitles'"
+let subFontReady = false
+const subFontLoad = document.fonts.load(`600 16px ${SUB_FONT}`).then(() => {
+  subFontReady = true
+})
+
+/** Widths come from the subtitle face, so the line breaks wait until it has loaded (it loads once). */
+function useSubtitleFont(): boolean {
+  const [ready, setReady] = useState(subFontReady)
+  useEffect(() => {
+    if (!ready) void subFontLoad.then(() => setReady(true))
+  }, [ready])
+  return ready
 }
 
-export const ENGINE_WIDTH = 1080
-const BOX_PAD = 18 // engine captions.BOX_PAD
-
-export function lookFromStyle(st: Record<string, unknown> | undefined): SubtitleLook {
-  const s = st ?? {}
-  return {
-    size: Number(s.size ?? 105),
-    position: Number(s.position ?? 0.75),
-    color: String(s.color ?? '#FFFFFF'),
-    outlineColor: String(s.outlineColor ?? '#000000'),
-    outline: Number(s.outline ?? 8),
-    box: !!s.box,
-    upper: (s.case ?? 'upper') === 'upper'
-  }
+let measureCtx: CanvasRenderingContext2D | null = null
+/** The engine's Measurer.width, in the browser: the face at ASS size `size`, plus the outline on both sides. */
+const measure: Measure = (text, size, outline) => {
+  measureCtx ??= document.createElement('canvas').getContext('2d')!
+  measureCtx.font = `600 ${size / SIZE_PER_EM}px ${SUB_FONT}`
+  return measureCtx.measureText(text).width + 2 * outline
 }
 
-/** The engine's subtitle look drawn in CSS at the size of `width` (the preview's width in px). */
-export function SubtitleSample({ look, text, width, testid }: { look: SubtitleLook; text: string; width: number; testid?: string }) {
+/**
+ * The engine's subtitle look drawn in CSS at the size of `width` (the preview's width in px), with the lines
+ * broken where the engine breaks them. The sample shows the moment word `lit` (counted from 0) is spoken, so
+ * a highlight lights that word.
+ */
+export function SubtitleSample({ look, text, width, testid, lit = 0 }: { look: SubtitleLook; text: string; width: number; testid?: string; lit?: number }) {
+  const fontReady = useSubtitleFont()
   const k = width / ENGINE_WIDTH
-  const fontSize = look.size * k
-  const outline = Math.max(0.6, look.outline * k)
+  const fit = fitLook(look, text, measure)
   const style: React.CSSProperties = {
     top: `${look.position * 100}%`,
-    fontSize,
+    fontSize: (fit.size / SIZE_PER_EM) * k,
+    lineHeight: SIZE_PER_EM,
     color: look.color,
-    textTransform: look.upper ? 'uppercase' : 'none'
+    visibility: fontReady ? undefined : 'hidden'
   }
   if (look.box) {
-    const pad = Math.max(look.outline, BOX_PAD) * k
-    Object.assign(style, { background: look.outlineColor, padding: `${pad * 0.35}px ${pad}px` })
+    // libass draws the box as the outline: that much padding all round each line.
+    Object.assign(style, { background: look.outlineColor, padding: Math.max(look.outline, BOX_PAD) * k })
   } else {
     // Stroke is centred on the glyph edge, so twice the engine's outline, painted under the fill.
-    Object.assign(style, { WebkitTextStroke: `${outline * 2}px ${look.outlineColor}`, paintOrder: 'stroke fill' })
+    Object.assign(style, { WebkitTextStroke: `${Math.max(0.6, look.outline * k) * 2}px ${look.outlineColor}`, paintOrder: 'stroke fill' })
   }
   return (
-    <div className="sub-sample" style={style} data-testid={testid} aria-hidden>
-      {text}
+    <div className={`sub-sample${look.pop ? ' pop' : ''}`} style={style} data-testid={testid} data-lines={fit.lines.length} aria-hidden>
+      {fit.lines.map((line, i) => {
+        const words = line.split(' ')
+        const at = lit - fit.lines.slice(0, i).reduce((n, l) => n + l.split(' ').length, 0)
+        if (!look.highlight || at < 0 || at >= words.length) return <span key={i}>{line}</span>
+        return (
+          <span key={i}>
+            {words.slice(0, at).map((w) => `${w} `).join('')}
+            <span style={{ color: look.highlight }}>{words[at]}</span>
+            {at + 1 < words.length ? ` ${words.slice(at + 1).join(' ')}` : ''}
+          </span>
+        )
+      })}
     </div>
   )
 }
@@ -115,7 +130,7 @@ export function PhonePlayer({
   /** First arrival after Working: start playing, muted, with a "Tap for sound" chip. */
   autoPlayMuted?: boolean
   /** Live preview of the subtitle style (the drawer). */
-  subtitle?: { look: SubtitleLook; text: string } | null
+  subtitle?: { look: SubtitleLook; text: string; lit?: number } | null
   /** Faint Instagram buttons + caption area over the video. */
   instagram?: boolean
   caption?: string
@@ -240,7 +255,7 @@ export function PhonePlayer({
               <video className={`raw-video on${stillMirrored ? ' mirrored' : ''}`} key={still} src={still} preload="auto" muted playsInline disablePictureInPicture aria-hidden />
             )}
             {holdingOriginal && <div className="phone-tag">Original</div>}
-            {subtitle && !holdingOriginal && <SubtitleSample look={subtitle.look} text={subtitle.text} width={width} testid="sub-preview" />}
+            {subtitle && !holdingOriginal && <SubtitleSample look={subtitle.look} text={subtitle.text} lit={subtitle.lit} width={width} testid="sub-preview" />}
             {instagram && !holdingOriginal && <InstagramOverlay caption={caption} />}
             {!playing && !holdingOriginal && !(still && subtitle) && (
               <button className="big-play" onClick={toggle} aria-label="Play" data-testid="play">
