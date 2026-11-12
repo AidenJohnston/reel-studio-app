@@ -109,6 +109,16 @@ def cmd_moments(args):
     return moments.run(_project(args), root=Path(args.root) if args.root else None, draft=not args.no_draft)
 
 
+def cmd_save_version(args):
+    from . import versions
+    return versions.save(_project(args), root=Path(args.root) if args.root else None)
+
+
+def cmd_export(args):
+    from . import versions
+    return versions.export(_project(args), root=Path(args.root) if args.root else None, version=args.version)
+
+
 def cmd_captions(args):
     from . import captions
     return captions.write_for_project(_project(args))
@@ -355,6 +365,11 @@ def build_parser() -> argparse.ArgumentParser:
     sp = add("moments", cmd_moments, "stills of what the last edit changed, then the window around them, then the draft")
     sp.add_argument("--mark", action="store_true", help="only record the project as it is as the state shown")
     sp.add_argument("--no-draft", action="store_true", help="stop after the stills and the window")
+    sp.add_argument("--root")
+    sp = add("save-version", cmd_save_version, "save the edit as a version from its draft (no full-quality render)")
+    sp.add_argument("--root")
+    sp = add("export", cmd_export, "the full-quality file: reused when nothing changed, else rendered once")
+    sp.add_argument("--version", type=int, help="an earlier version's own export instead")
     sp.add_argument("--root")
     add("captions", cmd_captions, "write the caption file only (debug)")
     add("doctor", cmd_doctor, "check the install")
