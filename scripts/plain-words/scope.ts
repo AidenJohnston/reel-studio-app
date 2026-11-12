@@ -209,6 +209,7 @@ export const scope: Scope = {
     { file: 'ai/src/index.ts', text: 'Your Claude Code app is not ready.', reason: "the route through her own Claude Code or Codex app, owned by the ai-setup lane: the app's real name is what she installs and opens" },
     { file: 'ai/src/index.ts', text: 'Your Codex app is not ready.', reason: "the route through her own Claude Code or Codex app, owned by the ai-setup lane: the app's real name is what she installs and opens" },
     { file: 'ai/src/index.ts', text: 'Connect your Claude Code app or Codex app as your editor first.', reason: "the route through her own Claude Code or Codex app, owned by the ai-setup lane: the app's real name is what she installs and opens" },
+    { file: 'app/src/renderer/src/screens/FirstRun.tsx', text: 'Connect your own Claude Code or Codex app once, and it picks your best takes, adds pictures and makes the changes you ask for.', reason: "names the apps creators already have, by decision (Nov 12): the first run points at connecting their own" },
     { file: 'app/src/main/codex-fetch.ts', text: 'unpacked package has no bin/codex', reason: "a developer detail for the log beside FETCH_MESSAGES.failed, which is what she reads" }
   ]
 }
