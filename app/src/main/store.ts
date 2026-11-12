@@ -213,13 +213,16 @@ const VIDEO_NAMES = ['export.mp4', 'draft.mp4']
 export async function listVersions(dir: string): Promise<VersionInfo[]> {
   const vdir = join(dir, 'versions')
   let names: string[] = []
+  let saved: number
   try {
     names = await fs.readdir(vdir)
+    saved = Number(JSON.parse(await fs.readFile(join(dir, 'project.json'), 'utf8')).version) || 0
   } catch {
     return []
   }
-  // docs/versions.md: a version is a `vN` folder with `export.mp4`. Drafts live in `versions/preview/`
-  // and are overwritten; they only show (as n = 0, "Preview") when no final version exists yet,
+  // docs/versions.md: a version is a `vN` folder with `export.mp4`, N up to project.json's `version`
+  // (a higher one is a render that was never saved, which the next final render replaces). Drafts
+  // live in `versions/preview/` and are overwritten; they only show (as n = 0, "Preview") when no final version exists yet,
   // e.g. when an AI run's final render failed.
   const out: VersionInfo[] = []
   const push = async (n: number, d: string, video: string): Promise<void> => {
@@ -236,7 +239,7 @@ export async function listVersions(dir: string): Promise<VersionInfo[]> {
   }
   for (const name of names) {
     const m = /^v(\d+)$/.exec(name)
-    if (!m) continue
+    if (!m || Number(m[1]) > saved) continue
     const d = join(vdir, name)
     const video = join(d, 'export.mp4')
     if (!existsSync(video) || existsSync(join(d, '.rendering'))) continue
@@ -265,6 +268,10 @@ export async function cleanPartialVersions(dir: string): Promise<string[]> {
   } catch {
     return removed
   }
+  // a folder up to project.json's version is a saved version, and stays even with a file missing
+  // (render.py never encodes into it); null: project.json can't be read, so only the files decide
+  const p = await readJson<{ version?: unknown } | null>(join(dir, 'project.json'), null)
+  const saved = p ? Number(p.version) || 0 : null
   for (const name of names) {
     // The engine's scratch previews (docs/versions.md) are the engine's to overwrite (review 31).
     if (name === PREVIEW_DIR) continue
@@ -278,10 +285,10 @@ export async function cleanPartialVersions(dir: string): Promise<string[]> {
       }
       continue
     }
+    const n = /^v(\d+)$/.exec(name)
     const finished =
-      /^v\d+$/.test(name) &&
-      VIDEO_NAMES.some((v) => existsSync(join(d, v))) &&
-      !existsSync(join(d, '.rendering'))
+      !!n &&
+      ((saved !== null && Number(n[1]) <= saved) || (VIDEO_NAMES.some((v) => existsSync(join(d, v))) && !existsSync(join(d, '.rendering'))))
     if (!finished) {
       await fs.rm(d, { recursive: true, force: true })
       removed.push(d)
@@ -516,7 +523,12 @@ export async function detail(slug: string): Promise<ProjectDetail> {
   const words = await readWords(dir, project)
   const kept = keptIds(words, project.cut?.keep)
   const st = await readAppState(slug)
-  const captionLines = readCaptionLines(await readJson<unknown>(join(dir, 'work', 'captions.json'), null))
+  // the lines of the saved version (or of the preview before there is one): each render keeps its
+  // caption report beside its video (docs/versions.md); a version made before that left it in work/
+  const shown = join(dir, 'versions', project.version ? `v${project.version}` : PREVIEW_DIR)
+  const captionLines = readCaptionLines(
+    (await readJson<unknown>(join(shown, 'captions.json'), null)) ?? (await readJson<unknown>(join(dir, 'work', 'captions.json'), null))
+  )
   const brollThumbs: Record<string, string> = {}
   for (const b of project.broll ?? []) {
     const a = typeof b.asset === 'string' ? b.asset : ''

@@ -322,7 +322,7 @@ def normalize(ctx, x: np.ndarray, work: Path, tag: str = "mix") -> tuple[np.ndar
 
 def build_audio(ctx, voice_wav) -> Path:
     """Cut voice wav (output timeline) + project.music -> work/audio/mix-<hash>.wav at -14 LUFS.
-    Writes work/audio/mix.json with the measured numbers."""
+    Writes the measured numbers beside the mix (mix-<sig>.json)."""
     voice_wav = Path(voice_wav)
     work = Path(ctx.work) / "audio"
     work.mkdir(parents=True, exist_ok=True)
@@ -345,7 +345,7 @@ def build_audio(ctx, voice_wav) -> Path:
                                    track.stat().st_mtime_ns if track else None, offset], sort_keys=True,
                                   default=str).encode()).hexdigest()[:12]
     out = work / f"mix-{sig}.wav"
-    rep_path = work / "mix.json"
+    rep_path = out.with_suffix(".json")
     if out.exists() and rep_path.exists():
         return out
     rep = {"duration": round(dur, 3), "music": None}
@@ -399,10 +399,13 @@ def build_audio(ctx, voice_wav) -> Path:
     old = sorted((p for p in work.glob("mix-*.wav") if p != out), key=lambda p: p.stat().st_mtime)
     for p in old[:-1]:
         p.unlink(missing_ok=True)
+        p.with_suffix(".json").unlink(missing_ok=True)
     rep["file"] = str(out)
     rep["truePeakDb"] = round(true_peak_db(mix), 2)
     rep["clipped"] = bool(np.abs(mix).max() >= 0.999)
-    rep_path.write_text(json.dumps(rep, indent=1), encoding="utf-8")
+    part = rep_path.with_suffix(".part.json")
+    part.write_text(json.dumps(rep, indent=1), encoding="utf-8")
+    part.replace(rep_path)
     report(ctx, "music", 100, "Balancing the sound")
     return out
 
