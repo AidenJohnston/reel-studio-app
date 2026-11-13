@@ -170,6 +170,21 @@ describe('project store', () => {
     expect((await listVersions(dir)).map((v) => [v.n, v.draft])).toEqual([[1, false]])
   })
 
+  it('shows a version saved from its draft, and its full-quality file once it is exported', async () => {
+    setupPaths()
+    await ensureRoot()
+    const dir = fakeProject('zeta', { versions: [1] })
+    const v2 = join(dir, 'versions', 'v2')
+    mkdirSync(v2, { recursive: true })
+    for (const f of ['project.json', 'inputs.json', 'draft.mp4', 'cover.png']) writeFileSync(join(v2, f), 'x')
+    const listed = await listVersions(dir)
+    expect(listed.map((v) => [v.n, v.draft])).toEqual([[1, false], [2, true]])
+    expect(listed[1].videoPath).toBe(join(v2, 'draft.mp4'))
+    expect(listed[1].cover).toBeTruthy()
+    writeFileSync(join(v2, 'export.mp4'), 'final')
+    expect((await listVersions(dir)).at(-1)).toMatchObject({ n: 2, draft: false, videoPath: join(v2, 'export.mp4') })
+  })
+
   it('recovers a project that was mid-render when the app quit', async () => {
     setupPaths()
     await ensureRoot()
