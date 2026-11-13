@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import type { LibraryFile, ProjectDetail, ProjectJson, VersionInfo, Word } from '../../../shared/api'
+import type { CoverCandidate, LibraryFile, ProjectDetail, ProjectJson, VersionInfo, Word } from '../../../shared/api'
 import { rangesKeepingOrder } from '../../../shared/cut'
 import { describeChange } from '../../../shared/describe'
 import { isMirrored, withMirror } from '../../../shared/mirror'
@@ -7,6 +7,8 @@ import { reel, userMessage } from '../api'
 import { useNotify } from '../App'
 import { IS_MAC } from '../components/ui'
 import { Icon } from '../components/icons'
+import { CoverPicks } from '../components/CoverPicks'
+import { coverMoments } from '../../../shared/cover'
 import { SubtitleSample, lookFromStyle, type SubtitleLook } from '../components/Player'
 import { SubtitleLines } from '../components/SubtitleLines'
 import { previewText, subtitleLines } from '../../../shared/subtitle-lines'
@@ -312,6 +314,30 @@ export function ShowMeHow({
   const wordById = useMemo(() => new Map(d.words.map((w) => [w.id, w])), [d.words])
 
   const coverTime = Number(p.cover?.atSourceTime ?? 0) || 0
+  const coverSource = p.cover?.source ?? d.project.sources?.[0]?.id ?? 's1'
+  // One look per opened drawer, with the cut as it is when the Cover tab first opens.
+  const coverPicks = useRef<Promise<CoverCandidate[]> | null>(null)
+  const loadCoverPicks = () => {
+    if (!coverPicks.current) {
+      const moments = coverMoments(d.words, kept, coverSource)
+      coverPicks.current = moments.length ? reel.projects.coverCandidates(d.slug, moments, coverSource) : Promise.resolve([])
+    }
+    return coverPicks.current
+  }
+  // The engine makes the stills from the saved project: a flip not saved yet is shown on them instead.
+  const savedFlip = d.project.sources?.find((s) => s.id === coverSource)?.mirror === true
+  const pendingFlip = p.sources?.find((s) => s.id === coverSource)?.mirror === true
+  // Closing the drawer stops a look still running (main waits for the engine to exit). The stopped look
+  // is forgotten, so an effect that runs again (React's development double run) starts a new one
+  // instead of showing "Stopped.".
+  useEffect(
+    () => () => {
+      if (!coverPicks.current) return
+      coverPicks.current = null
+      void reel.projects.stopCoverCandidates(d.slug)
+    },
+    [d.slug]
+  )
   const sourceDuration = d.project.sources?.[0]?.duration ?? 60
   const hashtags = (Array.isArray(p.post?.hashtags) ? p.post!.hashtags : [])
     .map((h) => String(h))
@@ -638,17 +664,26 @@ export function ShowMeHow({
           {tab === 'cover' && (
             <div className="stack">
               {version?.cover ? <img className="cover-img" src={version.cover} alt="Cover" /> : <p className="muted-sm">No cover yet.</p>}
-              <h3 style={{ marginTop: 6 }}>Pick the moment for your cover</h3>
+              <CoverPicks
+                load={loadCoverPicks}
+                waiting={coverMoments(d.words, kept, coverSource).length}
+                chosen={coverTime}
+                flipped={pendingFlip !== savedFlip}
+                onPick={(c) => set('cover', { ...(p.cover ?? { text: null }), atSourceTime: c.atSourceTime, source: c.source, exact: null, manual: true })}
+              />
+              <h3 style={{ marginTop: 6 }}>Or pick any moment</h3>
               <input
                 type="range"
                 className="slider"
                 aria-label="Moment for your cover"
                 min={0}
                 max={Math.max(1, Math.floor(sourceDuration))}
-                step={0.5}
+                // A tenth of a second, the precision of the line under it, so a picked frame (3.067 s) puts the
+                // thumb where that line says (3.1), not at 3.0. Page Up/Down still move a tenth of the range.
+                step={0.1}
                 value={coverTime}
                 onChange={(e) =>
-                  set('cover', { ...(p.cover ?? { source: 's1', text: null }), atSourceTime: Number(e.target.value) } as ProjectJson['cover'])
+                  set('cover', { ...(p.cover ?? { source: 's1', text: null }), atSourceTime: Number(e.target.value), exact: null, manual: null } as ProjectJson['cover'])
                 }
               />
               <p className="muted-sm">At {coverTime.toFixed(1)} seconds into your video.</p>

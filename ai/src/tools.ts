@@ -1156,7 +1156,11 @@ const tools: ToolDef[] = [
         if (p.sources.length && !p.sources.some((s) => s.id === src)) return `unknown source ${src}`;
         // a frame the model LOOKED at stays put; a blind time lets the engine search ~1.5 s around it
         const seen = (ctx.state.coverCandidates ?? []).some((c) => Math.abs(c - args.atSourceTime) < 0.01);
-        p.cover = { ...p.cover, atSourceTime: args.atSourceTime, source: src, text: args.text ?? null, exact: seen ? true : null };
+        // A text edit keeps the creator's frame; a different time or source starts a new pick.
+        const manual = p.cover.manual && p.cover.atSourceTime !== null &&
+          Math.abs(p.cover.atSourceTime - args.atSourceTime) < 0.01 &&
+          (p.cover.source ?? p.sources[0]?.id ?? 's1') === src ? true : null;
+        p.cover = { ...p.cover, atSourceTime: args.atSourceTime, source: src, text: args.text ?? null, exact: seen ? true : null, manual };
       });
       return { content: { ok: true }, summary: 'Picked a cover' };
     },
