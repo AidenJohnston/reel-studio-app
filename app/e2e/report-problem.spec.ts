@@ -118,8 +118,9 @@ test('Report a problem: review, send, and the way out when sending fails', async
     await expect(page.getByTestId('report-what')).not.toHaveAttribute('aria-invalid', 'true')
     await expect(page.getByTestId('report-field-error')).toContainText('not an email address')
     await expect(page.getByTestId('report-send')).toHaveCount(0) // the form has no Send: only a fresh review does
-    await page.keyboard.press('Control+A')
-    await page.keyboard.type('second.try@example.com') // typed where focus landed
+    // Replace the address with fill(), not a select-all shortcut, so the test does not depend on the platform's keys.
+    // That focus landed here is checked above.
+    await page.getByTestId('report-email').fill('second.try@example.com')
     fake.status.code = 201
     fake.status.body = undefined
     const before = fake.got.length
