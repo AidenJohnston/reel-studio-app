@@ -1,6 +1,7 @@
 import { app, BrowserWindow, clipboard, dialog, ipcMain, net, safeStorage, shell, type IpcMainInvokeEvent } from 'electron'
 import { existsSync, promises as fs, appendFileSync, mkdirSync, realpathSync } from 'node:fs'
 import { basename, dirname, join } from 'node:path'
+import { clipboardFiles, filesFromArgv } from './intake'
 import {
   binDir,
   engineDir,
@@ -391,6 +392,8 @@ async function exportVersion(slug: string, n: number): Promise<ExportResult> {
 // ---- IPC ----------------------------------------------------------------------------------------
 function registerIpc(): void {
   handle('app:info', () => appInfo())
+  handle('app:clipboardFiles', () => clipboardFiles())
+  handle('app:takeOpenFiles', async () => (await loadSettings()).firstRunDone ? pendingOpenFiles.splice(0) : [])
   handle('app:finishFirstRun', async () => {
     await saveSettings({ firstRunDone: true })
   })
@@ -783,16 +786,33 @@ function createWindow(): void {
   else void win.loadFile(join(__dirname, '../renderer/index.html'))
 }
 
+const pendingOpenFiles: string[] = []
+function queueOpenFiles(files: string[]): void {
+  pendingOpenFiles.push(...files)
+  // Early open-file events wait, like key links, until IPC and the app's services are ready.
+  if (!ready) return
+  if (!win || win.isDestroyed()) {
+    createWindow() // The new renderer drains pendingOpenFiles on mount.
+  } else {
+    if (win.isMinimized()) win.restore()
+    win.focus()
+    win.webContents.send('app:filesAvailable')
+  }
+}
+app.on('open-file', (event, path) => {
+  event.preventDefault()
+  queueOpenFiles([path])
+})
+if (process.platform === 'win32') queueOpenFiles(filesFromArgv(process.argv, process.cwd(), !!process.defaultApp))
+
 const gotLock = TEST || app.requestSingleInstanceLock()
 if (!gotLock) app.quit()
-app.on('second-instance', (_e, argv) => {
+app.on('second-instance', (_e, argv, cwd) => {
   // Windows: a reelstudio:// link opened while the app runs arrives as the new instance's command line.
   const link = argv.find((a) => a.toLowerCase().startsWith(`${PROTOCOL}:`))
   if (link) acceptKeyLink(link)
-  if (win) {
-    if (win.isMinimized()) win.restore()
-    win.focus()
-  }
+  // Also brings the window back (or makes a new one) when the launch opened no file.
+  queueOpenFiles(filesFromArgv(argv, cwd, !!process.defaultApp))
 })
 
 app.whenReady().then(async () => {
