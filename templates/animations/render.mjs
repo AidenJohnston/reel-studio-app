@@ -206,7 +206,7 @@ function startEncoder(ffmpeg, fps, outFile) {
 export async function renderAnimation(opts) {
   const { template, adapter, signal } = opts;
   if (!adapter) throw renderError('NO_RENDERER', 'renderAnimation needs an adapter (createElectronAdapter or createPlaywrightAdapter)');
-  const fps = clampInt(opts.fps ?? DEFAULT_FPS, 1, 120);
+  const fps = Math.min(120, Math.max(1, Number(opts.fps ?? DEFAULT_FPS) || 1));
   const animationsDir = opts.templatesRoot ? path.join(opts.templatesRoot, 'animations') : ANIMATIONS_DIR;
   const meta = loadMeta(template, animationsDir);
   const { params: checked, warnings } = prepareParams(meta, opts.params || {});
@@ -263,7 +263,6 @@ function withMovExt(p) {
   const ext = path.extname(p);
   return ext.toLowerCase() === OUTPUT_EXT ? p : (ext ? p.slice(0, -ext.length) : p) + OUTPUT_EXT;
 }
-const clampInt = (v, a, b) => Math.min(b, Math.max(a, Math.round(Number(v) || a)));
 
 export function renderError(code, message, userMessage = 'I could not make that animation. Try a picture or a text card instead.') {
   const e = new Error(message);

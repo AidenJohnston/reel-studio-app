@@ -97,6 +97,15 @@ def pick_version(project_dir: Path, proj: dict, root: Optional[Path] = None) -> 
 PREVIEW_DIR = "preview"
 
 
+def preview_fps(fps: float) -> float:
+    """The rate a draft or window preview renders at. Editing previews stay at 30 fps or under so they are
+    as fast as before projects kept their source rate; only the final export keeps it, up to 60. From 48
+    fps up a preview takes every other frame (60 -> 30, 59.94 -> 29.97, 50 -> 25), so motion stays even."""
+    if fps <= 30:
+        return fps
+    return fps / 2 if fps >= 48 else 30.0
+
+
 def preview_dir(project_dir: Path) -> Path:
     """versions/preview/: the ONE scratch folder every draft and window preview overwrites.
     Only a final render makes a user-visible version folder (docs/versions.md)."""
@@ -763,6 +772,8 @@ def run(project_dir: Path, draft: bool = False, window: Optional[str] = None,
     faces = source_faces(project_dir, proj)
 
     ctx = make_ctx(project_dir, proj, tl, draft, root, rwork)
+    if preview:
+        ctx.fmt["fps"] = preview_fps(float(ctx.fmt.get("fps") or 30))
     ctx.out_dir = vdir
     ctx.window = win
     timings = {}
@@ -803,7 +814,7 @@ def run(project_dir: Path, draft: bool = False, window: Optional[str] = None,
 
     # 3. captions
     fmt = proj["format"]
-    W, H, fps = int(fmt["width"]), int(fmt["height"]), float(fmt["fps"])
+    W, H, fps = int(fmt["width"]), int(fmt["height"]), float(ctx.fmt["fps"])
     ass_name, cap_report, font_path = None, [], None
     cap = proj.get("captions") or {}
     if cap.get("enabled", True):
@@ -897,7 +908,7 @@ def run(project_dir: Path, draft: bool = False, window: Optional[str] = None,
 
     result = {"version": version, "preview": preview, "versionDir": str(vdir), "file": str(out),
               "draft": draft, "window": list(win) if win else None, "firstLook": first_look,
-              "duration": round(dur, 3), "segments": len(segments), "encoder": encoder,
+              "duration": round(dur, 3), "fps": fps, "segments": len(segments), "encoder": encoder,
               "size": [out_w, out_h], "layers": len(layers), "zooms": len(zooms),
               "captions": len(cap_report), "warnings": warnings,
               "broll": [r for r in broll_report if r.get("fallback") or r.get("skipped") or r.get("remake")]}

@@ -138,4 +138,30 @@ describe('job manager (main): the contract on the wire', () => {
     expect(statuses.some((e) => e.type === 'status' && typeof e.secondsLeft === 'number' && e.secondsLeft > 0)).toBe(true)
     expect(existsSync(projectDir(slug))).toBe(true)
   })
+
+  it('asks for the video length only after init, not while a clip is being prepared inside it', async () => {
+    setupPaths()
+    const slug = 'prepared'
+    mkdirSync(projectDir(slug), { recursive: true })
+    let step = ''
+    const asked: string[] = []
+    const jobs = createJobManager(() => undefined, () => undefined, {
+      loadHistory: async () => ({ v: 1, phases: {} }),
+      saveHistory: async () => undefined,
+      mediaSeconds: async () => {
+        asked.push(step)
+        return 30
+      },
+      tickMs: 15
+    })
+    jobs.start(slug, 'first-edit', async (emit) => {
+      step = 'prepare'
+      emit({ type: 'status', message: 'Preparing your video', pct: 40, phase: 'prepare' })
+      step = 'listen'
+      emit({ type: 'status', message: 'Listening to your video', pct: 10, phase: 'listen' })
+      return { summary: 'ok', quiet: true }
+    })
+    await jobs.forSlug(slug)?.done
+    expect(asked).toEqual(['listen'])
+  })
 })

@@ -123,7 +123,7 @@ const runEngine: RunEngine = createEngineRunner({
 
 const host: EngineHost = {
   runEngine,
-  renderAnimation: (template, params, outPath) => renderAnimation(template, params, outPath),
+  renderAnimation: (template, params, outPath, fps) => renderAnimation(template, params, outPath, fps),
   captureWebsite: (url, outPath, opts) => captureWebsite(url, outPath, opts),
   reelStudioRoot
 }
@@ -268,6 +268,7 @@ async function appInfo(): Promise<AppInfo> {
       process.platform
     ),
     firstRunDone: s.firstRunDone,
+    fasterExports: s.fasterExports,
     engine: { mode: engineMode(), dir: engineDir(), python: pythonExe() },
     ai: aiSource,
     test: TEST,
@@ -279,13 +280,24 @@ function startFirstEdit(slug: string, initArgs: { title: string; files: string[]
   const dir = projectDir(slug)
   return jobs.start(slug, 'first-edit', async (emit, signal) => {
     if (initArgs && !existsSync(join(dir, 'project.json'))) {
+      const { fasterExports } = await loadSettings()
       emit({ type: 'status', message: 'Copying your video', pct: 0 })
       await runEngine(
         'init',
-        ['--project', dir, '--title', initArgs.title, '--slug', slug, ...initArgs.files],
-        (p) => emit({ type: 'status', message: 'Copying your video', pct: Math.round(p.pct * 0.01) }),
+        ['--project', dir, '--title', initArgs.title, '--slug', slug, ...(fasterExports ? ['--faster-exports'] : []), ...initArgs.files],
+        // A copy is instant. A clip whose frame timing varies is re-encoded first (engine init.py says
+        // "Preparing your video"), which can take minutes: that gets its own step with its real percent.
+        (p) =>
+          emit(
+            p.message === 'Preparing your video'
+              ? { type: 'status', message: p.message, pct: Math.round(p.pct), phase: 'prepare' }
+              : { type: 'status', message: 'Copying your video', pct: Math.round(p.pct * 0.01) }
+          ),
         signal
       )
+      await updateAppState(slug, (s) => {
+        delete s.importing
+      })
     }
     const provider = await ai.active().catch(() => null)
     // A render event with firstLook = the quick no-AI draft is ready while the AI keeps editing; the
@@ -391,6 +403,11 @@ async function exportVersion(slug: string, n: number): Promise<ExportResult> {
 // ---- IPC ----------------------------------------------------------------------------------------
 function registerIpc(): void {
   handle('app:info', () => appInfo())
+  handle('app:setFasterExports', async (_e, on: boolean) => {
+    if (typeof on !== 'boolean') throw { code: 'BAD_INPUT', userMessage: 'Choose whether to use faster exports.' }
+    await saveSettings({ fasterExports: on })
+    return appInfo()
+  })
   handle('app:finishFirstRun', async () => {
     await saveSettings({ firstRunDone: true })
   })
@@ -544,16 +561,20 @@ function registerIpc(): void {
     await updateAppState(slug, (s) => {
       s.status = 'working'
       s.title = title
+      s.importing = videos
     })
     const jobId = startFirstEdit(slug, { title, files: videos })
     return { slug, jobId, skipped }
   })
   handle('projects:resume', async (_e, slug: string) => {
     const dir = projectDir(slug)
-    if (!existsSync(join(dir, 'project.json'))) {
+    if (existsSync(join(dir, 'project.json'))) return { jobId: startFirstEdit(slug, null) }
+    // Stopped while the video was still being copied or prepared: do that again from the dropped videos.
+    const { title, importing } = await readAppState(slug)
+    if (!Array.isArray(importing) || !importing.length || !importing.every((f) => typeof f === 'string')) {
       throw { code: 'CANNOT_RESUME', userMessage: 'This video never finished copying. Delete it and drop the video in again.' }
     }
-    return { jobId: startFirstEdit(slug, null) }
+    return { jobId: startFirstEdit(slug, { title: title ?? titleFromFile(importing[0]), files: importing }) }
   })
   handle('projects:note', async (_e, slug: string, text: string, attachments?: unknown) => {
     const note = String(text ?? '').trim()

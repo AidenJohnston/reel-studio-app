@@ -96,9 +96,10 @@ export function createJobManager(broadcast: (e: JobEvent) => void, log: (s: stri
             job.message = e.message || job.message
             // Raw: per-step percents restart at 0; `overall` (progress.ts) is the whole job.
             if (typeof e.pct === 'number') job.pct = Math.max(0, Math.min(100, e.pct))
-            if (e.phase && slug && progress && !mediaAsked) {
+            // project.json exists once a phase after init starts: the estimate scales with it. Preparing a clip
+            // happens inside init, before project.json is written, so it never asks.
+            if (e.phase && e.phase !== 'prepare' && slug && progress && !mediaAsked) {
               mediaAsked = true
-              // project.json exists once a phase starts (after init): the estimate scales with it
               void progress.mediaSeconds(slug).then((s) => { mediaSec = s; tracker.setMedia(s) }).catch(() => undefined)
             }
             tracker.update(e.phase, e.phase ? e.pct : undefined)

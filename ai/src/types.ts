@@ -25,7 +25,7 @@ export interface ScriptResult { hook: string; script: string; onScreenText: stri
 export interface EngineProgress { stage: string; pct: number; message: string }
 export interface EngineHost {
   runEngine(command: string, args: string[], onProgress?: (p: EngineProgress) => void, signal?: AbortSignal): Promise<any>;
-  renderAnimation(template: string, params: Record<string, unknown>, outPath: string): Promise<string>;
+  renderAnimation(template: string, params: Record<string, unknown>, outPath: string, fps?: number): Promise<string>;
   reelStudioRoot(): string;
   /** Screenshot of a web page into outPath (PNG). Only the Electron app has one (offscreen window). */
   captureWebsite?(url: string, outPath: string, opts?: { layout?: 'phone' | 'desktop' }): Promise<CaptureResult>;

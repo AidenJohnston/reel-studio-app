@@ -5,7 +5,7 @@ import * as fsp from 'node:fs/promises';
 import * as path from 'node:path';
 import { ANIMATION_TEMPLATES, ENGINE_FED, alignWordTimes, itemTimes } from '../src/animations';
 import { executeTool, newToolState, toolByName, ToolContext } from '../src/tools';
-import { loadProject } from '../src/project';
+import { loadProject, saveProject } from '../src/project';
 import { StyleStore } from '../src/style';
 import { FakeHost, makeProject, tinyPng } from './helpers';
 
@@ -64,6 +64,18 @@ describe('word timing', () => {
 });
 
 describe('make_animation', () => {
+  it('fails if the project frame rate is omitted from an animation renderer request', async () => {
+    const { ctx, host, dir } = await ctxFor();
+    const project = await loadProject(dir);
+    project.format.fps = 60;
+    await saveProject(dir, project);
+    const result = await executeTool(ctx, 'make_animation', {
+      template: 'big-quote', params: { text: 'Keep moving' },
+    });
+    expect(result.isError).toBe(false);
+    expect(host.animations[0].fps).toBe(60);
+  });
+
   it('feeds wordTimes from the transcript and writes a .mov', async () => {
     const { ctx, host } = await ctxFor();
     // w48-w52 = "eighteen hours in the fridge"; older engine (no anim-context): approximate timings
