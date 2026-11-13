@@ -126,15 +126,17 @@ function honestSummary(r: Pick<RunAgentResult, 'finished' | 'stoppedBy'>, state:
   return `I ran out of time before I finished ${what}, so it may be only partly done. So far I: ${did.map((d) => d[0].toLowerCase() + d.slice(1)).join('; ')}. Tell me what still needs changing.`;
 }
 
-/** Undo what a failed note did to My style: rules it saved go, paused rules it turned back on are paused again
- * (StyleStore.undo). A rule removed or changed in My style since, or approved since, stays as the person left it.
- * Returns the words of each rule it could not undo. */
+/** Undo what a failed note did to My style: rules it saved are removed, paused rules it turned back on are paused
+ * again. A rule removed in My style since then stays removed. Returns the words of each rule it could not undo. */
 async function undoStyleRules(deps: EditorDeps, state: ToolState): Promise<string[]> {
   const left: string[] = [];
-  for (const c of state.styleChanges) {
-    await deps.style.undo(c).catch((e) => { if (e?.code !== 'NOT_FOUND') left.push(c.text); });
+  for (const [i, id] of state.styleRuleIds.entries()) {
+    await deps.style.remove(id).catch(() => { left.push(state.styleRulesAdded[i] ?? id); });
   }
-  state.styleChanges = []; state.styleRulesAdded = [];
+  for (const r of state.styleRulesResumed) {
+    await deps.style.update(r.id, { paused: true }).catch((e) => { if (e?.code !== 'NOT_FOUND') left.push(r.text); });
+  }
+  state.styleRuleIds = []; state.styleRulesAdded = []; state.styleRulesResumed = [];
   return left;
 }
 
