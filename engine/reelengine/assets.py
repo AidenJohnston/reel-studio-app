@@ -32,6 +32,7 @@ Errors raise EngineError with a plain-English userMessage. CLI (JSON lines on st
 from __future__ import annotations
 
 import html
+import http.client
 import io
 import ipaddress
 import json
@@ -45,7 +46,7 @@ from pathlib import Path
 from typing import Optional
 from urllib.error import HTTPError, URLError
 from urllib.parse import quote, urlencode, urlparse
-from urllib.request import HTTPRedirectHandler, Request, build_opener
+from urllib.request import HTTPHandler, HTTPRedirectHandler, HTTPSHandler, Request, build_opener
 
 from .compose_util import EngineError, ffmpeg_bin, log
 
@@ -65,11 +66,35 @@ def slugify(text: str, n: int = 60) -> str:
     return re.sub(r"-{2,}", "-", text).strip("-")[:n] or "image"
 
 
+_NAT64 = ipaddress.ip_network("64:ff9b::/96")
+# Local-use NAT64 (RFC 8215): where the IPv4 address sits depends on the network's prefix length,
+# so the whole range is refused.
+_LOCAL_NAT64 = ipaddress.ip_network("64:ff9b:1::/48")
+
+
 def _blocked_ip(ip: str) -> bool:
     a = ipaddress.ip_address(ip.split("%", 1)[0])
-    if isinstance(a, ipaddress.IPv6Address) and a.ipv4_mapped:
-        a = a.ipv4_mapped
+    if isinstance(a, ipaddress.IPv6Address):
+        if a in _LOCAL_NAT64:
+            return True
+        if a.ipv4_mapped:
+            a = a.ipv4_mapped
+        elif a in _NAT64:
+            a = ipaddress.IPv4Address(int(a) & 0xFFFFFFFF)
     return not a.is_global or a.is_multicast
+
+
+def _public_addrs(host: str, port: int) -> list[str]:
+    """Every address `host` resolves to, refusing the lot if any of them is not public."""
+    try:
+        infos = socket.getaddrinfo(host, port, proto=socket.IPPROTO_TCP)
+    except (socket.gaierror, UnicodeError) as e:
+        raise EngineError("NO_INTERNET", f"{host}: {e}", NO_NET) from None
+    for info in infos:
+        if _blocked_ip(info[4][0]):
+            raise EngineError("BLOCKED_HOST", f"refused {host} -> {info[4][0]} (not a public address)",
+                              "That link points at this computer or a private network, so I won't download it.")
+    return [info[4][0] for info in infos]
 
 
 def check_url(url: str) -> str:
@@ -82,16 +107,49 @@ def check_url(url: str) -> str:
                           "That isn't a web link to a picture. Copy the picture's address (it starts with https://).")
     if os.environ.get("REELENGINE_ALLOW_PRIVATE_FETCH") == "1":
         return url
-    try:
-        infos = socket.getaddrinfo(u.hostname, u.port or (443 if u.scheme.lower() == "https" else 80),
-                                   proto=socket.IPPROTO_TCP)
-    except (socket.gaierror, UnicodeError) as e:
-        raise EngineError("NO_INTERNET", f"{u.hostname}: {e}", NO_NET) from None
-    for info in infos:
-        if _blocked_ip(info[4][0]):
-            raise EngineError("BLOCKED_HOST", f"refused {u.hostname} -> {info[4][0]} (not a public address)",
-                              "That link points at this computer or a private network, so I won't download it.")
+    _public_addrs(u.hostname, u.port or (443 if u.scheme.lower() == "https" else 80))
     return url
+
+
+def _connect_public(address, *args):
+    """socket.create_connection that resolves once, checks, and connects only to the checked
+    addresses, so a name cannot answer differently between check_url and the connection."""
+    if os.environ.get("REELENGINE_ALLOW_PRIVATE_FETCH") == "1":
+        return socket.create_connection(address, *args)
+    host, port = address
+    err = None
+    for ip in _public_addrs(host, port):
+        try:
+            return socket.create_connection((ip, port), *args)
+        except OSError as e:
+            err = e
+    raise err
+
+
+def _pinned(conn_class):
+    class Pinned(conn_class):
+        def __init__(self, *a, **kw):
+            super().__init__(*a, **kw)
+            self._create_connection = _connect_public    # http.client's own hook; TLS still checks the name
+
+    return Pinned
+
+
+_PinnedHTTP = _pinned(http.client.HTTPConnection)
+_PinnedHTTPS = _pinned(http.client.HTTPSConnection)
+
+
+# Through a proxy (urllib reads the system's proxy settings) the proxy resolves the name, so only
+# check_url's check applies, and the proxy's own address is not refused.
+class _PinnedHTTPHandler(HTTPHandler):
+    def http_open(self, req):
+        return self.do_open(http.client.HTTPConnection if req.has_proxy() else _PinnedHTTP, req)
+
+
+class _PinnedHTTPSHandler(HTTPSHandler):
+    def https_open(self, req):
+        return self.do_open(http.client.HTTPSConnection if req._tunnel_host else _PinnedHTTPS, req,
+                            context=self._context)
 
 
 class _CheckedRedirects(HTTPRedirectHandler):
@@ -102,7 +160,7 @@ class _CheckedRedirects(HTTPRedirectHandler):
         return super().redirect_request(req, fp, code, msg, headers, newurl)
 
 
-_OPENER = build_opener(_CheckedRedirects())
+_OPENER = build_opener(_CheckedRedirects(), _PinnedHTTPHandler(), _PinnedHTTPSHandler())
 
 
 def _get(url: str, accept: str = "*/*", ua: str = API_UA, timeout: int = 30, limit: int = MAX_IMAGE_BYTES,

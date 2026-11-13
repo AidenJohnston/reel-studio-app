@@ -9,6 +9,7 @@ import http.server
 import json
 import os
 import shutil
+import socket
 import subprocess
 import sys
 import threading
@@ -171,6 +172,11 @@ class _Handler(http.server.SimpleHTTPRequestHandler):
             self.send_header("Location", "http://127.0.0.1:1/x.png")
             self.end_headers()
             return
+        if self.path.startswith("/redirect?to="):
+            self.send_response(302)
+            self.send_header("Location", self.path.split("=", 1)[1])
+            self.end_headers()
+            return
         super().do_GET()
 
     def log_message(self, *a):
@@ -220,6 +226,56 @@ def test_f5_redirect_to_loopback_refused(monkeypatch):
     with pytest.raises(EngineError) as e:
         h.redirect_request(None, None, 302, "Found", {}, "http://127.0.0.1/secret.png")
     assert e.value.code == "BLOCKED_HOST"
+
+
+def _resolves_as(monkeypatch, host, first, then):
+    """`host` answers `first` to its first lookup and `then` to every later one."""
+    monkeypatch.setenv("no_proxy", "*")              # a system proxy would do the lookups instead
+    real, answers = socket.getaddrinfo, [first]
+
+    def fake(h, port, *a, **kw):
+        if h != host:
+            return real(h, port, *a, **kw)
+        ip = answers.pop() if answers else then
+        return [(socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_TCP, "", (ip, port))]
+    monkeypatch.setattr(socket, "getaddrinfo", fake)
+
+
+def test_f5_a_name_that_rebinds_to_loopback_is_not_fetched(tmp_path, site, strict, monkeypatch):
+    _resolves_as(monkeypatch, "pics.example", "93.184.215.14", "127.0.0.1")
+    with pytest.raises(EngineError) as e:
+        assets.fetch_image(f"http://pics.example:{site.rsplit(':', 1)[1]}/pic.png", tmp_path)
+    assert e.value.code == "BLOCKED_HOST"
+
+
+class _V6Server(http.server.ThreadingHTTPServer):
+    address_family = socket.AF_INET6
+
+
+def test_f5_a_redirect_that_rebinds_to_loopback_is_not_followed(tmp_path, site, strict, monkeypatch):
+    # [::1] stands in for a public website; its redirect names a host that later answers 127.0.0.1
+    cdn = _V6Server(("::1", 0), functools.partial(_Handler, directory=str(tmp_path)))
+    threading.Thread(target=cdn.serve_forever, daemon=True).start()
+    real_blocked = assets._blocked_ip
+    monkeypatch.setattr(assets, "_blocked_ip", lambda ip: ip != "::1" and real_blocked(ip))
+    _resolves_as(monkeypatch, "inner.example", "93.184.215.14", "127.0.0.1")
+    target = f"http://inner.example:{site.rsplit(':', 1)[1]}/pic.png"
+    try:
+        with pytest.raises(EngineError) as e:
+            assets.fetch_image(f"http://[::1]:{cdn.server_port}/redirect?to={target}", tmp_path / "out")
+        assert e.value.code == "BLOCKED_HOST"
+    finally:
+        cdn.shutdown()
+
+
+@pytest.mark.parametrize("ip", ["64:ff9b::7f00:1", "64:ff9b::a9fe:a9fe", "64:ff9b:1::a00:1", "::ffff:127.0.0.1"])
+def test_f5_nat64_and_mapped_private_addresses_are_blocked(ip):
+    assert assets._blocked_ip(ip)
+
+
+def test_f5_nat64_public_address_is_allowed():
+    # an IPv6-only network (DNS64) reaches every IPv4-only website through 64:ff9b::/96
+    assert not assets._blocked_ip("64:ff9b::808:808")
 
 
 def test_f5_size_cap_and_image_check(tmp_path, site, monkeypatch):
