@@ -25,7 +25,7 @@ import time
 from pathlib import Path
 from typing import Optional
 
-from . import captions as capmod, cut as cutmod, project as projmod, safepath, tools
+from . import captions as capmod, cut as cutmod, project as projmod, proxy as proxymod, safepath, tools
 from .proto import EngineError, log, progress
 from .render_ctx import Layer, RenderCtx, Segment, ZoomSpan
 
@@ -469,8 +469,15 @@ def build_video_cmd(ctx: RenderCtx, segments: list, src_meta: dict, src_paths: d
             tm = HDR_CHAIN + "," if hdr and "zscale" in tools.filters() else ""
             per_seg = tm + reframe_filter(src, out_w, out_h, face, ctx.draft) + ",format=yuv420p"
         cmd += no_rotate_args(src)
-        if lane["seek"] > 0:
-            cmd += ["-ss", _f(lane["seek"])]
+        # A preview copy's clock runs `inputOffset` behind the original's (proxy.py: it has no
+        # sound that starts before the picture). Seek on its own clock and shift what is left, so its
+        # frames reach the trims below at the original's times; for an original both are as before.
+        off = float(src.get("inputOffset") or 0.0)
+        seek_in = max(0.0, lane["seek"] - off)
+        if seek_in > 0:
+            cmd += ["-ss", _f(seek_in)]
+        if seek_in + off - lane["seek"] > 1e-9:
+            cmd += ["-itsoffset", _f(seek_in + off - lane["seek"])]
         cmd += ["-i", str(src_paths[lane["source"]])]
         n = len(lane["segs"])
         head = f"[{li}:v]" + (pre + "," if pre else "")
@@ -761,6 +768,12 @@ def run(project_dir: Path, draft: bool = False, window: Optional[str] = None,
                               "I can't find the original video for this project. It may have been "
                               "moved or deleted.")
     faces = source_faces(project_dir, proj)
+    # The picture of a draft or window comes from each take's preview copy when it is finished
+    # (proxy.py); sound, the cover and every final read the originals.
+    if draft:
+        vmeta, vpaths, vfaces, video_from = proxymod.for_preview(project_dir, src_meta, src_paths, faces)
+    else:
+        vmeta, vpaths, vfaces, video_from = src_meta, src_paths, faces, {sid: "original" for sid in src_meta}
 
     ctx = make_ctx(project_dir, proj, tl, draft, root, rwork)
     ctx.out_dir = vdir
@@ -851,7 +864,7 @@ def run(project_dir: Path, draft: bool = False, window: Optional[str] = None,
     out = vdir / name
     out_part = rwork / (name + ".part")
     graph = rwork / ("graph_" + name.replace(".mp4", ".txt"))
-    cmd = build_video_cmd(ctx, segments, src_meta, src_paths, faces, out_w, out_h, layers, zooms,
+    cmd = build_video_cmd(ctx, segments, vmeta, vpaths, vfaces, out_w, out_h, layers, zooms,
                           ass_name, audio, audio_seek, dur, t_shift, encoder, out_part, graph)
     # The cover reads only the source and the project, never the encode's output: make it on a
     # thread while ffmpeg encodes (it used to add 3-9 s after the encode), and reuse it when nothing
@@ -865,15 +878,31 @@ def run(project_dir: Path, draft: bool = False, window: Optional[str] = None,
     def on_pct(p):
         progress(STAGE, 20 + 0.72 * p, "Making your video")
 
+    err = None
     try:
         err = tools.ffmpeg_progress(cmd, dur, on_pct, timeout=max(600, dur * 40), what="video render",
                                     cwd=rwork, user_message="I couldn't finish making your video. "
                                                             "Please try again.")
     except EngineError as exc:
-        if draft:
+        if not draft:
+            raise
+        if vpaths != src_paths:
+            # A damaged copy fails whatever encodes it: read the originals with the same encoder first,
+            # so a bad copy costs one retry and never marks a working encoder as failed.
+            log(f"# draft from the preview copies failed, retrying from the originals: {exc.message[-400:]}")
+            video_from = {sid: "original" for sid in src_meta}
+            cmd = build_video_cmd(ctx, segments, src_meta, src_paths, faces, out_w, out_h, layers, zooms,
+                                  ass_name, audio, audio_seek, dur, t_shift, encoder, out_part, graph)
+            try:
+                err = tools.ffmpeg_progress(cmd, dur, on_pct, timeout=max(600, dur * 40), what="video render",
+                                            cwd=rwork)
+            except EngineError as again:
+                exc = again
+        if err is None:
             log(f"# hardware draft path failed, retrying in software: {exc.message[-400:]}")
             warnings.append("The fast preview path didn't work on this computer, so I used the slower one.")
             failed_encoder, encoder = encoder, "libx264"
+            video_from = {sid: "original" for sid in src_meta}
             cmd = build_video_cmd(ctx, segments, src_meta, src_paths, faces, out_w, out_h, layers, zooms,
                                   ass_name, audio, audio_seek, dur, t_shift, encoder, out_part, graph,
                                   use_hw=False)
@@ -882,8 +911,6 @@ def run(project_dir: Path, draft: bool = False, window: Optional[str] = None,
             if failed_encoder != "libx264":
                 # Software worked where the GPU encoder did not: stop trying that encoder for a few days.
                 tools.mark_encoder_failed(failed_encoder)
-        else:
-            raise
     timings["encode"] = round(time.time() - t, 2)
     if font_path is not None:
         bad = check_fontselect(err, Path(font_path))
@@ -898,7 +925,7 @@ def run(project_dir: Path, draft: bool = False, window: Optional[str] = None,
     result = {"version": version, "preview": preview, "versionDir": str(vdir), "file": str(out),
               "draft": draft, "window": list(win) if win else None, "firstLook": first_look,
               "duration": round(dur, 3), "segments": len(segments), "encoder": encoder,
-              "size": [out_w, out_h], "layers": len(layers), "zooms": len(zooms),
+              "size": [out_w, out_h], "videoFrom": video_from, "layers": len(layers), "zooms": len(zooms),
               "captions": len(cap_report), "warnings": warnings,
               "broll": [r for r in broll_report if r.get("fallback") or r.get("skipped") or r.get("remake")]}
 
