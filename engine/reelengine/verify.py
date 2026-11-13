@@ -14,7 +14,7 @@ import re
 from pathlib import Path
 from typing import Optional
 
-from . import tools
+from . import render_identity, tools
 from .proto import EngineError, progress
 
 TARGET_LUFS = -14.0
@@ -201,39 +201,13 @@ def check(path: Path, expect_duration: Optional[float] = None, expect_w: int = 1
 
 
 def run(path: Path, expect_duration: Optional[float] = None, project_dir: Optional[Path] = None) -> dict:
-    """CLI entry. Expected size/fps/duration come from the sibling render manifest when present."""
-    path = Path(path)
+    """CLI entry. Re-checks a render against its own manifest: size, fps, duration and the caption
+    boxes that render drew (never the project's newest captions.json)."""
+    bound = render_identity.for_file(path, project_dir)
+    man = bound["manifest"]
     progress("verify", 5, "Checking your video", force=True)
-    exp_w, exp_h, exp_fps, caps, fmt, draft = 1080, 1920, 30.0, None, None, False
-    man = None
-    for cand in (path.parent / "render.json", path.parent / "render_draft.json"):
-        if cand.exists():
-            try:
-                m = json.loads(cand.read_text(encoding="utf-8"))
-            except ValueError:
-                continue
-            if Path(m.get("file", "")).name == path.name:
-                man = m
-                break
-    if man:
-        exp_w, exp_h = man["size"]
-        draft = bool(man.get("draft"))
-        if expect_duration is None:
-            expect_duration = man.get("duration")
-    snap = path.parent / "project.json"
-    if snap.exists():
-        try:
-            p = json.loads(snap.read_text(encoding="utf-8"))
-            exp_fps = float(p["format"]["fps"])
-            if not man:
-                exp_w, exp_h = int(p["format"]["width"]), int(p["format"]["height"])
-            fmt = (int(p["format"]["width"]), int(p["format"]["height"]))
-        except (ValueError, KeyError):
-            pass
-    if project_dir is not None:
-        cj = Path(project_dir) / "work" / "captions.json"
-        if cj.exists() and fmt:
-            caps = json.loads(cj.read_text(encoding="utf-8")).get("cues")
-    rep = check(path, expect_duration, exp_w, exp_h, exp_fps, caps, fmt, draft)
+    rep = check(bound["video"], expect_duration if expect_duration is not None else man["duration"],
+                *man["size"], man["fps"], man["captionsReport"], tuple(man["format"]), man["draft"])
+    rep.update(renderId=man["renderId"], inputFingerprint=man["inputFingerprint"])
     progress("verify", 100, "Checked", force=True)
     return rep

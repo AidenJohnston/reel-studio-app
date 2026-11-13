@@ -170,6 +170,23 @@ describe('project store', () => {
     expect((await listVersions(dir)).map((v) => [v.n, v.draft])).toEqual([[1, false]])
   })
 
+  it("fails if a version stops carrying its receipts' facts, or a version from before receipts loses its chat tooltip", async () => {
+    setupPaths()
+    await ensureRoot()
+    const dir = fakeProject('zeta', { versions: [1, 2, 3] })
+    const fact = (after: number) => ({ kind: 'captions.style', field: 'size', before: 105, after })
+    writeFileSync(join(dir, 'versions', 'v2', 'render.json'), JSON.stringify({ renderId: 'r_2' }))
+    writeFileSync(join(dir, 'versions', 'v3', 'render.json'), JSON.stringify({ renderId: 'r_3b' }))
+    writeFileSync(join(dir, 'versions', 'v3', 'receipts.json'), JSON.stringify([
+      { jobId: 'j1', renderId: 'r_3a', version: 3, facts: [fact(126)] },
+      { jobId: 'j2', renderId: 'r_3b', version: 3, facts: [fact(90)] }
+    ]))
+    const [v1, v2, v3] = await listVersions(dir)
+    expect([v1.facts, v1.beforeReceipts]).toEqual([undefined, true])
+    expect([v2.facts, v2.beforeReceipts]).toEqual([undefined, undefined])
+    expect([v3.facts, v3.beforeReceipts]).toEqual([[fact(126), fact(90)], undefined])
+  })
+
   it('recovers a project that was mid-render when the app quit', async () => {
     setupPaths()
     await ensureRoot()

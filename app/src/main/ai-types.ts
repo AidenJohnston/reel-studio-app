@@ -13,7 +13,8 @@ export interface UserFacingError {
 
 export interface AgentResult {
   summary: string
-  version: number
+  /** Absent when a note changed nothing (no edit, no saved My style rule) or its edit ended where it started: its reply belongs to no version. */
+  version?: number
   styleRulesAdded: string[]
   changed: string[]
   /** Rules the AI PROPOSES for My style, not saved (stream quality2). The app asks before saving. */
@@ -100,7 +101,7 @@ export interface AI {
     note: string,
     onEvent: (e: AgentEvent) => void,
     signal?: AbortSignal,
-    opts?: { attachments?: string[] }
+    opts?: { attachments?: string[]; jobId?: string }
   ): Promise<AgentResult>
   writeScript(idea: string, onEvent: (e: AgentEvent) => void, signal?: AbortSignal): Promise<ScriptResult>
   styleRules(): Promise<{ id: string; text: string; createdAt: string }[]>
@@ -117,6 +118,8 @@ export interface AI {
   removeConnection?(id: string): Promise<void>
   setConnectionImages?(id: string, supportsImages: boolean): Promise<void>
   connectionModels?(q: { kind: ConnectionInfo['kind']; baseURL: string; key?: string; id?: string }): Promise<{ models: string[]; suggested: string | null; needsKey: boolean }>
+  /** One small-model call that rewords a version's title and summary; null when the connection has no small model. Optional: older packages lack it. */
+  rewordVersion?(text: { title: string; summary: string }, signal?: AbortSignal): Promise<{ title: string; summary: string } | null>
   /** A fresh look at the person's own Codex app (`bin` stays in main). */
   codexStatus?(): Promise<ClaudeCodeStatus & { chatgptMoved?: boolean }>
   /** Once at start-up: signs out a saved "Sign in with ChatGPT" session (retired) and clears it as the choice. */
