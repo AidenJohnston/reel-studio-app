@@ -239,11 +239,19 @@ def timing_places(check: dict, records: list, assets: dict) -> list:
     return out
 
 
+WALLS = ("post-wall", "icon-wall")
+
+
 def _files(it: dict) -> list:
-    """Every file an item shows: its asset, and for a wall each picture in params.items (text cards have none)."""
+    """Every file an item shows (text cards have none). A wall draws each picture in params.items, and its asset only
+    as a folder of pictures or when nothing is listed (broll._items), so an unused asset is not counted."""
+    asset = it.get("asset") if isinstance(it.get("asset"), str) and it.get("asset") else None
+    if it.get("treatment") not in WALLS:
+        return [asset] if asset else []
     params = it.get("params") if isinstance(it.get("params"), dict) else {}
-    listed = params.get("items") if isinstance(params.get("items"), list) else []
-    return [a for a in [it.get("asset"), *listed] if isinstance(a, str) and a]
+    listed = [a for a in (params.get("items") if isinstance(params.get("items"), list) else []) if isinstance(a, str) and a]
+    folder = asset is not None and not Path(asset).suffix
+    return listed + ([asset] if asset and (folder or not listed) else [])
 
 
 def unique_places(records: list, files: dict) -> list:

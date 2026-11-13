@@ -2,7 +2,6 @@ import { describe, it, expect } from 'vitest';
 import * as fsp from 'node:fs/promises';
 import * as path from 'node:path';
 import { AIError, StyleStore, createAI, executeTool, newToolState } from '../src';
-import { ruleText } from '../src/rules';
 import { FakeHost, ScriptedModel, call, makeProject, tmpDir } from './helpers';
 
 describe('a damaged My style.json', () => {
@@ -96,8 +95,8 @@ describe('asking again for a rule paused in My style turns it back on', () => {
     expect((await executeTool(ctx, 'add_style_rule', { rule: 'Put a yellow box behind the captions.' })).isError).toBe(false);
     expect((await style.list())[0].paused).toBeUndefined();
     expect(await style.asPromptText()).toBe('- Put a yellow box behind the captions.');
-    // the rule was there before this note, so undoing the note pauses it again and never deletes it
-    expect(ctx.state.styleChanges).toEqual([expect.objectContaining({ id: rule.id, was: 'paused' })]);
+    // the rule was there before this note, so undoing the note must not delete it
+    expect(ctx.state.styleRuleIds).toEqual([]);
   });
 
   it('and a note that turned it back on, then failed, leaves it paused', async () => {
@@ -161,42 +160,5 @@ describe('asking again for a rule paused in My style turns it back on', () => {
     expect(err).toMatchObject(stopped);
     // and it survives being passed on as JSON (toJSON), as AI errors are
     expect(JSON.parse(JSON.stringify(err))).toMatchObject(stopped);
-  });
-});
-
-describe('answering a "Remember this for next time?" question about a sentence or a checked rule', () => {
-  const store = () => { const root = tmpDir('style answers '); return new StyleStore(() => root); };
-
-  it('Yes saves the sentence and records the answer in the same write; No takes back only that Yes', async () => {
-    const style = store();
-    const q = { id: 'm-1', text: 'Keep music quieter under talking.' };
-    expect(await style.answer(q, true)).toEqual({ status: 'saved' });
-    expect(await style.answerOf('m-1')).toMatchObject({ yes: true, status: 'saved' });
-    expect((await style.list()).map((r) => r.text)).toEqual(['Keep music quieter under talking.']);
-    expect(await style.answer(q, false)).toEqual({ status: 'declined' });
-    expect(await style.list()).toEqual([]);
-    expect(await style.answerOf('m-1')).toMatchObject({ yes: false, status: 'declined' });
-  });
-
-  it('a sentence already in My style stays as it is: kept when on, paused when paused, and a No changes neither', async () => {
-    const style = store();
-    const rule = (await style.add('Keep music quieter under talking.')).rule;
-    expect(await style.answer({ id: 'm-1', text: 'keep music quieter under talking' }, true)).toEqual({ status: 'exists' });
-    await style.update(rule.id, { paused: true });
-    expect(await style.answer({ id: 'm-2', text: 'Keep music quieter under talking.' }, true)).toEqual({ status: 'paused' });
-    await style.answer({ id: 'm-1', text: 'Keep music quieter under talking.' }, false);
-    expect(await style.list()).toEqual([expect.objectContaining({ id: rule.id, paused: true })]);
-  });
-
-  it('Yes to a checked rule replaces the one checking the same kind, and No brings it back', async () => {
-    const style = store();
-    const two = (await style.add(ruleText({ kind: 'captions.maxWords', value: 2 }), { kind: 'captions.maxWords', value: 2 })).rule;
-    const three = { id: 'm-3', text: 'Show at most 3 words in a caption.', check: { kind: 'captions.maxWords', value: 3 } as const };
-    expect(await style.answer(three, true)).toEqual({ status: 'saved' });
-    expect((await style.list()).map((r) => r.check)).toEqual([{ kind: 'captions.maxWords', value: 3 }]);
-    await style.answer(three, false);
-    expect(await style.list()).toEqual([expect.objectContaining({ id: two.id, check: { kind: 'captions.maxWords', value: 2 } })]);
-    // the words must be the check's: a question that says something else saves nothing
-    await expect(style.answer({ ...three, text: 'Short captions please.' }, true)).rejects.toThrow(/does not match/);
   });
 });

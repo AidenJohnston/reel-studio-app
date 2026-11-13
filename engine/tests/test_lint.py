@@ -197,6 +197,20 @@ def test_unique_counts_the_pictures_a_wall_draws():
     assert [(p["item"], p["asset"]) for p in f["places"]] == [("b2", "Library/images/b.png"), ("b3", "Library/images/c.png")]
 
 
+def test_unique_skips_a_wall_asset_the_wall_does_not_draw():
+    # a wall with pictures listed draws those, not its own file asset; a folder asset is drawn as well
+    items = [{"id": "b1", "treatment": "post-wall", "asset": "Library/images/cover.png", "params": {"items": ["Library/images/a.png"]}},
+             {"id": "b2", "asset": "Library/images/cover.png"},
+             {"id": "b3", "treatment": "icon-wall", "asset": "Library/images/logos", "params": {"items": ["Library/images/b.png"]}},
+             {"id": "b4", "treatment": "icon-wall", "asset": "Library/images/logos"},
+             {"id": "b5", "treatment": "post-wall", "asset": "Library/images/d.png"},
+             {"id": "b6", "asset": "Library/images/d.png"}]
+    broll = [shown(1, treatment="post-wall", t0=1.0, t1=3.0), shown(2, t0=4.0, t1=6.0), shown(3, treatment="icon-wall", t0=7.0, t1=9.0),
+             shown(4, treatment="icon-wall", t0=10.0, t1=12.0), shown(5, treatment="post-wall", t0=13.0, t1=15.0), shown(6, t0=16.0, t1=18.0)]
+    [f] = run({"kind": "broll.unique"}, broll=broll, items=items)["failures"]
+    assert [(p["item"], p["asset"]) for p in f["places"]] == [("b4", "Library/images/logos"), ("b6", "Library/images/d.png")]
+
+
 def test_face_clear_allows_a_full_screen_cutaway_but_not_a_card_on_the_eyes():
     over_eyes = shown(1, (300, 300, 780, 700))
     cutaway = shown(2, (0, 0, 1080, 1920), hiding=True, treatment="full-frame", t0=6.0, t1=7.0)

@@ -7,7 +7,7 @@ import {
   AgentEvent, AgentResult, AIError, EngineHost, ModelProvider, Part, ProviderId, ProviderStatus, ScriptResult, SecretStore, UserFacingError,
 } from './types';
 import { Prompts, defaultPromptsDir } from './prompts';
-import { StyleQuestion, StyleStore } from './style';
+import { StyleProposal, StyleStore } from './style';
 import type { RuleCheck } from './rules';
 import { writeFileAtomic } from './project';
 import { AnthropicProvider, DEFAULT_CLAUDE_MODEL } from './providers/anthropic';
@@ -519,11 +519,10 @@ export function createAI(opts: CreateAIOptions) {
     async addStyleRule(text: string, check?: RuleCheck) { return (await style.add(text, check)).rule; },
     /** My style started over because its file was damaged; the damaged copy is kept next to it. */
     async styleWasDamaged() { return style.wasDamaged(); },
-    /** The user answered a "Remember this for next time?" question (AgentResult.styleProposal, a styleSuggestions
-     * sentence or a styleChecks entry, with the question's id). One write records the answer and its effect. */
-    async answerStyleQuestion(q: StyleQuestion, yes: boolean) { return style.answer(q, yes); },
-    /** The recorded answer to a question, or null: the chat shows a question with one as answered. */
-    async styleAnswer(id: string) { return style.answerOf(id); },
+    /** The user said Yes to AgentResult.styleProposal. */
+    async approveStyleProposal(p: StyleProposal) { return style.approve(p); },
+    /** The user said No to AgentResult.styleProposal. */
+    async declineStyleProposal(p: StyleProposal) { return style.decline(p); },
     /** My style: the user edited a rule's words, or paused or resumed it. */
     async updateStyleRule(id: string, patch: { text?: string; paused?: boolean }) { return style.update(id, patch); },
   };

@@ -18,13 +18,13 @@ export interface AgentResult {
   summary: string; version: number;
   /** rules saved to My style because the user's note asked for it ("always...", "from now on...") */
   styleRulesAdded: string[];
-  /** rules the AI only PROPOSES: show "Remember this for next time?" Yes / No, answered with answerStyleQuestion */
+  /** rules the AI only PROPOSES: show "Remember this for next time?" Yes / No; Yes = addStyleRule(text) */
   styleSuggestions: string[];
   changed: string[];
-  /** a typed rule to ask about ("Use lowercase captions."), answered with answerStyleQuestion(it, yes) */
+  /** a typed rule to ask about ("Use lowercase captions."): Yes = approveStyleProposal(it) */
   styleProposal?: StyleProposal;
-  /** rules the app would check on every render, measured on this version: "Remember this?" says so; answered
-   * with answerStyleQuestion({ id, text, check }, yes) */
+  /** rules the app would check on every render, measured on this version: "Remember this?" says so; Yes =
+   * addStyleRule(text, check) */
   styleChecks?: StyleCheckProposal[];
 }
 export interface ScriptResult { hook: string; script: string; onScreenText: string[] }

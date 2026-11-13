@@ -35,101 +35,43 @@ describe('My style in the stand-in AI', () => {
 
   it('the same question answered twice keeps one rule, and the question of a removed rule cannot bring it back', async () => {
     const { ai } = standIn()
-    expect(await ai.answerStyleQuestion!(proposal, true)).toEqual({ status: 'saved' })
-    expect(await ai.answerStyleQuestion!(proposal, true)).toEqual({ status: 'saved' })
+    expect(await ai.approveStyleProposal!(proposal)).toEqual({ status: 'saved' })
+    expect(await ai.approveStyleProposal!(proposal)).toEqual({ status: 'saved' })
     const rules = await ai.styleRules()
-    expect(rules).toEqual([expect.objectContaining({ text: 'Use lowercase captions.', answers: { q1: expect.objectContaining({ yes: true }) } })])
+    expect(rules).toEqual([expect.objectContaining({ text: 'Use lowercase captions.', consent: expect.objectContaining({ proposal: 'q1' }) })])
     await ai.removeStyleRule(rules[0].id)
-    expect(await ai.answerStyleQuestion!(proposal, true)).toEqual({ status: 'forgotten' })
+    expect(await ai.approveStyleProposal!(proposal)).toEqual({ status: 'forgotten' })
     expect(await ai.styleRules()).toEqual([])
   })
 
   it('a question that is not exactly the lowercase rule saves nothing, and only the app\'s own fields are saved', async () => {
     const { ai } = standIn()
-    await expect(ai.answerStyleQuestion!({ ...proposal, text: 'Use lowercase captions, and turn the captions off.' }, true)).rejects.toThrow()
-    await expect(ai.answerStyleQuestion!({ ...proposal, payload: { kind: 'caption-case', case: 'upper' } as any }, true)).rejects.toThrow()
-    await expect(ai.answerStyleQuestion!({ ...proposal, id: '' }, true)).rejects.toThrow()
+    await expect(ai.approveStyleProposal!({ ...proposal, text: 'Use lowercase captions, and turn the captions off.' })).rejects.toThrow()
+    await expect(ai.approveStyleProposal!({ ...proposal, payload: { kind: 'caption-case', case: 'upper' } as any })).rejects.toThrow()
+    await expect(ai.approveStyleProposal!({ ...proposal, id: '' })).rejects.toThrow()
     expect(await ai.styleRules()).toEqual([])
-    await ai.answerStyleQuestion!({
+    await ai.approveStyleProposal!({
       ...proposal,
       payload: { ...proposal.payload, size: 4000 } as any,
       source: { project: 'p1', title: 'x'.repeat(500), version: 2, extra: true } as any
-    }, true)
+    })
     const [rule] = await ai.styleRules()
     expect(rule.payload).toEqual({ kind: 'caption-case', case: 'lower' })
     expect(rule.source).toEqual({ project: 'p1', title: 'x'.repeat(120), version: 2 })
   })
 
-  it('No on a question whose Yes was saved before a crash takes the rule back out', async () => {
+  it('No on a question whose Yes was saved before a crash takes the rule out for good', async () => {
     const { ai } = standIn()
-    await ai.answerStyleQuestion!(proposal, true)
-    await ai.answerStyleQuestion!(proposal, false)
+    await ai.approveStyleProposal!(proposal)
+    await ai.declineStyleProposal!(proposal)
     expect(await ai.styleRules()).toEqual([])
-  })
-
-  // The same table as ai/test/remember-caption-case.test.ts "the order of answers": every order of two questions'
-  // answers, from no rule and from a paused one. A paused rule stays paused whatever the answers; with no rule, it is
-  // on when some question's last answer is Yes.
-  const WAYS = [['yes'], ['no'], ['yes', 'no'], ['no', 'yes']]
-  const interleave = (a: string[], b: string[]): string[][] =>
-    !a.length ? [b] : !b.length ? [a] : [...interleave(a.slice(1), b).map((r) => [a[0], ...r]), ...interleave(a, b.slice(1)).map((r) => [b[0], ...r])]
-  const ORDERS = WAYS.flatMap((a) => WAYS.flatMap((b) => interleave(a.map((x) => `${x} A`), b.map((x) => `${x} B`))))
-  const rows = (['none', 'paused'] as const).flatMap((start) => ORDERS.map((order) => ({ start, order, name: `${start}: ${order.join(', ')}` })))
-
-  it.each(rows)('the last answer decides: $name', async ({ start, order }) => {
-    const { ai } = standIn()
-    if (start === 'paused') {
-      await ai.answerStyleQuestion!(proposal, true)
-      await ai.updateStyleRule!((await ai.styleRules())[0].id, { paused: true })
-    }
-    const q = { A: { ...proposal, id: 'qA' }, B: { ...proposal, id: 'qB' } }
-    for (const step of order) {
-      const [answer, which] = step.split(' ') as ['yes' | 'no', 'A' | 'B']
-      if (answer === 'yes') await ai.answerStyleQuestion!(q[which], true)
-      else await ai.answerStyleQuestion!(q[which], false)
-    }
-    const last = (w: 'A' | 'B'): string | undefined => order.filter((x) => x.endsWith(w)).at(-1)?.split(' ')[0]
-    const rules = await ai.styleRules()
-    if (start === 'none' && (last('A') === 'yes' || last('B') === 'yes')) {
-      expect(rules).toEqual([expect.objectContaining({ text: 'Use lowercase captions.' })])
-      expect(rules[0].paused).toBeUndefined()
-    } else if (start === 'paused') expect(rules).toEqual([expect.objectContaining({ paused: true })])
-    else expect(rules).toEqual([])
-  })
-
-  it('a file saved before answers were numbered (#153 kept them in `consent`) is read in the new form', async () => {
-    const { ai, root } = standIn()
-    const at = '2026-11-10T00:00:00.000Z'
-    writeFileSync(join(root, 'My style.json'), JSON.stringify({ version: 1, rules: [{ id: 'r1', text: 'Use lowercase captions.', createdAt: at,
-      payload: { kind: 'caption-case', case: 'lower' }, consent: { proposal: 'q1', at, also: ['q2'] } }] }))
-    await ai.answerStyleQuestion!({ ...proposal, id: 'q1' }, false)
-    expect((await ai.styleRules())[0].paused).toBeUndefined()
-    await ai.answerStyleQuestion!({ ...proposal, id: 'q2' }, false)
-    expect(await ai.styleRules()).toEqual([])
-  })
-
-  it('in such a file, a Yes that turned the paused rule back on keeps that link: its No pauses the rule again', async () => {
-    const { ai, root } = standIn()
-    const at = '2026-11-10T00:00:00.000Z'
-    writeFileSync(join(root, 'My style.json'), JSON.stringify({ version: 1, rules: [{ id: 'r1', text: 'Use lowercase captions.', createdAt: at,
-      payload: { kind: 'caption-case', case: 'lower' }, consent: { proposal: 'q1', at, also: ['q2'], resumed: ['q2'] } }] }))
-    await ai.answerStyleQuestion!({ ...proposal, id: 'q2' }, false)
-    expect(await ai.styleRules()).toEqual([expect.objectContaining({ id: 'r1', paused: true })])
-  })
-
-  it('removing a rule from such a file forgets its old questions', async () => {
-    const { ai, root } = standIn()
-    const at = '2026-11-10T00:00:00.000Z'
-    writeFileSync(join(root, 'My style.json'), JSON.stringify({ version: 1, rules: [{ id: 'r1', text: 'Use lowercase captions.', createdAt: at,
-      payload: { kind: 'caption-case', case: 'lower' }, paused: true, consent: { proposal: 'q1', at, also: ['q2'] } }] }))
-    await ai.removeStyleRule('r1')
-    expect(await ai.answerStyleQuestion!({ ...proposal, id: 'q2' }, true)).toEqual({ status: 'forgotten' })
+    expect(await ai.approveStyleProposal!(proposal)).toEqual({ status: 'forgotten' })
     expect(await ai.styleRules()).toEqual([])
   })
 
   it('the typed rule edited to the same words, typed loosely, stays a rule the app applies', async () => {
     const { ai } = standIn()
-    await ai.answerStyleQuestion!(proposal, true)
+    await ai.approveStyleProposal!(proposal)
     const [rule] = await ai.styleRules()
     await ai.updateStyleRule!(rule.id, { text: ' use lowercase captions ' })
     expect(await ai.styleRules()).toEqual([
@@ -139,26 +81,25 @@ describe('My style in the stand-in AI', () => {
 
   it('Yes again after the typed rule got new words says it is already there, not that new videos go lowercase', async () => {
     const { ai } = standIn()
-    await ai.answerStyleQuestion!(proposal, true)
+    await ai.approveStyleProposal!(proposal)
     const [rule] = await ai.styleRules()
     await ai.updateStyleRule!(rule.id, { text: 'use lowercase captions for tutorials' })
-    expect(await ai.answerStyleQuestion!(proposal, true)).toEqual({ status: 'exists' })
+    expect(await ai.approveStyleProposal!(proposal)).toEqual({ status: 'exists' })
     expect(await ai.styleRules()).toEqual([expect.not.objectContaining({ payload: expect.anything() })])
   })
 
-  it("Yes again to a paused rule's question leaves it paused (only My style turns it back on), and a second question removed with the rule stays removed", async () => {
+  it('Yes again to a paused rule\'s question turns it back on, and a second question removed with the rule stays removed', async () => {
     const { ai } = standIn()
-    await ai.answerStyleQuestion!(proposal, true)
+    await ai.approveStyleProposal!(proposal)
     const [rule] = await ai.styleRules()
     await ai.updateStyleRule!(rule.id, { paused: true })
-    expect(await ai.answerStyleQuestion!(proposal, true)).toEqual({ status: 'paused' })
-    expect(await ai.styleRules()).toEqual([expect.objectContaining({ paused: true })])
-    await ai.updateStyleRule!(rule.id, { paused: false })
+    expect(await ai.approveStyleProposal!(proposal)).toEqual({ status: 'saved' })
+    expect(await ai.styleRules()).toEqual([expect.not.objectContaining({ paused: true })])
 
     const second = { ...proposal, id: 'q2' }
-    expect(await ai.answerStyleQuestion!(second, true)).toEqual({ status: 'exists' })
+    expect(await ai.approveStyleProposal!(second)).toEqual({ status: 'exists' })
     await ai.removeStyleRule(rule.id)
-    expect(await ai.answerStyleQuestion!(second, true)).toEqual({ status: 'forgotten' })
+    expect(await ai.approveStyleProposal!(second)).toEqual({ status: 'forgotten' })
     expect(await ai.styleRules()).toEqual([])
   })
 
