@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { withAnimationRetiming } from '../src/main/anim-retime'
+import { untilStopped, withAnimationRetiming } from '../src/main/anim-retime'
 import type { RunEngine } from '../src/main/engine'
 
 const job = { id: 'b2', template: 'big-quote', params: { text: 'Done is better', wordTimes: [0.13, 0.4, 0.7] }, out: '/p/work/animations/big-quote-abc.mov' }
@@ -66,5 +66,17 @@ describe('withAnimationRetiming', () => {
     await expect(wrapped('render', ['--project', '/p'], undefined, stop.signal)).rejects.toMatchObject({ code: 'CANCELLED' })
     expect(seen).toEqual([stop.signal])
     expect(calls).toEqual(['anim-jobs --project /p'])
+  })
+
+  it('Stop ends the wait at once, even for a render that never finishes (queued behind another)', async () => {
+    const { run, calls } = fakeEngine([job])
+    const stop = new AbortController()
+    const wrapped = withAnimationRetiming(run, () => new Promise<string>(() => {}))
+    const done = wrapped('render', ['--project', '/p'], undefined, stop.signal)
+    await new Promise((r) => setTimeout(r, 10))
+    stop.abort()
+    await expect(done).rejects.toMatchObject({ code: 'CANCELLED' })
+    expect(calls).toEqual(['anim-jobs --project /p'])
+    await expect(untilStopped(Promise.resolve(7), new AbortController().signal)).resolves.toBe(7)
   })
 })
