@@ -296,3 +296,42 @@ def test_a_proxy_run_refuses_a_take_whose_copy_was_not_made(tmp_path):
     (take / "session.json").write_text('{"steps": []}', encoding="utf-8")
     with pytest.raises(RuntimeError, match="preview copies not made"):
         replay.replay(replay.Take("t", take), Cand(), [], tmp_path / "scratch", None, "ffprobe", proxy=True)
+
+
+def test_a_note_state_with_a_saved_version_replays_its_stills_from_the_draft(tmp_path, monkeypatch):
+    """A real note's frozen state can have version > 0, and copy_project leaves out every saved
+    version. The stills must come from the draft just made, not from the missing versions/vN."""
+    from types import SimpleNamespace
+    from reelengine.render import latest_render, preview_dir
+    src = tmp_path / "take"
+    (src / "media").mkdir(parents=True)
+    (src / "media" / "take01.mp4").write_bytes(b"media")
+    (src / "project.json").write_text("{}", encoding="utf-8")
+    (src / "versions" / "v2").mkdir(parents=True)
+    (src / "versions" / "v2" / "export.mp4").write_bytes(b"old export")
+
+    class FakeEngine:
+        """Like the engine: `frames` reads --file, else the project's latest render (frames.py)."""
+        def run(self, command, args):
+            proj = __import__("pathlib").Path(args[args.index("--project") + 1])
+            out = preview_dir(proj)
+            out.mkdir(parents=True, exist_ok=True)
+            if command == "render":
+                f = out / ("draft.mp4" if "--draft" in args else "window.mp4" if "--window" in args else "final.mp4")
+                f.write_bytes(command.encode())
+                return SimpleNamespace(seconds=0.1, result={"file": str(f), "duration": 1.0})
+            assert command == "frames"
+            state = json.loads((proj / "project.json").read_text(encoding="utf-8"))
+            video = args[args.index("--file") + 1] if "--file" in args else latest_render(proj, state)
+            if video is None:
+                raise RuntimeError("NO_RENDER: There's no video to look at yet.")
+            still = out / "still.png"
+            still.write_bytes(b"png")
+            return SimpleNamespace(seconds=0.1, result={"video": str(video), "frames": [{"t": 0.5, "file": str(still)}]})
+
+    monkeypatch.setattr(replay, "_complete_video", lambda *a: None)
+    monkeypatch.setattr(replay.media, "read_image", lambda p: None)
+    take = SimpleNamespace(id="note-v2", project=src, session=["note"], state=lambda step: {"version": 2})
+    refs = [{"fps": 30, "stills": [0.5], "window": [0.0, 1.0]}]
+    out = replay.replay(take, FakeEngine(), refs, tmp_path / "scratch", None, "ffprobe")
+    assert out["seconds"]["still"] == [0.1]

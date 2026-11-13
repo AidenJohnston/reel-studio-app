@@ -250,7 +250,10 @@ def replay(take: Take, cand: Engine, refs: list, scratch: Path, keep_dir, ffprob
         fps = ref["fps"]
         draft = cand.run("render", ["--project", proj, "--draft"])
         _complete_video(ffprobe, draft.result["file"], draft.result["duration"], fps)
-        still = cand.run("frames", ["--project", proj, "--times", ",".join(f"{t:.3f}" for t in ref["stills"])])
+        # The draft just made, by name: a real note's frozen state can have version > 0, and
+        # copy_project leaves out the saved versions frames would otherwise read (frames.py).
+        still = cand.run("frames", ["--project", proj, "--file", draft.result["file"],
+                                    "--times", ",".join(f"{t:.3f}" for t in ref["stills"])])
         for f in still.result["frames"]:
             media.read_image(Path(f["file"]))          # decodes = complete
         a, b = ref["window"]
