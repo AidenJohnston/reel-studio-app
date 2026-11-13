@@ -16,9 +16,9 @@ export interface LiveState {
   message: string
   /** 0-99, never backwards. */
   overall: number
-  /** Seconds left for the whole job. null = too early to say. */
+  /** Seconds left for the whole job. null = no usable estimate. */
   secondsLeft: number | null
-  /** Past every estimate on the last step: say "Still working, almost there", no number. */
+  /** The last phase outlasted its usable estimate: say "Still working, almost there", no number. */
   overdue: boolean
   /** Waiting on the AI's answer: show "thinking", not "stuck". */
   thinking: boolean
