@@ -6,6 +6,7 @@ import { nativeImage, protocol, type WebContents } from 'electron'
 import { handleMediaProtocol } from '../src/main/media'
 import { mediaUrl } from '../src/main/media-url'
 import { startDragOut } from '../src/main/window'
+import { setupPaths } from './helpers'
 
 vi.mock('electron', () => ({
   nativeImage: {
@@ -80,7 +81,7 @@ describe('media protocol path checks', () => {
   }
 
   it.skipIf(process.platform !== 'win32')('allows an existing file in the allowed root when its path uses different letter case on Windows', async () => {
-    const root = join(tempDir(), 'Reel Studio')
+    const { root } = setupPaths(tempDir())
     const file = join(root, 'Projects', 'clip.mp4')
     mkdirSync(dirname(file), { recursive: true })
     writeFileSync(file, 'clip')
@@ -93,7 +94,7 @@ describe('media protocol path checks', () => {
   })
 
   it('refuses a sibling folder whose name starts with the allowed root name', async () => {
-    const root = join(tempDir(), 'Reel Studio')
+    const { root } = setupPaths(tempDir())
     const sibling = `${root}Evil`
     const file = join(sibling, 'clip.mp4')
     mkdirSync(sibling)
