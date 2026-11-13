@@ -5,7 +5,7 @@ import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { TOOLS, TOOL_NAMES, executeTool, newToolState, loadProject, StyleStore, ToolContext, AgentEvent } from '../src';
 import { saveProject } from '../src/project';
-import { visibleChangeSinceRender } from '../src/tools';
+import { effectiveStart, visibleChangeSinceRender } from '../src/tools';
 import { isStrict, validate } from '../src/schema';
 import { FakeHost, makeProject, tinyPng } from './helpers';
 
@@ -246,6 +246,31 @@ describe('tool implementations', () => {
     expect(seen.music.beats).toEqual({ bpm: 120, count: 400 });
     expect(seen.music.drops[0]).toMatchObject({ from: 'w3', to: 'w5', backOnBeatAtSec: expect.any(Number) });
     expect(JSON.stringify(seen)).not.toMatch(/frames|sha256/);
+  });
+
+  it('a drop on a song started too near its end comes back on the beat of the song played from the top', async () => {
+    const { ctx, root, host } = await ctxFor();
+    await writeSongs(root, ['calm.mp3']);
+    host.engineAssets = true;
+    // 120 bpm over the 120 s song; a start at 119.3 s plays it from the top (as the engine does)
+    host.songInfo = { ...host.songInfo, beatGrid: { ...gridOf('calm.mp3'), frames: Array.from({ length: 240 }, (_, i) => 15 * i) } };
+    await executeTool(ctx, 'set_cut', { keep: [{ from: 'w0', to: 'w8' }] });
+    await executeTool(ctx, 'choose_music', { track: 'calm.mp3', startAt: 119.3, level: null });
+    await executeTool(ctx, 'set_sound_moments', { ...none, drops: [{ from: 'w3', to: 'w5' }] });
+    const back = JSON.parse((await executeTool(ctx, 'get_project', {})).content).music.drops[0].backOnBeatAtSec;
+    expect(back).not.toBeNull();
+    expect((back * 2) % 1).toBeCloseTo(0, 5);              // on the half-second grid of the song from 0 s
+    expect(effectiveStart(119.3, 120)).toBe(0);
+    expect(effectiveStart(30, 120)).toBe(30);
+  });
+
+  it('get_project shows the saved sound effects, so a later note can keep them', async () => {
+    const { ctx, dir } = await ctxFor();
+    await executeTool(ctx, 'set_cut', { keep: [{ from: 'w0', to: 'w8' }] });
+    expect(JSON.parse((await executeTool(ctx, 'get_project', {})).content).sfx).toBeUndefined();
+    const at = { word: 'w4', broll: null, cut: null };
+    await executeTool(ctx, 'set_sfx', { sfx: [{ sound: 'pop-plop', at, gainDb: null }] });
+    expect(JSON.parse((await executeTool(ctx, 'get_project', {})).content).sfx).toEqual((await loadProject(dir)).sfx);
   });
 
   it('a song change is a visible change when edits land on its beats, and only heard when none do', async () => {

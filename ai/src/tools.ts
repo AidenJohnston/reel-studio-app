@@ -255,12 +255,20 @@ function projectView(ctx: ToolContext, p: Project, t: Transcript): unknown {
     music: musicView(p.music, times),
     broll: p.broll.map((b) => ({ ...b, says: quote(t, b.anchor), approxOutSec: times.get(b.anchor.from)?.s ?? null })),
     zooms: p.zooms.map((z) => ({ ...z, says: quote(t, z.anchor) })),
+    // set_sfx replaces the list: a later note can only keep the effects it can see
+    ...(p.sfx?.length ? { sfx: p.sfx } : {}),
     cover: p.cover,
     post: p.post,
     notes: p.notes,
     lastRender: ctx.state.renders.at(-1)?.version ?? null,
   };
 }
+
+/** Where the song really starts (engine beats.effective_start): a start less than END_MARGIN_S from the
+ * song's end plays it from the top. */
+const END_MARGIN_S = 1.0;
+export const effectiveStart = (startAt: number, seconds: number) =>
+  (startAt || 0) < Math.round(seconds * 100) / 100 - END_MARGIN_S ? Math.max(0, startAt || 0) : 0;
 
 /** The music as the model sees it: the beat grid's frames (hundreds of numbers only the engine reads)
  * become its tempo and beat count, and each drop says when the music comes back on a beat. */
@@ -270,7 +278,7 @@ export function musicView(m: Music, times: Map<string, { s: number; e: number }>
   const f = beats.frames;
   const steps = f.slice(1).map((x, i) => x - f[i]).sort((a, b) => a - b);
   const bpm = steps.length ? Math.round((60 * beats.fps) / steps[steps.length >> 1]) : null;
-  const heard = f.map((x) => x / beats.fps - (m.startAt || 0)).filter((t) => t >= 0);
+  const heard = f.map((x) => x / beats.fps - effectiveStart(m.startAt, beats.seconds)).filter((t) => t >= 0);
   const drops = m.drops?.map((d) => {
     const end = times.get(d.to)?.e;
     const back = end === undefined ? undefined : heard.find((t) => t >= end && t - end <= 1);
