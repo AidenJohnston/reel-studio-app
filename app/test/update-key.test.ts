@@ -147,6 +147,33 @@ describe('createUpdateKeyService', () => {
     expect(await f.svc.get()).toBeNull()
     expect(f.sent).toEqual([{ on: false, plan: null }])
   })
+  it('fails if the updater, refused for the old key, erases a key saved while that answer was on its way', async () => {
+    // The save of the new key is still being written when the refusal for the old key arrives.
+    let state: UpdateKeyState = { updateKey: K }
+    let finishWrite!: () => void
+    const svc = createUpdateKeyService({
+      load: async () => state,
+      save: (p) =>
+        new Promise<void>((resolve) => {
+          finishWrite = () => {
+            state = { ...state, ...p }
+            resolve()
+          }
+        }),
+      log: () => {},
+      send: () => {},
+      confirmLink: async () => true
+    })
+    const other = key('once')
+    const pasting = svc.fromText(other)
+    const clearing = svc.clearIfCurrent(K)
+    await new Promise((r) => setTimeout(r, 0))
+    finishWrite()
+    await pasting
+    expect(await clearing).toBe(false)
+    expect(await svc.get()).toBe(other)
+    expect(await svc.isCurrent(K)).toBe(false)
+  })
   it('a damaged stored value counts as off', async () => {
     const f = fakes({ updateKey: 'garbage' })
     expect(await f.svc.get()).toBeNull()

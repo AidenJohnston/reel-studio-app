@@ -115,13 +115,30 @@ export interface UpdateKeyDeps {
 
 export function createUpdateKeyService(d: UpdateKeyDeps) {
   const status = (key: string | null): UpdateKeyStatus => ({ on: validKey(key), plan: planOf(key) })
-  async function store(key: string, from: string): Promise<UpdateKeyStatus> {
-    await d.save({ updateKey: key })
-    const s = status(key)
-    d.log(`[updates] automatic updates turned on (key from ${from}, plan ${s.plan ?? '?'})`) // never the key
-    d.send(s)
-    return s
+  // Every change to the key runs one at a time, so the updater's "clear this key if it is still the saved one"
+  // cannot read the old key while a new one is being saved and then erase the new one.
+  let chain: Promise<unknown> = Promise.resolve()
+  function serial<T>(f: () => Promise<T>): Promise<T> {
+    const run = chain.then(f, f)
+    chain = run.catch(() => undefined)
+    return run
   }
+  const store = (key: string, from: string): Promise<UpdateKeyStatus> =>
+    serial(async () => {
+      await d.save({ updateKey: key })
+      const s = status(key)
+      d.log(`[updates] automatic updates turned on (key from ${from}, plan ${s.plan ?? '?'})`) // never the key
+      d.send(s)
+      return s
+    })
+  const clear = (): Promise<UpdateKeyStatus> =>
+    serial(async () => {
+      await d.save({ updateKey: null })
+      d.log('[updates] automatic updates turned off (key removed)')
+      const s = status(null)
+      d.send(s)
+      return s
+    })
   return {
     /** For the updater: the key to send to dl.getreelstudio.com/u/, or null. */
     async get(): Promise<string | null> {
@@ -152,14 +169,20 @@ export function createUpdateKeyService(d: UpdateKeyDeps) {
       const k = keyFromText(text)
       return k ? store(k, 'paste') : null
     },
-    /** Settings > "Turn off", or the updater after the server said the key is not ours (401). */
-    async clear(): Promise<UpdateKeyStatus> {
-      await d.save({ updateKey: null })
-      d.log('[updates] automatic updates turned off (key removed)')
-      const s = status(null)
-      d.send(s)
-      return s
-    }
+    /** Settings > "Turn off". */
+    clear,
+    /** Whether `key` is the saved key, after any change already under way has finished. */
+    isCurrent: (key: string): Promise<boolean> => serial(async () => (await d.load()).updateKey === key),
+    /** The updater after the server answered 401 to `key`: turns automatic updates off only if `key` is still the
+     * saved one. False when another key was saved meanwhile (that one is kept). */
+    clearIfCurrent: (key: string): Promise<boolean> =>
+      serial(async () => {
+        if ((await d.load()).updateKey !== key) return false
+        await d.save({ updateKey: null })
+        d.log('[updates] automatic updates turned off (the update server did not accept the key)')
+        d.send(status(null))
+        return true
+      })
   }
 }
 

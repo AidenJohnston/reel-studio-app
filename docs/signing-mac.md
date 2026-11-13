@@ -66,8 +66,16 @@ packaging/build-mac.sh          # builds the unsigned app (about 5 minutes the f
 packaging/sign-mac.sh           # signs everything, notarizes, staples, builds the signed .dmg
 ```
 
-When it ends it prints `DONE.` and the path to the finished installer:
-`app/release/signed/Reel-Studio-<version>-arm64.dmg`. That file is what you give to people.
+When it ends it prints `DONE.` and two files in `app/release/signed/`:
+
+| File | What it is for |
+|---|---|
+| `Reel-Studio-<version>-arm64.dmg` | The installer you give to people. |
+| `Reel-Studio-<version>-arm64-mac.zip` | The same signed, stapled app, zipped: what installed copies download to update themselves. |
+
+Publish both with the release: the dmg as the Mac download, the zip as the Mac update file. The download server
+works out the update's checksum and size from the zip it is given, so use the zip exactly as the script wrote it;
+a zip from another run, or re-zipped by hand, is a different file.
 
 Practice first (no risk, uses the throw-away spike app): `packaging/build-mac.sh --spike` then
 `packaging/sign-mac.sh --spike`.
@@ -82,9 +90,11 @@ Practice first (no risk, uses the throw-away spike app): `packaging/build-mac.sh
 3. `codesign --verify --deep --strict`.
 4. Zips the app, sends it to Apple with `xcrun notarytool submit --wait`, then `xcrun stapler staple`
    attaches the approval ticket to the app so it also works offline.
-5. Builds the `.dmg`, signs it, notarizes it, staples it.
+5. Builds the `.dmg`, signs it, notarizes it, staples it. Zips the stapled app with `ditto` (which keeps the
+   bundle exactly as signed) into `Reel-Studio-<version>-arm64-mac.zip`.
 6. Final checks: `codesign --verify --deep --strict`, `spctl -a -vv` (must say `accepted` and
-   `source=Notarized Developer ID`), `xcrun stapler validate`.
+   `source=Notarized Developer ID`), `xcrun stapler validate`; then unzips the update zip and checks that the
+   app inside is still validly signed, stapled, and carries `app-update.yml` (which switches the updater on).
 
 Any problem stops the script with a plain message.
 
