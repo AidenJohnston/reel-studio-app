@@ -7,7 +7,7 @@ import {
   AgentEvent, AgentResult, AIError, EngineHost, ModelProvider, Part, ProviderId, ProviderStatus, ScriptResult, SecretStore, UserFacingError,
 } from './types';
 import { Prompts, defaultPromptsDir } from './prompts';
-import { StyleStore } from './style';
+import { StyleProposal, StyleStore } from './style';
 import { writeFileAtomic } from './project';
 import { AnthropicProvider, DEFAULT_CLAUDE_MODEL } from './providers/anthropic';
 import { ClaudeCliProvider, CodexCliProvider } from './providers/cli';
@@ -516,6 +516,12 @@ export function createAI(opts: CreateAIOptions) {
     async addStyleRule(text: string) { return (await style.add(text)).rule; },
     /** My style started over because its file was damaged; the damaged copy is kept next to it. */
     async styleWasDamaged() { return style.wasDamaged(); },
+    /** The user said Yes to AgentResult.styleProposal. */
+    async approveStyleProposal(p: StyleProposal) { return style.approve(p); },
+    /** The user said No to AgentResult.styleProposal. */
+    async declineStyleProposal(p: StyleProposal) { return style.decline(p); },
+    /** My style: the user edited a rule's words, or paused or resumed it. */
+    async updateStyleRule(id: string, patch: { text?: string; paused?: boolean }) { return style.update(id, patch); },
   };
 }
 

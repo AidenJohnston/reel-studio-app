@@ -1,4 +1,5 @@
 // Public interface (docs/architecture.md section 8) + provider-neutral model types.
+import type { StyleProposal } from './style';
 
 /** Where a long task is, for honest overall progress + time left (the app weighs phases from history).
  * listen = transcribe, analyze = retakes/face, firstLook = the no-AI preview, edit = the AI's turns and
@@ -19,6 +20,8 @@ export interface AgentResult {
   /** rules the AI only PROPOSES: show "Remember this for next time?" Yes / No; Yes = addStyleRule(text) */
   styleSuggestions: string[];
   changed: string[];
+  /** a typed rule to ask about ("Use lowercase captions."): Yes = approveStyleProposal(it) */
+  styleProposal?: StyleProposal;
 }
 export interface ScriptResult { hook: string; script: string; onScreenText: string[] }
 
@@ -49,7 +52,9 @@ export interface SecretStore {
   getSelectedStorageBackend?(): string;
 }
 
-export interface UserFacingError { code: string; userMessage: string; link?: string; retryable?: boolean }
+/** `tellAfterStop`: said to the person even when they pressed Stop, which otherwise shows no message: something
+ * the stop could not put back, such as a My style rule left on. */
+export interface UserFacingError { code: string; userMessage: string; link?: string; retryable?: boolean; tellAfterStop?: string }
 
 /** Error with a grandma-friendly message. `link` is shown as a button when present. */
 export class AIError extends Error implements UserFacingError {
@@ -69,8 +74,10 @@ export class AIError extends Error implements UserFacingError {
   retryable: boolean;
   status?: number;
   requestId?: string;
+  tellAfterStop?: string;
   toJSON(): UserFacingError & { status?: number; requestId?: string } {
-    return { code: this.code, userMessage: this.userMessage, link: this.link, retryable: this.retryable, status: this.status, requestId: this.requestId };
+    return { code: this.code, userMessage: this.userMessage, link: this.link, retryable: this.retryable, status: this.status, requestId: this.requestId,
+      ...(this.tellAfterStop ? { tellAfterStop: this.tellAfterStop } : {}) };
   }
 }
 

@@ -4,7 +4,7 @@ import { AgentEvent, AgentResult, AIError, EngineHost, ModelProvider, Phase, Scr
 import { runAgent, RunAgentResult } from './agent';
 import type { LookupFn } from './safety';
 import { Prompts } from './prompts';
-import { StyleStore } from './style';
+import { StyleProposal, StyleStore, captionCaseProposal } from './style';
 import { ToolContext, ToolState, captionWithCredits, captionsForProofread, doRender, unsureWords, executeTool, load, newToolState, resolveAsset, cleanSummary } from './tools';
 import { planFastNote } from './fastnote';
 import { AttachmentInfo, attachmentStills, attachmentsSection, earlierUnplaced, placedAssets, validateAttachments } from './attachments';
@@ -125,9 +125,32 @@ function honestSummary(r: Pick<RunAgentResult, 'finished' | 'stoppedBy'>, state:
   return `I ran out of time before I finished ${what}, so it may be only partly done. So far I: ${did.map((d) => d[0].toLowerCase() + d.slice(1)).join('; ')}. Tell me what still needs changing.`;
 }
 
-async function removeStyleRules(deps: EditorDeps, state: ToolState): Promise<void> {
-  for (const id of state.styleRuleIds) await deps.style.remove(id).catch(() => undefined);
-  state.styleRuleIds = []; state.styleRulesAdded = [];
+/** Undo what a failed note did to My style: rules it saved are removed, paused rules it turned back on are paused
+ * again. A rule removed in My style since then stays removed. Returns the words of each rule it could not undo. */
+async function undoStyleRules(deps: EditorDeps, state: ToolState): Promise<string[]> {
+  const left: string[] = [];
+  for (const [i, id] of state.styleRuleIds.entries()) {
+    await deps.style.remove(id).catch(() => { left.push(state.styleRulesAdded[i] ?? id); });
+  }
+  for (const r of state.styleRulesResumed) {
+    await deps.style.update(r.id, { paused: true }).catch((e) => { if (e?.code !== 'NOT_FOUND') left.push(r.text); });
+  }
+  state.styleRuleIds = []; state.styleRulesAdded = []; state.styleRulesResumed = [];
+  return left;
+}
+
+/** The error a failed note ends with. When My style could not be put back, the person is told which rules to
+ * check: a rule left on would change their next videos without a word. The app shows no error for Stop, so the
+ * same news also goes in `tellAfterStop`. */
+function noteFailed(e: unknown, styleLeft: string[]): unknown {
+  if (!styleLeft.length) return e;
+  const u = e as Partial<AIError> | null;
+  const shown = typeof u?.userMessage === 'string' ? u.userMessage : "I couldn't finish that note.";
+  const rules = styleLeft.map((t) => `"${t}"`).join(' and ');
+  const err = new AIError(typeof u?.code === 'string' ? u.code : 'note_failed', `${shown} I also couldn't undo its change to ${rules} in My style, so please check it there.`,
+    { detail: e instanceof Error ? e.message : String(e), link: u?.link, retryable: u?.retryable });
+  err.tellAfterStop = `I stopped that note, but I couldn't undo its change to ${rules} in My style, so please check it there.`;
+  return err;
 }
 
 async function listAssets(projectDir: string): Promise<Set<string>> {
@@ -135,17 +158,18 @@ async function listAssets(projectDir: string): Promise<Set<string>> {
   return new Set(await fsp.readdir(dir).catch(() => [] as string[]));
 }
 
-/** Put the project back exactly as it was before a failed note: project.json, the My style rules
- * it added, the credits book, and the pictures it downloaded. */
-async function rollbackNote(deps: EditorDeps, projectDir: string, before: Buffer, creditsBefore: Buffer | null | undefined, assetsBefore: Set<string>, state: ToolState): Promise<void> {
+/** Put the project back exactly as it was before a failed note: project.json, what it changed in My style,
+ * the credits book, and the pictures it downloaded. Returns the My style rules it could not put back. */
+async function rollbackNote(deps: EditorDeps, projectDir: string, before: Buffer, creditsBefore: Buffer | null | undefined, assetsBefore: Set<string>, state: ToolState): Promise<string[]> {
   await writeFileAtomic(path.join(projectDir, 'project.json'), before).catch(() => undefined);
-  await removeStyleRules(deps, state);
+  const styleLeft = await undoStyleRules(deps, state);
   const creditsPath = path.join(projectDir, 'work', 'assets', 'credits.json');
   if (creditsBefore === null) await fsp.rm(creditsPath, { force: true }).catch(() => undefined);
   else if (creditsBefore) await writeFileAtomic(creditsPath, creditsBefore).catch(() => undefined);
   for (const f of await listAssets(projectDir)) {
     if (!assetsBefore.has(f)) await fsp.rm(path.join(projectDir, 'work', 'assets', f), { force: true }).catch(() => undefined);
   }
+  return styleLeft;
 }
 
 /** The caption's credit line follows the pictures the edit ends with (one removed after write_post
@@ -240,8 +264,23 @@ async function firstLook(deps: EditorDeps, ctx: ToolContext, onEvent: (e: AgentE
   } catch { /* an older engine, or a failed preview: the AI edit goes on */ }
 }
 
+/** A new video starts from the person's typed My style rules. They go through the caption tool like any AI
+ * call, before the AI edits, so the AI (and later notes) can still change them. */
+async function applyMyStyle(deps: EditorDeps, projectDir: string): Promise<boolean> {
+  if (await deps.style.captionCase() !== 'lower') return false;
+  return !(await executeTool(newCtx(deps, projectDir, null, () => undefined), 'set_caption_style', { case: 'lower' })).isError;
+}
+
 export async function firstEdit(deps: EditorDeps, provider: ModelProvider | null, projectDir: string, onEvent: (e: AgentEvent) => void, signal?: AbortSignal): Promise<EditResult> {
   await ensureAnalyzed(deps, projectDir, onEvent, signal);
+  const applied = await applyMyStyle(deps, projectDir);
+  const r = await editNewVideo(deps, provider, projectDir, onEvent, signal);
+  // the AI may still pick another case for this video; only say so when the video kept it
+  const kept = applied && (await loadProject(projectDir)).captions.style.case === 'lower';
+  return kept ? { ...r, summary: `${r.summary} I used lowercase captions from your My style.` } : r;
+}
+
+async function editNewVideo(deps: EditorDeps, provider: ModelProvider | null, projectDir: string, onEvent: (e: AgentEvent) => void, signal?: AbortSignal): Promise<EditResult> {
   if (!provider) return deterministicEdit(deps, projectDir, onEvent, signal);
   const ctx = newCtx(deps, projectDir, provider, onEvent, signal, 3);
   const { p } = await load(ctx);
@@ -254,9 +293,9 @@ export async function firstEdit(deps: EditorDeps, provider: ModelProvider | null
     run = await runAgent({ provider, system: await systemPrompt(deps), task, ctx, onEvent, signal, maxSteps: deps.maxSteps ?? 45, tokenBudget: deps.tokenBudget, preload: ['get_project', 'get_transcript'] });
   } catch (e: any) {
     await ctx.renderGate?.catch(() => undefined);   // never two renders at once
-    if (signal?.aborted || e?.code === 'cancelled') { await removeStyleRules(deps, ctx.state); throw e; }
+    if (signal?.aborted || e?.code === 'cancelled') { await undoStyleRules(deps, ctx.state); throw e; }
     if (e instanceof AIError && !ctx.state.renders.length) {
-      await removeStyleRules(deps, ctx.state);
+      await undoStyleRules(deps, ctx.state);
       // The AI stopped (limit, sign-in, network). Make a simple version so the user still gets a video,
       // and say plainly why. No other paid service is used.
       const simple = await deterministicEdit(deps, projectDir, onEvent, signal, e.userMessage);
@@ -337,8 +376,7 @@ export async function applyNote(deps: EditorDeps, provider: ModelProvider | null
         onEvent({ type: 'status', message: 'Done', pct: 100 });
         return { summary: fast.summary, version, styleRulesAdded: [], styleSuggestions: [], changed: [...ctx.state.changed], fast: fast.kind };
       } catch (e) {
-        await rollbackNote(deps, projectDir, before, creditsBefore, assetsBefore, ctx.state);
-        throw e;
+        throw noteFailed(e, await rollbackNote(deps, projectDir, before, creditsBefore, assetsBefore, ctx.state));
       }
     }
     // the direct change did not fit this project: undo it and let the AI read the note
@@ -354,6 +392,8 @@ export async function applyNote(deps: EditorDeps, provider: ModelProvider | null
   const noteText = note.trim() || '(no words: the user only attached the file(s) below)';
   const task = deps.prompts.render('applyNote', { note: noteText }) + (files ? `\n\n${files}` : '');
   const label = noteLabel(note, attached);
+  let committed: EditResult;
+  let saved: Project;
   try {
     const r = await runAgent({ provider, system: await systemPrompt(deps), task, taskImages: images, ctx, onEvent, signal, maxSteps: deps.maxSteps ?? 25, tokenBudget: deps.tokenBudget, preload: ['get_project', 'get_transcript'] });
     if (!ctx.state.changed.size && !ctx.state.styleRulesAdded.length) {
@@ -374,11 +414,22 @@ export async function applyNote(deps: EditorDeps, provider: ModelProvider | null
     await saveProject(projectDir, p);
     await snapshotVersion(projectDir, p, version, `# v${version}\n\nNote: ${label}\n\n${summary}\n`);
     onEvent({ type: 'status', message: 'Done', pct: 100 });
-    return { summary, version, styleRulesAdded: ctx.state.styleRulesAdded, styleSuggestions: ctx.state.styleSuggestions, changed: [...ctx.state.changed] };
+    saved = p;
+    committed = { summary, version, styleRulesAdded: ctx.state.styleRulesAdded, styleSuggestions: ctx.state.styleSuggestions, changed: [...ctx.state.changed] };
   } catch (e) {
-    await rollbackNote(deps, projectDir, before, creditsBefore, assetsBefore, ctx.state);
-    throw e;
+    throw noteFailed(e, await rollbackNote(deps, projectDir, before, creditsBefore, assetsBefore, ctx.state));
   }
+  const styleProposal = await rememberCaptionCase(deps, p0, saved, committed.version);
+  return styleProposal ? { ...committed, styleProposal } : committed;
+}
+
+/** A note that turned the captions lowercase, now committed in `version`: ask to keep that for new videos.
+ * Read from the saved project, so a case the AI set and then changed back asks nothing, and the question's
+ * words are fixed here, never taken from the note or the AI. */
+async function rememberCaptionCase(deps: EditorDeps, before: Project, after: Project, version: number): Promise<StyleProposal | null> {
+  if (after.captions.style.case !== 'lower' || before.captions.style.case === 'lower') return null;
+  if (await deps.style.hasCaptionCase()) return null;
+  return captionCaseProposal({ project: after.id, title: after.title, version });
 }
 
 // ---------------------------------------------------------------- idea -> script
