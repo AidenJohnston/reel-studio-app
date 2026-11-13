@@ -270,7 +270,7 @@ describe('answering the question', () => {
     return { ...s, a, b };
   }
 
-  it('a failed note that turned the paused rule back on leaves it on when another video's Yes approved it meanwhile', async () => {
+  it("a failed note that turned the paused rule back on leaves it on when another video's Yes approved it meanwhile", async () => {
     const { dir, host, ai, newVideo, b } = await pausedRule();
     const other = await newVideo(dir);
     host.failRender = true;
