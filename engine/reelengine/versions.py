@@ -1,14 +1,18 @@
 """`save-version` and `export`: an edit is saved as a version from its draft, and its full-quality file
 is made once, when the person exports it (docs/versions.md).
 
-A note or a hand edit ends with `save-version`: versions/vN gets the project snapshot, the draft that
-shows it and that draft's cover, and project.json's `version` becomes N. No full-quality render runs.
-`export` makes versions/vN/export.mp4 with one full render, or hands back the one already made when
-nothing changed since (render.pick_version), and reports what the file really is, read with ffprobe.
+A saved version is complete and never changes. `save-version` writes versions/vN in one step: the project
+snapshot, a record of every file outside project.json that its video is made from (`inputs.json`), the
+draft that shows it and that draft's cover. project.json's `version` becomes N. No full-quality render runs.
+`export` rebuilds a version's full-quality file from its own snapshot, so any version, newest or not,
+exports the same file. It renders once and hands that file back afterwards, and it refuses when a file
+the version was made from has changed since, rather than make a different video under its number.
 """
 from __future__ import annotations
 
+import hashlib
 import os
+import re
 import shutil
 from pathlib import Path
 from typing import Optional
@@ -18,18 +22,51 @@ from .probe import probe
 from .proto import EngineError, progress
 
 STAGE = "render"
+INPUTS = "inputs.json"
+_ANIMATION_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,80}$")    # broll.py resolves these in work/animations
 
 
 def _link_or_copy(src: Path, dst: Path) -> None:
     """dst becomes src's file. A hard link costs nothing, and the engine replaces the preview's files
     (never writes into them), so the version keeps what it linked. A copy where links don't work."""
-    tmp = dst.with_name(dst.name + ".part")
-    tmp.unlink(missing_ok=True)
     try:
-        os.link(src, tmp)
+        os.link(src, dst)
     except OSError:
-        shutil.copyfile(src, tmp)
-    os.replace(tmp, dst)
+        shutil.copyfile(src, dst)
+
+
+def _sha256(f: Path) -> Optional[str]:
+    try:
+        return hashlib.sha256(f.read_bytes()).hexdigest()
+    except OSError:
+        return None
+
+
+def inputs(project_dir: Path, proj: dict, root: Optional[Path] = None) -> dict:
+    """Every file outside project.json that the video of `proj` is made from: the takes, the song and the
+    pictures by size and time (render.asset_fingerprint), and the app's animations, the face track and the
+    transcript by content, since they are rewritten in place under the same name."""
+    work = Path(project_dir) / "work"
+    ids = {a for b in proj.get("broll") or []
+           for a in [b.get("asset"), *((b.get("params") or {}).get("items") or [])]
+           if isinstance(a, str) and _ANIMATION_ID.match(a)}
+    animations = {f.name: _sha256(f) for a in sorted(ids) for f in sorted((work / "animations").glob(f"{a}.*"))}
+    return {"assets": render.asset_fingerprint(project_dir, proj, root), "animations": animations,
+            "faces": {f.name: _sha256(f) for f in sorted(work.glob("face*.json"))},
+            "transcript": _sha256(projmod.transcript_path(project_dir, proj))}
+
+
+def _same_video(vdir: Path, proj: dict, now: dict) -> bool:
+    """vdir is a saved version of this very video: the same edit, made from the same files."""
+    try:
+        if projmod.edit_signature(projmod.read_json(vdir / "project.json")) != projmod.edit_signature(proj):
+            return False
+        if (vdir / INPUTS).exists():
+            return projmod.read_json(vdir / INPUTS) == now
+        # saved by an earlier build, as a full render: it recorded only the takes, song and pictures
+        return (vdir / "assets.json").exists() and projmod.read_json(vdir / "assets.json") == now["assets"]
+    except (OSError, ValueError):
+        return False
 
 
 def fresh_draft(project_dir: Path, proj: dict, root: Optional[Path] = None) -> Optional[Path]:
@@ -52,35 +89,42 @@ def fresh_draft(project_dir: Path, proj: dict, root: Optional[Path] = None) -> O
 
 def save(project_dir: Path, root: Optional[Path] = None) -> dict:
     """Saves the edit as it is now as a version, from its draft (rendered here when the preview shows
-    another edit). Returns the version and the file to play."""
+    another edit). The current version when it already is this video, else a new one. Returns the
+    version and the file to play."""
     project_dir = Path(project_dir).resolve()
     root = tools.root_dir(str(root) if root else None)
     proj = projmod.load(project_dir)
     draft = fresh_draft(project_dir, proj, root)
     if draft is None:
-        made = render.run(project_dir, draft=True, root=root)
-        draft = Path(made["file"])
+        draft = Path(render.run(project_dir, draft=True, root=root)["file"])
     shown = projmod.read_json(draft.with_name("project.json"))     # exactly what the draft shows
+    now = inputs(project_dir, shown, root)
     cur = int(proj.get("version") or 0)
-    n = render.pick_version(project_dir, dict(shown, version=cur), root)
-    vdir = project_dir / "versions" / f"v{n}"
-    if n == cur and _exported(vdir):
-        # this very edit is already exported: the version is that file
+    vdir = project_dir / "versions" / f"v{cur}"
+    if cur and _same_video(vdir, shown, now):
         moments.mark(project_dir)
-        return {"version": n, "file": str(vdir / "export.mp4"), "draft": False, "versionDir": str(vdir)}
-    if n > cur and vdir.exists():
-        shutil.rmtree(vdir)       # above `version`: an attempt that never finished, not a version
-    vdir.mkdir(parents=True, exist_ok=True)
-    projmod.write_json(vdir / "project.json", dict(shown, version=n))
+        exported = _exported(vdir)
+        return {"version": cur, "file": str(vdir / ("export.mp4" if exported else "draft.mp4")),
+                "draft": not exported, "versionDir": str(vdir)}
+    n = cur + 1
+    vdir = project_dir / "versions" / f"v{n}"
+    part = vdir.with_name(f".v{n}.part")
+    for stale in (vdir, part):     # above `version`: an attempt that never finished, not a version
+        if stale.exists():
+            shutil.rmtree(stale)
+    part.mkdir(parents=True)
+    projmod.write_json(part / "project.json", dict(shown, version=n))
+    projmod.write_json(part / INPUTS, now)
+    projmod.write_json(part / "assets.json", now["assets"])       # what render.pick_version reads
     cover = render.render_manifest(draft).get("cover")      # only when that draft made it
     if cover and Path(cover).exists():
-        _link_or_copy(Path(cover), vdir / "cover.png")
-    _link_or_copy(draft, vdir / "draft.mp4")
-    if n != cur:
-        # Re-read: patch the one field this command owns, as render does.
-        fresh = projmod.load(project_dir)
-        fresh["version"] = n
-        projmod.save(project_dir, fresh)
+        _link_or_copy(Path(cover), part / "cover.png")
+    _link_or_copy(draft, part / "draft.mp4")
+    os.replace(part, vdir)        # the version appears whole, or not at all
+    # Re-read: patch the one field this command owns, as render does.
+    fresh = projmod.load(project_dir)
+    fresh["version"] = n
+    projmod.save(project_dir, fresh)
     moments.mark(project_dir)     # the screen now shows this version: the next edit's moments start here
     progress(STAGE, 100, "Your change is saved", force=True)
     return {"version": n, "file": str(vdir / "draft.mp4"), "draft": True, "versionDir": str(vdir)}
@@ -104,33 +148,26 @@ def _exported(vdir: Path) -> bool:
         return False
 
 
-def _result(n: int, vdir: Path, reused: bool) -> dict:
-    video, cover = vdir / "export.mp4", vdir / "cover.png"
-    return {"version": n, "file": str(video), "cover": str(cover) if cover.exists() else None,
-            "reused": reused, "facts": facts(video, projmod.read_json(vdir / "project.json")["format"])}
-
-
 def export(project_dir: Path, root: Optional[Path] = None, version: Optional[int] = None) -> dict:
-    """The full-quality file of the edit as it is now: the one already made when the edit and the files
-    it reads have not changed since (render.pick_version), else one full render. With `version`, an
-    earlier version's: only one exported before has that file."""
+    """Version `version`'s full-quality file, rebuilt from its own snapshot the first time and handed
+    back after that. Without `version`: the edit as it is now, saved as a version first."""
     project_dir = Path(project_dir).resolve()
     root = tools.root_dir(str(root) if root else None)
-    proj = projmod.load(project_dir)
-    n = render.pick_version(project_dir, proj, root)
-    if version is not None and version != n:
-        vdir = project_dir / "versions" / f"v{version}"
-        if not _exported(vdir):
-            raise EngineError("ONLY_A_PREVIEW", f"v{version} has no export.mp4",
-                              f"Version {version} was saved as a quick preview, so it has no full-quality file. "
-                              "Export your newest version, or send a note to change it back first.")
+    if version is None:
+        version = save(project_dir, root)["version"]
+    vdir = project_dir / "versions" / f"v{version}"
+    if not (vdir / "project.json").exists():
+        raise EngineError("NO_VERSION", f"no {vdir}", f"I couldn't find Version {version}. Pick another version and export again.")
+    reused = _exported(vdir)
+    if not reused:
+        snap = projmod.read_json(vdir / "project.json")
+        if (vdir / INPUTS).exists() and projmod.read_json(vdir / INPUTS) != inputs(project_dir, snap, root):
+            raise EngineError("VERSION_INPUTS_CHANGED", f"a file v{version} was made from has changed",
+                              f"A picture, song, animation or take used in Version {version} has changed since it was "
+                              "saved, so I can't make that exact video any more. Export a newer version instead.")
+        render.run(project_dir, root=root, version=version)
+    else:
         progress(STAGE, 100, "Your video is ready", force=True)
-        return _result(version, vdir, True)
-    vdir = project_dir / "versions" / f"v{n}"
-    if n == int(proj.get("version") or 0) and _exported(vdir):
-        progress(STAGE, 100, "Your video is ready", force=True)
-        return _result(n, vdir, True)
-    made = render.run(project_dir, root=root)
-    vdir = Path(made["versionDir"])
-    (vdir / "draft.mp4").unlink(missing_ok=True)       # the full-quality file is this version now
-    return _result(int(made["version"]), vdir, False)
+    cover = vdir / "cover.png"
+    return {"version": version, "file": str(vdir / "export.mp4"), "cover": str(cover) if cover.exists() else None,
+            "reused": reused, "facts": facts(vdir / "export.mp4", projmod.read_json(vdir / "project.json")["format"])}

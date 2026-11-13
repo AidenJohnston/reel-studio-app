@@ -787,10 +787,15 @@ def first_look_project(project_dir: Path, proj: dict, music: Optional[str] = Non
 
 def run(project_dir: Path, draft: bool = False, window: Optional[str] = None,
         root: Optional[Path] = None, verify: bool = True, first_look: bool = False,
-        music: Optional[str] = None, cover: bool = True) -> dict:
+        music: Optional[str] = None, cover: bool = True, version: Optional[int] = None) -> dict:
+    """`version`: rebuild that saved version's full render from its own snapshot, into its own folder
+    (versions.export), whatever the project is now."""
     t_start = time.time()
     project_dir = Path(project_dir).resolve()
-    proj = projmod.load(project_dir)
+    if version is None:
+        proj = projmod.load(project_dir)
+    else:
+        proj = projmod.read_json(project_dir / "versions" / f"v{version}" / "project.json")
     if first_look:
         draft = True
         proj = first_look_project(project_dir, proj, music)
@@ -804,7 +809,8 @@ def run(project_dir: Path, draft: bool = False, window: Optional[str] = None,
     if win:
         draft = True        # a window is a preview: always the fast encoder
 
-    version = pick_version(project_dir, proj, root)  # for a preview: the number this edit WILL get
+    if version is None:
+        version = pick_version(project_dir, proj, root)  # for a preview: the number this edit WILL get
     preview = bool(draft)
     vdir = preview_dir(project_dir) if preview else project_dir / "versions" / f"v{version}"
     vdir.mkdir(parents=True, exist_ok=True)

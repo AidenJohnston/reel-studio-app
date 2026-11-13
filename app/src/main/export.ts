@@ -39,7 +39,7 @@ export interface Exported {
   facts: VideoFacts
 }
 
-/** The full-quality file of the edit as it is now, or of an earlier `version` that has one. */
+/** Version `version`'s full-quality file, rebuilt from its own snapshot (null: the edit as it is now, saved first). */
 export async function makeExport(runEngine: RunEngine, dir: string, version: number | null, emit: Emit, signal: AbortSignal): Promise<Exported> {
   const words = 'Making the full-quality video'
   emit({ type: 'status', message: words, pct: 1, phase: 'final' })

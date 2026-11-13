@@ -341,21 +341,21 @@ function safeFileName(s: string): string {
 }
 
 /** Export: the full-quality file is made here, once (engine `export`; notes and hand edits stop at their
- * draft). It runs as a normal job, so it shows progress, Stop works, and nothing else runs on this video
- * meanwhile. While nothing changed since the last export, the file made then is handed back at once. */
+ * draft). It is rebuilt from the chosen version's own snapshot, so every version exports its own video,
+ * and the file made the first time is handed back after that. It runs as a normal job, so it shows
+ * progress, Stop works, and nothing else runs on this video meanwhile. */
 async function exportVersion(slug: string, n: number): Promise<ExportResult> {
   const dir = projectDir(slug)
   const versions = await listVersions(dir)
-  const latest = versions[versions.length - 1]
-  const v = versions.find((x) => x.n === n) ?? latest
+  const v = versions.find((x) => x.n === n) ?? versions[versions.length - 1]
   if (!v) throw { code: 'NO_VERSION', userMessage: 'This video is not ready yet. Wait for it to finish, then try again.' }
   if (jobs.forSlug(slug)) throw { code: 'BUSY', userMessage: 'I am still working on this video. Wait until it is done, then export.' }
-  // the newest version is the edit as it is now; an earlier one only has the file it was exported with
   let made: Exported | null = null
   let failed: unknown = null
   jobs.start(slug, 'export', async (emit, signal) => {
     try {
-      made = await makeExport(runEngine, dir, v === latest ? null : v.n, emit, signal)
+      // "Preview" (n = 0, no version yet): the edit as it is now, saved as a version first
+      made = await makeExport(runEngine, dir, v.n || null, emit, signal)
     } catch (e) {
       failed = e
       throw e

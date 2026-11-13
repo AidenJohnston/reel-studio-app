@@ -5,14 +5,16 @@ never a pile of preview-only folders an AI run left behind.
 
 Changed 2026-11-12: a version is saved from its draft. Notes and hand edits end at the draft, and the
 full-quality file is made once, when the person exports (a 2 s nitpick no longer waits for a full render).
+A saved version is complete and never changes, and Export rebuilds any version from its own snapshot.
 
 ## On disk
 
 ```
 <project>/versions/
-  v1/            a VERSION: project.json + draft.mp4 + cover.png (+ notes.md), saved from its draft;
-                 once exported: export.mp4 + cover.png + verify.json + render.json + assets.json instead
-                 of draft.mp4
+  v1/            a VERSION, saved from its draft and then never changed: project.json (the snapshot),
+                 inputs.json (every file outside project.json its video is made from), assets.json,
+                 draft.mp4, cover.png (+ notes.md); once exported, also export.mp4 + render.json +
+                 verify.json and the render's reports, all made from that snapshot
   v2/
   preview/       the ONE scratch folder for previews, overwritten every time:
                  draft.mp4, window_<a>-<b>.mp4 (only the latest window), cover.png, verify.json,
@@ -26,23 +28,29 @@ run finishes.
 
 Rules:
 
-1. **Only `save-version` and a final render (`render` without `--draft`/`--window`, run by `export`)
-   create or fill `versions/vN/`.** `save-version` links the draft of this edit from `preview/` (rendering
-   it first when `preview/` shows another edit) with its cover and the project snapshot, and records
-   the moments base (the screen now shows this version).
+1. **Only `save-version` creates `versions/vN/`, and only `export` adds to it.** `save-version` links
+   the draft of this edit from `preview/` (rendering it first when `preview/` shows another edit) with
+   its cover, the snapshot and `inputs.json`, writes them under `.vN.part/` and renames that to `vN/`,
+   so a version is whole or absent. It records the moments base (the screen now shows this version).
+   Nothing ever rewrites or deletes a saved version's files.
 2. **Every `render --draft` and every `render --window a:b` writes into `versions/preview/`**,
    replacing what was there (a new window deletes the previous `window_*.mp4`). It never creates a
    `vN` folder and never changes `project.json`'s `version`.
 3. `project.json` `version` = the last SAVED version number (saved from its draft or exported).
-4. `save-version` and a final render re-use `vN` when the edit is unchanged since `vN` was saved;
-   otherwise they make `v(N+1)` (`render.pick_version`). `export` renders only when `vN` has no whole
-   `export.mp4` (its `render.json` written after it) for this edit, and otherwise hands that file back.
-   `export --version K` hands back an earlier version's `export.mp4`, and refuses (`ONLY_A_PREVIEW`)
-   when K was only ever a draft. Its result carries `facts` read from the file with ffprobe: width,
-   height, fps, bytes, duration and `fullResolution` (the project's format).
-5. `cover` (cover only) writes into `vN` when that edit already has its `export.mp4`, else into
-   `preview/`.
-6. `frames` reads the newest full render, preview or final (never a window slice), whose manifest
+4. `save-version` keeps the current `vN` when it is this very video (the same edit signature and the
+   same `inputs.json`: the takes, song and pictures by size and time, the animations, face track and
+   transcript by content), and otherwise saves `v(N+1)`. A file replaced under the same name is a new
+   version, never a changed old one.
+5. `export --version K` makes version K's `export.mp4` by rendering K's own snapshot into `vK/`
+   (`render.run(version=K)`), whatever the project is now, so every version, newest or only ever a
+   preview, exports its own video. It renders once: a whole `export.mp4` (its `render.json` written
+   after it) is handed back as it is. When a file K was made from has changed since K was saved, it
+   refuses (`VERSION_INPUTS_CHANGED`) instead of making a different video under K's number. Without
+   `--version` it saves the edit as it is now first. Its result carries `facts` read from the file with
+   ffprobe: width, height, fps, bytes, duration and `fullResolution` (the version's format).
+6. `cover` (cover only) writes into `vN` when that edit already has its `export.mp4` (the same edit
+   draws the same cover), else into `preview/`.
+7. `frames` reads the newest full render, preview or final (never a window slice), whose manifest
    carries the project's current picture key. When none does, it draws the stills from the project
    into `preview/frames/` without making a preview.
 
@@ -58,16 +66,18 @@ Rules:
 
 ## What the app shows
 
-- **Version chips** = folders matching `^v\d+$` that contain `export.mp4` or `draft.mp4`, sorted by
-  number. A chip with only `draft.mp4` plays its draft and says it is a quick preview; Export makes its
-  full-quality file. Folders with neither are not shown.
+- **Version chips** = folders matching `^v\d+$` that contain `export.mp4`, or `draft.mp4` beside
+  `inputs.json` (an older build's scratch draft in a `vN` folder has no `inputs.json` and is not a
+  version), sorted by number. A chip without `export.mp4` plays its draft and says it is a quick
+  preview; Export makes that version's full-quality file.
 - **While an AI run is working**, the player may show `versions/preview/draft.mp4` (the `render`
   event with `draft: true`).
 - **`AgentResult.version`** is the version to select after a run: saved from its draft, so its folder
   has `draft.mp4` until it is exported.
-- **Export, Send to my phone and posting** all start with `export`, as a job with progress; the file
-  copied into Library › Finished videos is that version's `export.mp4`.
-- `versions/vN/notes.md` (written by the ai package) is the note text for that chip.
+- **Export, Send to my phone and posting** all start with `export --version <the chosen chip>`, as a job
+  with progress; the file copied into Library › Finished videos is that version's `export.mp4`.
+- `versions/vN/notes.md` (written by the ai package) is the note text for that chip: the one file
+  added to a saved version, and never part of its video.
 
 ## ai package
 

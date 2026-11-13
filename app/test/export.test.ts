@@ -45,36 +45,42 @@ describe('a hand edit and Export', () => {
   it('Export renders the full-quality file once and hands back the same file while nothing changed', async () => {
     const { run, dir, emit, signal, edit, v } = await project()
     await saveHandEdit(run, dir, 'Updating your video', emit, signal)
-    const first = await makeExport(run, dir, null, emit, signal)
+    const first = await makeExport(run, dir, 1, emit, signal)
     expect(first).toMatchObject({ version: 1, file: v(1, 'export.mp4'), reused: false })
-    expect(existsSync(v(1, 'draft.mp4'))).toBe(false)
+    expect(existsSync(v(1, 'draft.mp4'))).toBe(true)        // a saved version keeps everything it had
     const made = statSync(first.file).mtimeMs
-    const again = await makeExport(run, dir, null, emit, signal)
+    const again = await makeExport(run, dir, 1, emit, signal)
     expect(again).toMatchObject({ version: 1, file: first.file, reused: true })
     expect(statSync(first.file).mtimeMs).toBe(made)
     // a changed edit is the next version, made in full only when it is exported
     edit({ captions: { enabled: false } })
     expect(await saveHandEdit(run, dir, 'Updating your subtitles', emit, signal)).toBe(2)
-    expect((await makeExport(run, dir, null, emit, signal)).version).toBe(2)
+    expect((await makeExport(run, dir, 2, emit, signal)).version).toBe(2)
     // the earlier version still has its own file
     expect(await makeExport(run, dir, 1, emit, signal)).toMatchObject({ version: 1, file: first.file, reused: true })
   }, 120_000)
 
-  it('an earlier version that was only a preview says so instead of exporting another video', async () => {
-    const { run, dir, emit, signal, edit } = await project()
+  it('an earlier version that was only a preview exports its own video, rebuilt from its snapshot', async () => {
+    const { run, dir, emit, signal, edit, v } = await project()
     await saveHandEdit(run, dir, 'Updating your video', emit, signal)
     edit({ captions: { enabled: false } })
     await saveHandEdit(run, dir, 'Updating your subtitles', emit, signal)
-    await expect(makeExport(run, dir, 1, emit, signal)).rejects.toMatchObject({
-      code: 'ONLY_A_PREVIEW',
-      userMessage: expect.stringContaining('Version 1')
-    })
+    expect(await makeExport(run, dir, 1, emit, signal)).toMatchObject({ version: 1, file: v(1, 'export.mp4'), reused: false })
+    expect(JSON.parse(readFileSync(v(1, 'project.json'), 'utf8')).captions).not.toEqual({ enabled: false })
+    expect(existsSync(v(2, 'export.mp4'))).toBe(false)
+    expect(JSON.parse(readFileSync(join(dir, 'project.json'), 'utf8')).version).toBe(2)   // nothing else changes
+  }, 60_000)
+
+  it('Export without a version saves the edit as it is now first', async () => {
+    const { run, dir, emit, signal, v } = await project()
+    expect(await makeExport(run, dir, null, emit, signal)).toMatchObject({ version: 1, file: v(1, 'export.mp4') })
+    expect(existsSync(v(1, 'inputs.json'))).toBe(true)
   }, 60_000)
 
   it("the facts are read from the exported file and say what people ask before they post", async () => {
     const { run, dir, emit, signal } = await project()
     await saveHandEdit(run, dir, 'Updating your video', emit, signal)
-    const { facts, file } = await makeExport(run, dir, null, emit, signal)
+    const { facts, file } = await makeExport(run, dir, 1, emit, signal)
     expect(facts).toMatchObject({ width: 1080, height: 1920, fps: 30, bytes: statSync(file).size, fullResolution: true })
   }, 60_000)
 })
