@@ -91,11 +91,12 @@ export async function load(ctx: ToolContext): Promise<{ p: Project; t: Transcrip
 
 async function mutate(ctx: ToolContext, field: string, fn: (p: Project, t: Transcript) => void | string): Promise<void> {
   const { p, t } = await load(ctx);
+  const before = structuredClone(p.broll);
   const problem = fn(p, t);
   if (typeof problem === 'string') throw new ToolInputError(problem);
   // in a planned project the rows are the b-roll: they follow this edit in the same write (plan.ts afterEdit)
   if (field === 'broll' || field === 'cut') {
-    try { afterEdit(p, t, ctx.userNote === undefined ? 'ai' : 'note'); } catch (e) { if (e instanceof PlanError) throw new ToolInputError(e.message); throw e; }
+    try { afterEdit(p, t, ctx.userNote === undefined ? 'ai' : 'note', before); } catch (e) { if (e instanceof PlanError) throw new ToolInputError(e.message); throw e; }
   }
   const problems = validateProject(p, t);
   if (problems.length) throw new ToolInputError(problems.join('; '));

@@ -67,6 +67,7 @@ All additive (optional fields only), per docs/architecture.md section 3. Schema:
   `locked`, `lockedAt`, `hook`, `onScreenText`}, `beats[]` {`line`, `visual`, `sound`}, `broll[]` {`id` (`p1`...),
   `words`, `anchor` (word range), `visual`, `source` (own-file | library | fetched | card | animation |
   screen-recording), `asset`, `treatment`, `status` (proposed | approved | rejected), `hold` (seconds, a hint),
-  `note`, `broll` (the b-roll item it built)}, `music`, `cover` (one line each), `buildProposed` (build proposed
+  `note`, `broll` (the b-roll item it built), `look` ({`leadIn`, `params`}: its picture's look while it is out of
+  the video)}, `music`, `cover` (one line each), `buildProposed` (build proposed
   rows as if approved). The engine renders only `broll`, which the AI layer derives from the rows; its edit
   signature counts only `plan.script`.

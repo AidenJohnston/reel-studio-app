@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest';
 import * as fsp from 'node:fs/promises';
 import * as path from 'node:path';
 import { createAI, Plan, PlanRow, Project, changePlan, emptyPlan, fromMarkdown, planProblems, syncPlan, toMarkdown, updatePlan, withDefaults } from '../src';
-import { aiUpdateRow, followBroll, followHandEdit, proposeRows, readPlan } from '../src/plan';
+import { afterEdit, aiUpdateRow, followBroll, followHandEdit, proposeRows, readPlan } from '../src/plan';
 import { PLAN_TOOLS } from '../src/planAgent';
 import { FakeHost, ScriptedModel, call, firstVersion, makeProject, makeTranscript, SAMPLE_LINES, tinyPng, tmpDir } from './helpers';
 
@@ -125,8 +125,9 @@ describe('the plan builds b-roll deterministically', () => {
   it('a note\'s change to a placed row goes back to the row, and the next sync keeps it', () => {
     const p = project(withRows([HOURS], { buildProposed: true }));
     syncPlan(p, t);
+    const before = structuredClone(p.broll);
     p.broll[0] = { ...p.broll[0], anchor: { from: 'w48', to: 'w52' }, params: { text: '18 HRS', tilt: 3 } };
-    followBroll(p, t, 'note');
+    followBroll(p, t, 'note', before);
     expect(p.plan!.broll[0]).toEqual({ ...HOURS, words: 'eighteen hours in the fridge', anchor: { from: 'w48', to: 'w52' }, visual: '18 HRS', broll: 'p2' });
     const once = JSON.stringify(p);
     syncPlan(p, t);
@@ -151,6 +152,56 @@ describe('the plan builds b-roll deterministically', () => {
     expect(p.broll.map((b) => b.id)).toEqual(['p1', 'p2']);
   });
 
+  it('cutting a word inside a row\'s words keeps its picture on the words that are left', () => {
+    const p = project(withRows([row({ id: 'p1', words: 'I spent twenty bucks', visual: '$20', status: 'approved' })]));
+    // the cut drops "twenty" (w29) from the middle
+    p.cut.keep = [{ from: 'w16', to: 'w28' }, { from: 'w30', to: 'w56' }];
+    expect(syncPlan(p, t)).toEqual([]);
+    expect(p.broll.map((b) => [b.id, b.anchor])).toEqual([['p1', { from: 'w27', to: 'w30' }]]);
+  });
+
+  it('a picture whose words leave the cut comes back with the look it had', () => {
+    const p = project(withRows([row({ id: 'p1', words: 'eighteen hours', visual: '18 HOURS', status: 'approved' })]));
+    syncPlan(p, t);
+    p.broll[0] = { ...p.broll[0], leadIn: 0.3, params: { ...p.broll[0].params, tilt: 3, style: 'label' } };
+    const look = structuredClone(p.broll[0]);
+    p.cut.keep = [{ from: 'w16', to: 'w47' }];
+    expect(syncPlan(p, t)).toEqual([{ id: 'p1', why: 'words-cut' }]);
+    expect(p.broll).toEqual([]);
+    expect(p.plan!.broll[0].look).toEqual({ leadIn: 0.3, params: { text: '18 HOURS', tilt: 3, style: 'label' } });
+    p.cut.keep = [{ from: 'w16', to: 'w56' }];
+    syncPlan(p, t);
+    expect(p.broll).toEqual([look]);
+    expect(p.plan!.broll[0].look).toBeUndefined();
+  });
+
+  it('a removed picture keeps its look on its rejected row, and it comes back as it was when approved again', () => {
+    const p = project(withRows([row({ id: 'p1', words: 'eighteen hours', visual: '18 HOURS', status: 'approved' })]));
+    syncPlan(p, t);
+    p.broll[0] = { ...p.broll[0], params: { ...p.broll[0].params, side: 'left' } };
+    const look = structuredClone(p.broll[0]);
+    const before = structuredClone(p.broll);
+    p.broll = [];
+    afterEdit(p, t, 'hand', before);
+    expect(p.plan!.broll[0]).toMatchObject({ status: 'rejected', look: { leadIn: 0.13, params: { text: '18 HOURS', side: 'left' } } });
+    p.plan = changePlan(p.plan, { kind: 'rowStatus', id: 'p1', status: 'approved' }, NOW);
+    syncPlan(p, t);
+    expect(p.broll).toEqual([look]);
+  });
+
+  it('b-roll that was in the video before the plan had rows is adopted, never refused as the AI\'s', () => {
+    const p = project(withRows([]));
+    p.broll.push({ id: 'b1', anchor: { from: 'w40', to: 'w41' }, leadIn: 0.13, treatment: 'text-pop', asset: null, params: { text: 'BRICK' } });
+    // the creator adds a row to a video that already has b-roll, then the AI recuts it
+    p.plan = changePlan(p.plan, { kind: 'row', id: null, row: { words: 'fancy flour', visual: 'FLOUR', source: 'card' } }, NOW);
+    syncPlan(p, t);
+    const before = structuredClone(p.broll);
+    p.cut.keep = [{ from: 'w16', to: 'w56' }];
+    afterEdit(p, t, 'ai', before);
+    expect(p.plan!.broll.map((r) => [r.id, r.status, r.broll, r.note ?? null])).toEqual([['p1', 'approved', 'p1', null], ['p2', 'approved', 'b1', 'In the video already.']]);
+    expect(p.broll.map((b) => b.id)).toEqual(['b1', 'p1']);
+  });
+
   it('outside a note the AI can change only the look of what the creator decided', () => {
     const p = project(withRows([{ ...HOURS, status: 'approved' }, row({ id: 'p3', words: 'a brick', visual: 'a brick', source: 'fetched', status: 'approved' })]));
     syncPlan(p, t);
@@ -158,7 +209,7 @@ describe('the plan builds b-roll deterministically', () => {
     const refused = (change: (q: Project) => void) => {
       const q = structuredClone(p);
       change(q);
-      expect(() => followBroll(q, t, 'ai')).toThrow(/approved this video's b-roll plan/);
+      expect(() => followBroll(q, t, 'ai', p.broll)).toThrow(/approved this video's b-roll plan/);
     };
     refused((q) => { q.broll[0].params = { ...q.broll[0].params, text: '20 HOURS' }; });
     refused((q) => { q.broll[0].anchor = { from: 'w48', to: 'w52' }; });
@@ -167,7 +218,7 @@ describe('the plan builds b-roll deterministically', () => {
     const q = structuredClone(p);
     q.broll[0].params = { ...q.broll[0].params, tilt: 3 };
     q.broll[0].treatment = 'side-card';
-    followBroll(q, t, 'ai');
+    followBroll(q, t, 'ai', p.broll);
     expect(q.plan!.broll[0]).toMatchObject({ visual: '18 HOURS', treatment: 'side-card' });
     expect(JSON.stringify(p)).toBe(before);
     // update_plan_row: an approved row's anchor and file are fixed once it has them; missing ones may be filled

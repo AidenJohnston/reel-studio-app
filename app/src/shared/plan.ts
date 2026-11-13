@@ -33,6 +33,8 @@ export interface PlanRow {
   note?: string
   /** the b-roll item this row built: set while the row is in the video */
   broll?: string
+  /** how its picture looked while it is out of the video, so it comes back as it was */
+  look?: { leadIn?: number; params?: Record<string, unknown> }
 }
 export interface Plan {
   script: PlanScript

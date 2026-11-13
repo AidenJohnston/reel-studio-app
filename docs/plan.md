@@ -16,7 +16,8 @@ it. Without a `plan` nothing changes: the first edit picks its own b-roll as it 
   `anchor` (the same words as word ids), `visual` (one line; a card's text), `source` (`own-file`, `library`,
   `fetched`, `card`, `animation`, `screen-recording`), `asset` (the file, once known), `treatment` (how it is shown;
   the source's default otherwise), `status` (`proposed`, `approved`, `rejected`), `hold` (seconds it should stay
-  up: a hint for choosing the words), `note`, and `broll` (the project b-roll item it built).
+  up: a hint for choosing the words), `note`, `broll` (the project b-roll item it built), and `look` (its picture's
+  lead-in and params while it is out of the video, so it comes back as it was).
 - **Music** and **cover**: one line each.
 
 ## The flow
@@ -47,9 +48,11 @@ it. Without a `plan` nothing changes: the first edit picks its own b-roll as it 
 ## Determinism
 
 The plan reaches the video only through project.json `broll`, which `syncPlan` derives from the rows: in row order,
-an item updated in place or appended, anchors found by the same phrase search every time (kept words first). A row
-whose anchor the cut leaves out is looked for again in the kept words; one whose words are not kept at all is not
-built and is reported (`words-cut`) until they are. The same project.json and transcript always give the same
+an item updated in place or appended, anchors found by the same phrase search every time (kept words first). A
+row's anchor counts as in the cut while any of its words is kept (cutting a filler inside it leaves the picture on
+the kept words, as the engine shows it). With none kept its words are looked for again in the kept ones, and when
+they are not kept anywhere the row is not built and is reported (`words-cut`) until they are, then comes back with
+the look it had. The same project.json and transcript always give the same
 b-roll, and syncing again changes nothing (`ai/test/plan.test.ts`). A re-transcription moves the rows' anchors with
 the b-roll's (engine `remap_anchors`). The engine's edit signature counts only `plan.script` (captions may follow the locked
 script), so approving a row that builds nothing does not make a new version.

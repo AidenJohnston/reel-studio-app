@@ -241,7 +241,12 @@
               "status": { "enum": ["proposed", "approved", "rejected"] },
               "hold": { "type": "number", "minimum": 0, "maximum": 60, "description": "seconds it should stay up: a hint; the anchor's words decide the real length" },
               "note": { "type": "string" },
-              "broll": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$", "description": "the broll item this row built" }
+              "broll": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$", "description": "the broll item this row built" },
+              "look": {
+                "type": "object",
+                "description": "how its picture looked while it is out of the video (its words cut out, or the row rejected), so it comes back as it was",
+                "properties": { "leadIn": { "type": "number" }, "params": { "type": "object" } }
+              }
             }
           }
         },
