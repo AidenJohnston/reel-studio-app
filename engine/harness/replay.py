@@ -15,6 +15,7 @@ import os
 import shutil
 import statistics
 from pathlib import Path
+from typing import Optional
 
 from . import checks, media
 from .engines import Engine, Refusal, sha256_file
@@ -65,9 +66,23 @@ def write_state(proj_dir: Path, state: dict) -> None:
     os.replace(tmp, proj_dir / "project.json")
 
 
-def grid(fps: float) -> float:
-    """Keep the millisecond grid for integer rates; fractional rates use individual frames."""
-    return 1.0 / math.gcd(int(fps), 1000) if float(fps).is_integer() else 1.0 / fps
+def preview_rate(fps: float) -> float:
+    """The rate a draft or window renders at (engine render.preview_fps, pinned to it by a test):
+    the project rate up to 30, every other frame from 48 up (60 -> 30, 59.94 -> 29.97), else 30. The
+    final keeps the project rate, so the reference final and a preview can run on different clocks."""
+    if fps <= 30:
+        return fps
+    return fps / 2 if fps >= 48 else 30.0
+
+
+def grid(fps: float, preview: Optional[float] = None) -> float:
+    """Keep the millisecond grid for integer rates; fractional rates use individual frames. With a
+    `preview` rate, the grid holds frames of both clocks, so a window starts on a frame of each and a
+    still asks for one."""
+    preview = fps if preview is None else preview
+    if float(fps).is_integer() and float(preview).is_integer():
+        return 1.0 / math.gcd(int(fps), int(preview), 1000)
+    return 1.0 / preview
 
 
 def moment_time(segments: list, words: dict, word_id: str) -> float:
@@ -79,9 +94,10 @@ def moment_time(segments: list, words: dict, word_id: str) -> float:
     raise ValueError(f"moment word {word_id} is not in the cut")
 
 
-def plan_previews(t: float, duration: float, fps: float) -> dict:
-    """The 2 s window around a moment and two stills in it, on the frame grid."""
-    stride = round(grid(float(fps)) * fps)
+def plan_previews(t: float, duration: float, fps: float, preview: Optional[float] = None) -> dict:
+    """The 2 s window around a moment and two stills in it, on the frame grid of the final (`fps`)
+    and of the previews (`preview`, the same rate when not given)."""
+    stride = round(grid(float(fps), preview) * fps)
 
     def frame(seconds: float) -> int:
         return math.floor(max(0.0, seconds) * fps / stride + 1e-9) * stride
@@ -204,9 +220,10 @@ def build_references(take: Take, ref_engine: Engine, refs_root: Path, scratch: P
         segs = json.loads((d / "segments.json").read_text(encoding="utf-8"))
         done = json.loads((d / "done.json").read_text(encoding="utf-8"))
         fps = float(state["format"]["fps"])
+        pfps = preview_rate(fps)
         t = moment_time(segs, words, step["moment"]["word"])
         out.append({"dir": d, "key": key, "format": state["format"], "moment": round(t, 3), "fps": fps,
-                    **plan_previews(t, float(done["result"]["duration"]), fps)})
+                    "previewFps": pfps, **plan_previews(t, float(done["result"]["duration"]), fps, pfps)})
     return out
 
 
@@ -247,7 +264,7 @@ def replay(take: Take, cand: Engine, refs: list, scratch: Path, keep_dir, ffprob
             raise RuntimeError(f"{take.id}: preview copies not made, so --proxy would measure the originals: {bad}")
     for k, (step, ref) in enumerate(zip(take.session, refs)):
         write_state(proj, take.state(step))
-        fps = ref["fps"]
+        fps = ref["previewFps"]                      # drafts and windows run on the preview clock
         draft = cand.run("render", ["--project", proj, "--draft"])
         _complete_video(ffprobe, draft.result["file"], draft.result["duration"], fps)
         # The draft just made, by name: a real note's frozen state can have version > 0, and
@@ -359,13 +376,15 @@ def check_take(take: Take, refs: list, runs: list, ffmpeg: str, ffprobe: str, th
             elif name is None or any(name not in run["files"][k] for run in runs):
                 stills.append(_missing(f"no still for {t}s in every run"))
             else:
-                stills.append(_merge([checks.check_still(ffmpeg, ffprobe, export, f, t, caps, pv, still_want)
+                stills.append(_merge([checks.check_still(ffmpeg, ffprobe, export, f, t, caps, pv, still_want,
+                                                         ref["previewFps"])
                                       for f in distinct(lambda r, name=name: r["files"][k][name])]))
         steps.append({
-            "draft": _merge([checks.check_preview_video(ffmpeg, ffprobe, export, f, caps, pv, ref["fps"], want)
+            "draft": _merge([checks.check_preview_video(ffmpeg, ffprobe, export, f, caps, pv, ref["fps"], want,
+                                                        preview_fps=ref["previewFps"])
                              for f in distinct(lambda r: r["files"][k]["draft"])]),
             "window": _merge([checks.check_preview_video(ffmpeg, ffprobe, export, f, caps, pv, ref["fps"], want,
-                                                         start=a, end=b)
+                                                         start=a, end=b, preview_fps=ref["previewFps"])
                               for f in distinct(lambda r: r["files"][k]["window"])]),
             "still": stills})
     last = refs[-1]["dir"]
