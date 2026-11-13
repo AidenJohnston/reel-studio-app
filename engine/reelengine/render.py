@@ -12,7 +12,9 @@ the same length and the concat cannot drift. Every ffmpeg input is bounded.
 Inputs are opened in LANES: each lane is one ffmpeg input of a source whose segments run forward in
 source time. A cut in source order is one lane per source. A reordered cut (hook recorded last,
 placed first) gets an extra lane, opened with an input seek, so ffmpeg never has to buffer minutes
-of decoded frames waiting for a later segment.
+of decoded frames waiting for a later segment. The picture also starts a new lane across a long
+gap of cut-away footage (video_lanes), so a long take cut short decodes only near what it keeps.
+The voice keeps one lane per forward run: audio decode is cheap and its file is cached.
 """
 from __future__ import annotations
 
@@ -36,6 +38,18 @@ LRA = 11
 LIMIT = 0.97
 DRAFT_SCALE = 0.5
 SEEK_PREROLL = 3.0
+# A new video input opens the file again and decodes from the keyframe before (start - SEEK_PREROLL);
+# staying on the lane decodes the gap. Split only gaps clearly longer than that preroll plus a GOP.
+# The 2 s margin is a judgment, not a measurement.
+MIN_SEEK_GAP = SEEK_PREROLL + 2.0
+# Every input holds its own decoder until ffmpeg exits (fftools/ffmpeg_dec.c frees the codec context
+# only at cleanup), so memory grows with the input count. On Windows 11 (16 threads, FFmpeg 7.1.1-rs2)
+# the final of a 4K HEVC take cut to five far-apart stretches peaked at 1.50 GiB with one input and
+# 3.86 GiB with five, about 0.6 GiB per extra input. Three bounds the extra near 1.2 GiB for 8-bit 4K;
+# 10-bit footage and Macs are unmeasured. Raising it trades memory for decode time.
+# It caps only the seeks video_lanes adds. A reordered cut keeps every input plan_lanes gives it, as
+# on main, even past this: a forward-only input cannot serve an earlier segment without buffering.
+MAX_VIDEO_LANES = 3
 
 
 BROLL_FAILED = "Some b-roll couldn't be added to this version. Try again, or pick a different picture."
@@ -259,8 +273,43 @@ def plan_lanes(segments: list) -> list:
             lanes.append({"source": seg.source, "segs": [i], "last": seg.src_end,
                           "first": seg.src_start})
     for lane in lanes:
-        lane["seek"] = max(0.0, math.floor((lane["first"] - SEEK_PREROLL) * 10) / 10.0)
+        lane["seek"] = _lane_seek(lane["first"])
     return lanes
+
+
+def _lane_seek(first: float) -> float:
+    return max(0.0, math.floor((first - SEEK_PREROLL) * 10) / 10.0)
+
+
+def video_lanes(segments: list) -> list:
+    """plan_lanes, but a lane that would decode through more than MIN_SEEK_GAP of cut-away footage
+    starts again as a new input seeked to just before its next segment. A 5-minute take cut to
+    45 s otherwise decodes the whole span between its first and last kept second. The largest gaps
+    are split first, and only while the total stays within MAX_VIDEO_LANES. The lanes plan_lanes
+    needs are all kept, so a reordered cut with more of them than the cap gets no added seeks and
+    opens as many inputs as it does on main. Each piece is opened and trimmed the same way a reordered
+    cut's lanes already are, so the frames it yields are the same."""
+    lanes = plan_lanes(segments)
+    gaps = []
+    for li, lane in enumerate(lanes):
+        idx = lane["segs"]
+        for k in range(1, len(idx)):
+            gap = segments[idx[k]].src_start - segments[idx[k - 1]].src_end
+            if gap > MIN_SEEK_GAP:
+                gaps.append((gap, li, k))
+    gaps.sort(key=lambda g: -g[0])
+    splits: dict = {}
+    for _, li, k in gaps[:max(0, MAX_VIDEO_LANES - len(lanes))]:
+        splits.setdefault(li, []).append(k)
+    out = []
+    for li, lane in enumerate(lanes):
+        cuts = [0] + sorted(splits.get(li, [])) + [len(lane["segs"])]
+        for a, b in zip(cuts, cuts[1:]):
+            idx = lane["segs"][a:b]
+            first = segments[idx[0]].src_start
+            out.append({"source": lane["source"], "segs": idx, "first": first,
+                        "last": segments[idx[-1]].src_end, "seek": _lane_seek(first)})
+    return out
 
 
 def _f(t: float) -> str:
@@ -449,7 +498,7 @@ def build_video_cmd(ctx: RenderCtx, segments: list, src_meta: dict, src_paths: d
                     out_part: Path, graph_file: Path, use_hw: bool = True) -> list:
     fps = float(ctx.fmt.get("fps") or 30)
     f = out_w / float(ctx.fmt.get("width") or out_w)
-    lanes = plan_lanes(segments)
+    lanes = video_lanes(segments)
     cmd = [ctx.ffmpeg, "-y", "-nostdin", "-hide_banner"]
     hw = tools.hwaccel() if (ctx.draft and use_hw) else None
     seg_input, seg_chain = {}, {}

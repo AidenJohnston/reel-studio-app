@@ -1,0 +1,43 @@
+{
+  "reference": {
+    "engineCommit": "d4185a3cc35165d5a0c2d1f24569ee0a64f0386d",
+    "ffmpegBuild": "ffmpeg-7.1.1-rs2 (packaging/fetch_runtime.py)",
+    "ffmpegSha256": {"win32": "12655dcac4af7d0f4e8774c935293ef1e95bc555b45f9f9fbf7df2c551077f1e", "darwin": null},
+    "ffprobeSha256": {"win32": "7c09e2580e1a81fc6c8fc51ed0236e9f95d02e991a21dea8a74e637bc8f67469", "darwin": null}
+  },
+  "sizes": {
+    "why": "What a preview must measure before it is compared: render.py renders drafts and windows at DRAFT_SCALE of the output format, frames.py writes stills 540 wide.",
+    "previewScale": 0.5,
+    "stillWidth": 540
+  },
+  "runs": 5,
+  "agreeWithinPct": 5,
+  "thresholds": {
+    "approved": false,
+    "source": "Proposed from one run on main (Windows 11, pinned FFmpeg, harness-1, 2026-11-04), not approved by a person. Correct previews scored caption-band PSNR 34.0-45.5 dB, other PSNR 37.4-41.6 dB, mean color delta up to 1.59, audio offset 0 ms, level delta up to 0.15 dB; windows hit by the caption regrouping bug scored 10.1-12.0 dB in the caption band. Each preview bound sits well outside the correct range; 25 dB is roughly halfway between the two caption groups. Finals were byte-identical to the reference, which says nothing about how far a final may drift, so the final bounds stay unset.",
+    "final": {"psnrMinDb": null, "captionPsnrMinDb": null},
+    "preview": {
+      "captionPsnrMinDb": 25.0,
+      "otherPsnrMinDb": 30.0,
+      "meanColorMaxDelta": 4.0,
+      "audioOffsetMaxMs": 2.0,
+      "audioLevelMaxDb": 1.0
+    }
+  },
+  "heldOut": ["rotated"],
+  "corpus": [
+    {"id": "talking-head", "synthetic": {"width": 2160, "height": 3840, "fps": 30, "seconds": 10, "codec": "hevc",
+      "bitDepth": 8, "transfer": "sdr", "bitrate": "12M", "seed": 1}},
+    {"id": "hdr-hlg", "synthetic": {"width": 2160, "height": 3840, "fps": 30, "seconds": 10, "codec": "hevc",
+      "bitDepth": 10, "transfer": "hlg", "bitrate": "12M", "seed": 1}},
+    {"id": "vfr", "synthetic": {"width": 1080, "height": 1920, "fps": 30, "seconds": 10, "codec": "h264",
+      "vfr": true, "bitrate": "6M", "seed": 2}},
+    {"id": "rotated", "synthetic": {"width": 1080, "height": 1920, "fps": 30, "seconds": 10, "codec": "h264",
+      "rotation": 90, "bitrate": "6M", "seed": 3}},
+    {"id": "long-take", "synthetic": {"width": 1080, "height": 1920, "fps": 30, "seconds": 90, "codec": "h264",
+      "keepSeconds": [40, 62], "bitrate": "2500k", "grain": 4, "seed": 4}},
+    {"id": "long-take-4k", "synthetic": {"width": 2160, "height": 3840, "fps": 30, "seconds": 300, "codec": "hevc",
+      "bitDepth": 8, "transfer": "sdr", "keepSeconds": [[15, 26], [75, 86], [135, 146], [195, 206], [255, 266]],
+      "bitrate": "8M", "grain": 4, "seed": 5}}
+  ]
+}
