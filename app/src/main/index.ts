@@ -38,7 +38,7 @@ import {
 import { addToLibrary, isVideo, listLibrary, uniqueDest } from './library'
 import { createJobManager } from './jobs'
 import { createLiveVideos } from './live-video'
-import { answerStyleQuestion, rememberQuestion, styleConsent } from './style-consent'
+import { AnswerDeps, answerStyleQuestion, rememberQuestion, showAnswered, styleConsent } from './style-consent'
 import type { AgentResult } from './ai-types'
 import { loadAI } from './ai'
 import type { AI, EngineHost } from './ai-types'
@@ -339,6 +339,25 @@ async function replyAskingAboutStyle(slug: string, r: AgentResult, summary: stri
   return { summary: c.summary, version: r.version, quiet: true }
 }
 
+/** "Remember this for next time?" answers: My style records each one (main/style-consent.ts). */
+function answerDeps(): AnswerDeps {
+  return {
+    chat: async (s) => (await readAppState(s)).chat,
+    answer: ai.answerStyleQuestion?.bind(ai),
+    answerOf: ai.styleAnswer?.bind(ai),
+    // one write: the question loses its buttons and gains the reply together
+    settle: async (s, id, reply) => {
+      await updateAppState(s, (st) => {
+        const x = st.chat.find((y) => y.id === id)
+        if (!x?.actions) return
+        delete x.actions
+        st.chat.push({ id: randomUUID(), from: 'editor', text: reply, at: new Date().toISOString() })
+      })
+    },
+    serialized
+  }
+}
+
 const EDITABLE: (keyof ProjectJson)[] = ['title', 'cut', 'captions', 'music', 'broll', 'zooms', 'cover', 'post']
 
 function safeFileName(s: string): string {
@@ -520,6 +539,8 @@ function registerIpc(): void {
 
   handle('projects:list', () => listProjects())
   handle('projects:get', async (_e, slug: string) => {
+    // a question whose answer My style recorded, but whose reply a crash cut off, shows as answered
+    await showAnswered(answerDeps(), slug).catch(() => undefined)
     const d = await detail(slug)
     const running = jobs.forSlug(slug)
     d.job = running
@@ -681,28 +702,7 @@ function registerIpc(): void {
     if (text !== undefined && !text.trim()) throw { code: 'EMPTY', userMessage: 'Type the rule first, or press Remove.' }
     return ai.updateStyleRule(id, { text, paused: typeof patch?.paused === 'boolean' ? patch.paused : undefined })
   })
-  handle('style:answer', (_e, slug: string, messageId: string, yes: boolean) =>
-    answerStyleQuestion(
-      {
-        chat: async (s) => (await readAppState(s)).chat,
-        addStyleRule: ai.addStyleRule?.bind(ai),
-        approveStyleProposal: ai.approveStyleProposal?.bind(ai),
-        declineStyleProposal: ai.declineStyleProposal?.bind(ai),
-        // one write: a crash can never leave the question without its buttons and without the reply
-        settle: async (s, id, reply) => {
-          await updateAppState(s, (st) => {
-            const x = st.chat.find((y) => y.id === id)
-            if (x) delete x.actions
-            st.chat.push({ id: randomUUID(), from: 'editor', text: reply, at: new Date().toISOString() })
-          })
-        },
-        serialized
-      },
-      slug,
-      messageId,
-      !!yes
-    )
-  )
+  handle('style:answer', (_e, slug: string, messageId: string, yes: boolean) => answerStyleQuestion(answerDeps(), slug, messageId, !!yes))
 
   handle('script:write', (_e, idea: string) => {
     if (!String(idea ?? '').trim()) throw { code: 'EMPTY', userMessage: 'Tell me your idea in a sentence or two first.' }

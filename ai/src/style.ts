@@ -13,6 +13,16 @@ export interface CaptionCaseRule { kind: 'caption-case'; case: 'lower' }
 export interface StyleSource { project: string; title: string; version: number }
 /** "Remember this for next time?" for a typed rule. Saved only when the person says Yes to exactly this. */
 export interface StyleProposal { id: string; text: string; payload: CaptionCaseRule; source: StyleSource }
+/** Any "Remember this for next time?" question: a rule's words, with a typed `payload` or a measured `check`, or
+ * neither (a sentence the AI reads). `id` is the question's own: the typed proposal's, or the chat message's. */
+export interface StyleQuestion { id: string; text: string; payload?: CaptionCaseRule; source?: StyleSource; check?: RuleCheck }
+/** What answering a question did, which the chat says: `saved` (the rule is new), `exists` (it was already there),
+ * `paused` (it is in My style but paused: only My style turns it back on), `forgotten` (the person removed it, so it
+ * stays with that video), `declined` (No). */
+export type AnswerStatus = 'saved' | 'exists' | 'paused' | 'forgotten' | 'declined';
+/** A question's recorded answer. It is written with the answer's effect on the rule, in one write, so the chat is a
+ * view of it: a question with a recorded answer shows as answered, whatever happened to the chat. */
+export interface QuestionAnswer { yes: boolean; status: AnswerStatus; at: string }
 
 export interface StyleRule {
   id: string; text: string; createdAt: string;
@@ -33,6 +43,9 @@ export interface StyleRule {
    * while a later Yes held it on (undo()), or a file from before answers were numbered says a Yes turned it back on.
    * Any direct change clears it: the rule then simply is as the person left it. */
   held?: 'paused' | 'gone';
+  /** Rules checking the same kind that a Yes replaced when it saved this one. If that Yes is taken back while it is
+   * the only thing holding this rule, they come back. */
+  replaced?: StyleRule[];
 }
 export interface StyleAnswer { yes: boolean; seq: number; at: string }
 /** What a note changed in My style, so a failed note can undo exactly that: StyleStore.undo(). */
@@ -42,10 +55,7 @@ export interface StyleChange { id: string; text: string; seq: number; was: 'gone
 export interface StyleChecks { active: CheckedRule[]; unreadable: StyleRule[] }
 /** `damaged`: the file name of a damaged My style.json kept next to this one when My style started over.
  * `forgotten`: questions whose rule was removed, so answering one again cannot bring it back. IDs only. */
-export interface StyleFile { version: 1; rules: StyleRule[]; damaged?: string; forgotten?: string[]; seq?: number }
-/** `paused`: the rule is in My style but paused there. A Yes records the answer and leaves it paused: a paused rule
- * comes back only through My style. */
-export type Approval = { status: 'saved' | 'exists' | 'paused'; rule: StyleRule } | { status: 'forgotten' };
+export interface StyleFile { version: 1; rules: StyleRule[]; damaged?: string; forgotten?: string[]; seq?: number; questions?: Record<string, QuestionAnswer> }
 
 export const LOWERCASE_CAPTIONS = 'Use lowercase captions.';
 const isCaptionCase = (x: unknown): x is CaptionCaseRule => (x as CaptionCaseRule)?.kind === 'caption-case' && (x as CaptionCaseRule).case === 'lower';
@@ -67,7 +77,12 @@ function settle(rules: StyleRule[], r: StyleRule): StyleRule[] {
   if (!r.held) return rules;
   const since = typeof r.seq === 'number' ? r.seq : 0;
   if (answersOf(r).some(([, a]) => a.yes && a.seq > since)) { delete r.paused; return rules; }
-  if (r.held === 'gone') return rules.filter((x) => x !== r);
+  if (r.held === 'gone') {
+    const rest = rules.filter((x) => x !== r);
+    // a rule replaced comes back unless another rule has taken its place since
+    const back = (r.replaced ?? []).filter((old) => !rest.some((x) => x.id === old.id || (old.check && x.check?.kind === old.check.kind)));
+    return [...rest, ...back];
+  }
   r.paused = true;
   delete r.held;
   return rules;
@@ -100,6 +115,7 @@ function fromConsent(data: StyleFile): void {
 function changedDirectly(data: StyleFile, r: StyleRule): number {
   r.seq = next(data);
   delete r.held;
+  delete r.replaced;
   return r.seq;
 }
 
@@ -259,55 +275,61 @@ export class StyleStore {
     });
   }
 
-  /** The person said Yes to `p`: the answer, and the rule when it is new, are saved in one write. Answering the
-   * same question again returns the same rule, and the question of a rule they removed cannot bring it back. A rule
-   * paused in My style stays paused (`paused`): it comes back only through My style, never through a question
-   * asked on some video, so no order of answers can turn a paused rule on. */
-  async approve(p: StyleProposal): Promise<Approval> {
+  /** The person answered question `q`. The answer and what it does to My style are written together, with the
+   * question's record (answerOf), so no crash can leave a question half answered: the chat shows the record.
+   * Yes saves the rule when it is new; a rule already there stays as it is, and a paused one stays paused (only My
+   * style turns it back on), so no order of answers can turn a rule on or off behind the person's back. No takes back
+   * only this question's own Yes (settle()). The question of a rule the person removed cannot bring it back. Answered
+   * again (a stale window), the last answer wins, and the reply says what the rule is now. */
+  async answer(q: StyleQuestion, yes: boolean): Promise<{ status: AnswerStatus }> {
     return this.serial(async () => {
-      if (!p?.id || p.text !== LOWERCASE_CAPTIONS || !isCaptionCase(p.payload)) throw new Error('the question does not match the rule it would save');
+      const typed = q.payload !== undefined;
+      if (!q?.id || (typed && (q.text !== LOWERCASE_CAPTIONS || !isCaptionCase(q.payload)))) throw new Error('the question does not match the rule it would save');
+      const check = q.check === undefined ? undefined : parseCheck(q.check);
+      const text = check ? ruleText(check) : typed ? LOWERCASE_CAPTIONS : cleanRuleText(q.text);
+      if (check && cleanRuleText(q.text) !== text) throw new Error('the question does not match the rule it would save');
       const data = await this.read();
-      if (data.forgotten?.includes(p.id)) return { status: 'forgotten' };
       const at = new Date().toISOString();
-      const same = data.rules.find((r) => answered(r).includes(p.id));
-      // Edited to new words since the answer, the rule is a sentence the AI reads, so "Saved" would promise lowercase
-      // videos the app no longer makes.
-      if (same && !isCaptionCase(same.payload)) return { status: 'exists', rule: same };
-      let rules = data.rules;
-      let rule = same ?? rules.find((r) => isCaptionCase(r.payload));
-      const answer = (r: StyleRule) => { r.answers = { ...r.answers, [p.id]: { yes: true, seq: next(data), at } }; };
-      if (rule?.paused) {
-        answer(rule);
-        delete rule.held;
-        await this.write(data);
-        return { status: 'paused', rule };
+      const done = (status: AnswerStatus, rules = data.rules) =>
+        this.write({ ...data, rules, questions: { ...data.questions, [q.id]: { yes, status, at } } }).then(() => ({ status }));
+      const asked = data.rules.find((r) => answered(r).includes(q.id));
+      if (!yes) {
+        if (!asked) return done('declined');
+        asked.answers = { ...asked.answers, [q.id]: { yes: false, seq: next(data), at } };
+        return done('declined', settle(data.rules, asked));
       }
-      const wasOn = !!rule;
-      if (!rule) {
-        // The same words saved as a plain sentence give way to the typed rule. It gets a new ID: a running note
-        // that saved that sentence undoes it by ID if the note fails, and must not take the approved rule with it.
-        rule = { id: randomUUID(), text: LOWERCASE_CAPTIONS, createdAt: at, payload: { kind: 'caption-case', case: 'lower' },
-          source: { project: String(p.source?.project ?? ''), title: String(p.source?.title ?? '').slice(0, 120), version: Number(p.source?.version) || 0 },
-          held: 'gone' };
-        rules = [...rules.filter((r) => normalize(r.text) !== normalize(LOWERCASE_CAPTIONS)), rule];
+      if (data.forgotten?.includes(q.id)) return done('forgotten');
+      const say = (r: StyleRule) => { r.answers = { ...r.answers, [q.id]: { yes: true, seq: next(data), at } }; };
+      // The rule this question is about, if My style has it: the one it answered before, or the same rule.
+      const same = asked ?? data.rules.find((r) => typed ? isCaptionCase(r.payload)
+        : check ? r.check?.kind === check.kind && r.text === text : !r.check && !r.payload && normalize(r.text) === normalize(text));
+      if (same) {
+        say(same);
+        // Edited to new words since, the rule is not the one asked about: "saved" would promise what it no longer does.
+        const edited = typed ? !isCaptionCase(same.payload) : !!check && same.text !== text;
+        if (same.paused) delete same.held;
+        return done(edited ? 'exists' : same.paused ? 'paused' : asked ? 'saved' : 'exists');
       }
-      answer(rule);
-      await this.write({ ...data, rules: settle(rules, rule) });
-      return { status: same || !wasOn ? 'saved' : 'exists', rule };
+      const rule: StyleRule = { id: randomUUID(), text, createdAt: at, held: 'gone',
+        ...(typed ? { payload: { kind: 'caption-case', case: 'lower' } as const,
+          source: { project: String(q.source?.project ?? ''), title: String(q.source?.title ?? '').slice(0, 120), version: Number(q.source?.version) || 0 } } : {}),
+        ...(check ? { check } : {}) };
+      say(rule);
+      // My style keeps one rule per check kind, and the same words once (a plain sentence gives way to the typed or
+      // checked rule). It gets a new ID: a running note that saved that sentence undoes it by ID if the note fails, and
+      // must not take the approved rule with it.
+      const gives = (r: StyleRule) => normalize(r.text) === normalize(text) || (!!check && r.check?.kind === check.kind);
+      const replaced = data.rules.filter(gives);
+      if (check && replaced.length) rule.replaced = replaced;
+      return done('saved', [...data.rules.filter((r) => !gives(r)), rule]);
     });
   }
 
-  /** The person said No to `p`. If a Yes to it was saved before a crash cut off the reply, the No is now that
-   * question's answer and takes the Yes back (settle() decides what that changes). A Yes after it, from buttons a
-   * crash left behind, is the last answer again. */
-  async decline(p: StyleProposal): Promise<void> {
-    return this.serial(async () => {
-      const data = await this.read();
-      const rule = data.rules.find((r) => answered(r).includes(p.id));
-      if (!rule) return;
-      rule.answers = { ...rule.answers, [p.id]: { yes: false, seq: next(data), at: new Date().toISOString() } };
-      await this.write({ ...data, rules: settle(data.rules, rule) });
-    });
+  /** The recorded answer to question `id`, or null when it has not been answered. */
+  async answerOf(id: string): Promise<QuestionAnswer | null> {
+    const data = await this.serial(() => this.read()).catch(() => null);
+    const a = data?.questions?.[id];
+    return a && typeof a.yes === 'boolean' && typeof a.status === 'string' ? a : null;
   }
 
   /** My style: the person changed a rule's words, or paused or resumed it. New words make a typed rule a plain

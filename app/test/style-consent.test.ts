@@ -1,7 +1,11 @@
 import { describe, expect, it } from 'vitest'
-import type { ChatMessage, StyleProposal } from '../src/shared/api'
+import { mkdtempSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import type { ChatMessage, StyleAnswerStatus, StyleProposal, StyleQuestion } from '../src/shared/api'
+import { createMockAI } from '../src/main/ai-mock'
 import { serialized } from '../src/main/store'
-import { answerStyleQuestion, rememberQuestion, styleConsent, type AnswerDeps } from '../src/main/style-consent'
+import { answerStyleQuestion, rememberQuestion, showAnswered, styleConsent, type AnswerDeps } from '../src/main/style-consent'
 
 describe('My style consent (grandma 2: saved without asking)', () => {
   it('an AI that already saved a rule: undo it, drop the announcement, ask instead', () => {
@@ -37,13 +41,13 @@ describe('answering a typed My style question (lowercase captions)', () => {
     payload: { kind: 'caption-case', case: 'lower' },
     source: { project: 'p1', title: 'Baking bread', version: 3 }
   }
-  function app(approve: (p: StyleProposal) => Promise<{ status: 'saved' | 'exists' | 'paused' | 'forgotten' }>) {
+  function app(approve: (q: StyleQuestion) => Promise<{ status: StyleAnswerStatus }>) {
     const chat: ChatMessage[] = [
       { id: 'm1', from: 'editor', text: rememberQuestion(proposal.text), at: '', actions: ['remember-yes', 'remember-no'], proposal }
     ]
     const deps: AnswerDeps = {
       chat: async () => structuredClone(chat),
-      approveStyleProposal: approve,
+      answer: (q, yes) => (yes ? approve(q) : Promise.resolve({ status: 'declined' as const })),
       settle: async (_slug, id, reply) => {
         await new Promise((r) => setTimeout(r, 5))
         delete chat.find((m) => m.id === id)!.actions
@@ -87,57 +91,66 @@ describe('answering a typed My style question (lowercase captions)', () => {
     expect(chat.at(-1)?.text).toBe('Saved. Your next videos will start with lowercase captions. You can change or remove it in My style.')
   })
 
-  it('No on a question whose Yes was saved just before a crash takes the rule back out', async () => {
-    const saved: string[] = []
-    let crash = true
-    const chat: ChatMessage[] = [
-      { id: 'm1', from: 'editor', text: rememberQuestion(proposal.text), at: '', actions: ['remember-yes', 'remember-no'], proposal }
-    ]
-    const deps: AnswerDeps = {
-      chat: async () => structuredClone(chat),
-      approveStyleProposal: async (p) => {
-        saved.push(p.id)
-        return { status: 'saved' }
-      },
-      declineStyleProposal: async (p) => {
-        saved.splice(saved.indexOf(p.id), 1)
-      },
-      settle: async (_slug, id, reply) => {
-        if (crash) throw new Error('the app quit')
-        delete chat.find((m) => m.id === id)!.actions
-        chat.push({ id: 'r', from: 'editor', text: reply, at: '' })
-      },
-      serialized
-    }
-    await expect(answerStyleQuestion(deps, 'bread', 'm1', true)).rejects.toThrow()
-    crash = false
-    await answerStyleQuestion(deps, 'bread', 'm1', false)
-    expect(saved).toEqual([])
-    expect(chat.at(-1)?.text).toBe('OK, only for this video.')
-  })
 })
 
-describe('answering a checked My style question', () => {
-  it('Yes saves the rule with its check, and the reply says it will be checked on every video', async () => {
-    const check = { kind: 'captions.maxWords', value: 2 } as const
-    const text = 'Show at most 2 words in a caption.'
-    const chat: ChatMessage[] = [
-      { id: 'm1', from: 'editor', text: rememberQuestion(text), at: '', actions: ['remember-yes', 'remember-no'], suggestion: text, check }
-    ]
-    const saved: unknown[][] = []
+describe('a question killed between the My style write and the chat write', () => {
+  // One question of each kind: the typed lowercase rule, a sentence the AI reads, and a rule the app measures (which
+  // replaces the saved rule checking the same kind: "at most 2 words" gives way to "at most 3").
+  const proposal: StyleProposal = { id: 'q-typed', text: 'Use lowercase captions.', payload: { kind: 'caption-case', case: 'lower' }, source: { project: 'p1', title: 'Baking bread', version: 3 } }
+  const kinds = [
+    { kind: 'typed', message: { proposal }, saved: 'Saved. Your next videos will start with lowercase captions. You can change or remove it in My style.' },
+    { kind: 'sentence', message: { suggestion: 'Keep music quieter under talking.' }, saved: "Saved. I'll do that in your next videos too. You can remove it in My style." },
+    { kind: 'checked', message: { suggestion: 'Show at most 3 words in a caption.', check: { kind: 'captions.maxWords', value: 3 } as const },
+      saved: "Saved. I'll check this on every video from now on. You can pause or remove it in My style." }
+  ]
+
+  /** The stand-in AI as My style (it writes the real My style.json), a chat with the question, and a chat write
+   * that dies the first time: the app quitting after My style saved the answer. */
+  async function killed(message: Partial<ChatMessage>) {
+    const root = mkdtempSync(join(tmpdir(), 'rs-consent '))
+    const ai = createMockAI({ host: { reelStudioRoot: () => root, runEngine: async () => ({}), renderAnimation: async () => ({}) } as any, settingsDir: root })
+    const before = await ai.addStyleRule!('Show at most 2 words in a caption.', { kind: 'captions.maxWords', value: 2 })
+    const chat: ChatMessage[] = [{ id: 'm1', from: 'editor', text: 'Remember this for next time?', at: '', actions: ['remember-yes', 'remember-no'], ...message }]
+    let dies = true
     const deps: AnswerDeps = {
       chat: async () => structuredClone(chat),
-      addStyleRule: async (...args) => {
-        saved.push(args)
-      },
+      answer: ai.answerStyleQuestion!.bind(ai),
+      answerOf: ai.styleAnswer!.bind(ai),
       settle: async (_slug, id, reply) => {
-        delete chat.find((m) => m.id === id)!.actions
-        chat.push({ id: 'r', from: 'editor', text: reply, at: '' })
+        if (dies) {
+          dies = false
+          throw new Error('the app quit')
+        }
+        const m = chat.find((x) => x.id === id)!
+        if (!m.actions) return
+        delete m.actions
+        chat.push({ id: `r${chat.length}`, from: 'editor', text: reply, at: '' })
       },
       serialized
     }
-    await answerStyleQuestion(deps, 'bread', 'm1', true)
-    expect(saved).toEqual([[text, check]])
-    expect(chat.at(-1)?.text).toBe("Saved. I'll check this on every video from now on. You can pause or remove it in My style.")
+    await expect(answerStyleQuestion(deps, 'bread', 'm1', true)).rejects.toThrow('the app quit')
+    return { ai, chat, deps, before }
+  }
+
+  it.each(kinds)('$kind: after a restart the question shows answered, with the reply for what the Yes did', async ({ message, saved }) => {
+    const { ai, chat, deps } = await killed(message)
+    expect(chat[0].actions).toEqual(['remember-yes', 'remember-no'])
+    await showAnswered(deps, 'bread')
+    expect(chat[0].actions).toBeUndefined()
+    expect(chat.map((m) => m.text)).toEqual(['Remember this for next time?', saved])
+    // and the rule the Yes saved is in My style, once
+    const text = message.proposal?.text ?? message.suggestion
+    expect((await ai.styleRules()).filter((r) => r.text === text)).toHaveLength(1)
+    await showAnswered(deps, 'bread')
+    expect(chat).toHaveLength(2)
+  })
+
+  it.each(kinds)('$kind: No from a window that still shows the buttons takes back only what that Yes did', async ({ kind, message }) => {
+    const { ai, chat, deps, before } = await killed(message)
+    await answerStyleQuestion(deps, 'bread', 'm1', false)
+    expect(chat.at(-1)?.text).toBe('OK, only for this video.')
+    // My style is as it was before the question: the checked rule it replaced is back
+    expect((await ai.styleRules()).map((r) => r.text)).toEqual([before.text])
+    if (kind === 'checked') expect((await ai.styleRules())[0].check).toEqual({ kind: 'captions.maxWords', value: 2 })
   })
 })

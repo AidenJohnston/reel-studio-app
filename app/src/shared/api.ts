@@ -329,6 +329,18 @@ export interface ModelStatus {
   error: string | null
 }
 
+/** A "Remember this for next time?" question as My style answers it (StyleQuestion in ai/src/style.ts): the typed
+ * proposal's id, or the chat message's for a suggested sentence or a checked rule. */
+export interface StyleQuestion {
+  id: string
+  text: string
+  payload?: StyleProposal['payload']
+  source?: StyleProposal['source']
+  check?: RuleCheck
+}
+/** What an answer did, which the chat says. `declined`: No. */
+export type StyleAnswerStatus = 'saved' | 'exists' | 'paused' | 'forgotten' | 'declined'
+
 export interface StyleRule {
   id: string
   text: string
@@ -345,6 +357,8 @@ export interface StyleRule {
   answers?: Record<string, { yes: boolean; seq: number; at: string }>
   seq?: number
   held?: 'paused' | 'gone'
+  /** Rules of the same check kind a Yes replaced when it saved this one; they come back if that Yes is taken back. */
+  replaced?: StyleRule[]
 }
 
 /** A checked My style rule's machine form (ai/src/rules.ts is the one that validates it). */

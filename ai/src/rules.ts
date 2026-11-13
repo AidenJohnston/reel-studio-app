@@ -167,7 +167,7 @@ export interface LintFailure { id: string; kind: RuleKind; count: number; places
 /** `checkedIds`: every rule this render measured. Missing from renders made before it existed. */
 export interface Lint { ok: boolean; checked: number; checkedIds?: string[]; failures: LintFailure[]; measured: Measured }
 
-/** A checked rule to ask about: Yes = addStyleRule(text, check). The words are ruleText(check). */
+/** A checked rule to ask about, answered with answerStyleQuestion. The words are ruleText(check). */
 export interface StyleCheckProposal { text: string; check: RuleCheck }
 
 /** An active checked rule, as the rules file lists it. */
