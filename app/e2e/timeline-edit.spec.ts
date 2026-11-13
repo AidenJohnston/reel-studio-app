@@ -33,12 +33,13 @@ test('editing timeline: trim a cut, move, resize, frame and delete a picture, mo
   await passFirstRun(page)
   const slug = await reelWith(page, ROOT, media.video, { seconds: 24, pictures: 3 })
   const project = () => JSON.parse(readFileSync(join(ROOT, 'Projects', slug, 'project.json'), 'utf8'))
-  let version = 1
-  /** The gesture's own version: made, on screen, and the timeline drawn from it again. */
+  // the version the fixture shows; each gesture makes the next one
+  let version = Number(project().version)
+  /** The gesture's own version: made, and on screen while Edit it myself stays open (its log is behind the panel). */
   const made = async () => {
     version++
-    await expect(page.getByTestId(`log-play-${version}`)).toBeVisible({ timeout: 5 * 60_000 })
-    await expect(page.getByTestId('version-on-screen')).toHaveText(`Version ${version}`)
+    await expect(page.getByTestId('version-on-screen')).toHaveText(`Version ${version}`, { timeout: 5 * 60_000 })
+    await expect.poll(() => project().version).toBe(version)
   }
 
   await page.getByTestId('edit-myself').click()
@@ -57,6 +58,15 @@ test('editing timeline: trim a cut, move, resize, frame and delete a picture, mo
   // the stills of your video along its lane
   await expect.poll(() => page.getByTestId('track-film').evaluate((c: HTMLCanvasElement) => c.width)).toBeGreaterThan(0)
   await shot(page, 'track-00-lanes')
+
+  // ---- zoom spreads the lanes out, and Fit brings the whole reel back ----
+  const wide = (await track.locator('.trk-content').boundingBox())!.width
+  await page.getByTestId('track-zoom-in').click()
+  await page.getByTestId('track-zoom-in').click()
+  await expect.poll(async () => (await track.locator('.trk-content').boundingBox())!.width).toBeGreaterThan(wide * 2)
+  await shot(page, 'track-04-zoomed')
+  await page.getByTestId('track-fit').click()
+  await expect.poll(async () => (await track.locator('.trk-content').boundingBox())!.width).toBeLessThan(wide + 2)
 
   // ---- the first cut's end, dragged back over its last word: that word is cut, and nothing else ----
   const before = project()
@@ -132,9 +142,12 @@ test('editing timeline: trim a cut, move, resize, frame and delete a picture, mo
   await page.keyboard.press('Delete')
   await made()
   expect(project().broll.map((b: { id: string }) => b.id)).toEqual(['b1', 'b3'])
-  await expect(pictures).toHaveCount(2)
+  // gone from the timeline too (the fake engine's later versions play the take straight, so only pictures on its
+  // first seconds are on their clock)
+  await expect(page.locator('[data-testid=track-picture][data-id=b2]')).toHaveCount(0)
+  await expect(page.locator('[data-testid=track-picture][data-id=b1]')).toBeVisible()
 
-  // ---- keys: L plays, K stops; the arrows step a word; zoom spreads the lanes out ----
+  // ---- keys: L plays, K stops; Home on the ruler goes to the start ----
   // from the page itself, as after clicking the reel
   await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur())
   const play = page.locator('.transport .pp')
@@ -146,13 +159,6 @@ test('editing timeline: trim a cut, move, resize, frame and delete a picture, mo
   await ruler.focus()
   await page.keyboard.press('Home')
   await expect(ruler).toHaveAttribute('aria-valuenow', '0')
-  const wide = (await track.locator('.trk-content').boundingBox())!.width
-  await page.getByTestId('track-zoom-in').click()
-  await page.getByTestId('track-zoom-in').click()
-  await expect.poll(async () => (await track.locator('.trk-content').boundingBox())!.width).toBeGreaterThan(wide * 2)
-  await shot(page, 'track-04-zoomed')
-  await page.getByTestId('track-fit').click()
-  await expect.poll(async () => (await track.locator('.trk-content').boundingBox())!.width).toBeLessThan(wide + 2)
 
   await app.close()
 })

@@ -22,7 +22,7 @@
   display: inline-flex; align-items: center; gap: 4px; height: 24px; padding: 0 8px; border: 1px solid var(--trk-line); border-radius: 6px;
   background: #202421; color: var(--trk-ink); font: inherit; font-weight: 600; cursor: pointer; white-space: nowrap;
 }
-.trk-icon { width: 26px; padding: 0; justify-content: center; }
+.trk-icon { width: 26px; padding: 0; justify-content: center; font-size: 16px; line-height: 1; }
 .trk-btn:hover:not(:disabled), .trk-icon:hover:not(:disabled) { background: #2A2F2B; }
 .trk-btn:disabled, .trk-icon:disabled { opacity: .45; cursor: default; }
 .trk-btn.danger { color: #FF9A8A; }
@@ -47,7 +47,8 @@ html.kb .trk-btn:focus-visible, html.kb .trk-icon:focus-visible, html.kb .trk [r
 .trk-label.sounds svg { color: var(--trk-sound-hi); }
 
 .trk-scroll { flex: 1; min-width: 0; overflow-x: auto; overflow-y: hidden; scrollbar-width: thin; scrollbar-color: #3A403C transparent; }
-.trk-content { position: relative; cursor: text; }
+/* clip: nothing drawn past the reel's end may widen what scrolls, or the lanes could not scroll back after zooming out */
+.trk-content { position: relative; cursor: text; overflow: clip; }
 .trk-content.dragging, .trk-content.dragging * { cursor: grabbing !important; }
 .trk-ruler { position: relative; height: var(--trk-ruler-h); border-bottom: 1px solid var(--trk-line); cursor: ew-resize; }
 .trk-tick { position: absolute; top: 0; bottom: 0; padding: 3px 0 0 4px; border-left: 1px solid var(--trk-line); color: var(--trk-ink-3); font-variant-numeric: tabular-nums; pointer-events: none; }

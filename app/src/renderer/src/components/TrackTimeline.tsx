@@ -39,6 +39,8 @@ const LABEL_PX = 64
 const NUDGE_MS = 600
 // J skips back this far each press.
 const J_STEP = 1
+// A subtitle being retyped is at least this wide, and kept inside the lanes at the reel's end.
+const CAPTION_EDIT_PX = 160
 
 const clamp = (v: number, a: number, b: number): number => Math.max(a, Math.min(b, v))
 const tenths = (t: number): string => `${clock(Math.floor(t))}.${Math.floor((t % 1) * 10)}`
@@ -399,7 +401,7 @@ export function TrackTimeline(props: TrackTimelineProps) {
         </div>
         <div className="trk-zoom" role="group" aria-label="Zoom">
           <button className="trk-icon" aria-label="Zoom out" disabled={zoom <= 1} onClick={() => zoomBy(1 / 1.5)} data-testid="track-zoom-out">
-            <Icon name="zoom-out" size={16} />
+            <span aria-hidden>−</span>
           </button>
           <input
             type="range"
@@ -412,7 +414,7 @@ export function TrackTimeline(props: TrackTimelineProps) {
             onChange={(e) => zoomBy(Math.pow(maxZoom, Number(e.target.value)) / zoom)}
           />
           <button className="trk-icon" aria-label="Zoom in" disabled={zoom >= maxZoom} onClick={() => zoomBy(1.5)} data-testid="track-zoom-in">
-            <Icon name="zoom-in" size={16} />
+            <span aria-hidden>+</span>
           </button>
           <button className="trk-btn" disabled={zoom === 1} onClick={() => setZoom(1)} data-testid="track-fit">
             Fit
@@ -430,7 +432,10 @@ export function TrackTimeline(props: TrackTimelineProps) {
             ) : null
           )}
         </div>
-        <div className="trk-scroll" ref={scroller} onScroll={(e) => setView((v) => ({ ...v, left: e.currentTarget.scrollLeft }))}>
+        <div className="trk-scroll" ref={scroller} onScroll={(e) => {
+            const left = e.currentTarget.scrollLeft
+            setView((v) => ({ ...v, left }))
+          }}>
           {/* a press that no block took for itself (each stops its own) puts the playhead there and drops the pick */}
           <div
             className={`trk-content${drag ? ' dragging' : ''}`}
@@ -461,7 +466,7 @@ export function TrackTimeline(props: TrackTimelineProps) {
             </div>
 
             <div className="trk-row video" role="group" aria-label="Your video, its cuts" data-testid="track-video">
-              {props.video && <Filmstrip src={props.video} duration={duration} pps={pps} left={view.left} width={view.width} />}
+              {props.video && <Filmstrip src={props.video} duration={duration} pps={pps} left={Math.min(view.left, contentW - view.width)} width={view.width} />}
               {lanes.video.map((p, i) => {
                 const trimming = drag?.kind === 'trim' && drag.part === i ? drag : null
                 const t0 = trimming?.side === 'start' && trimming.stop ? trimming.stop.at : p.t0
@@ -541,6 +546,7 @@ export function TrackTimeline(props: TrackTimelineProps) {
                   key={c.id}
                   c={c}
                   left={x(c.t0)}
+                  end={contentW}
                   width={Math.max(4, x(c.t1) - x(c.t0))}
                   editing={editing === c.id}
                   locked={!!locked}
@@ -627,6 +633,7 @@ function CaptionBlock({
   c,
   left,
   width,
+  end,
   editing,
   locked,
   onOpen,
@@ -635,6 +642,8 @@ function CaptionBlock({
   c: CaptionPart
   left: number
   width: number
+  /** where the lanes end: the box being typed in stays inside them */
+  end: number
   editing: boolean
   locked: boolean
   onOpen: () => void
@@ -647,7 +656,7 @@ function CaptionBlock({
     return (
       <input
         className="trk-cap-input"
-        style={{ left, minWidth: Math.max(width, 160) }}
+        style={{ left: Math.max(0, Math.min(left, end - CAPTION_EDIT_PX)), minWidth: Math.max(width, CAPTION_EDIT_PX) }}
         autoFocus
         value={text}
         aria-label="Subtitle line"
