@@ -1122,7 +1122,7 @@ const tools: ToolDef[] = [
   },
   {
     name: 'set_zoom',
-    description: 'Replace all zoom-ins. Each zoom spans one whole line, from its first word to its last; scale ~1.08-1.15. Use on punch lines (the named word, the reveal, the comic line), not every line: at most about 6 per minute, never two back to back, none in the first 3 s beside the hook title. Empty list = no zooms.',
+    description: 'Replace all zoom-ins. Each zoom spans one whole line, from its first word to its last; scale ~1.08-1.15. Use on punch lines only: at most about 6 per minute, never two back to back. Empty list = no zooms.',
     parameters: S.obj({ zooms: S.arr(S.obj({ anchor: ANCHOR, scale: S.num('1.0-1.5', { minimum: 1, maximum: 1.6 }) })) }),
     async run(ctx, args) {
       const { t } = await load(ctx);
