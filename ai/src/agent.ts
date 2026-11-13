@@ -197,6 +197,8 @@ async function agentLoop(o: RunAgentOptions): Promise<RunAgentResult> {
     misses = 0;
     const results = await runCalls(o, res.toolCalls);
     messages.push({ role: 'tool', results });
+    // the reply changed what the video shows: draw it while the model reads these results (moments.ts)
+    if (o.ctx.state.pictureEdit) o.ctx.moments?.show(o.ctx.state.edits, o.ctx.state.pictureEdit);
     if (steps === maxSteps - 2 && o.ctx.state.finished === null) {
       messages.push({ role: 'user', content: [{ type: 'text', text: 'You are almost out of steps. Wrap up now: call finish with your summary.' }] });
     }

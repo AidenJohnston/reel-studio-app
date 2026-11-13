@@ -177,6 +177,10 @@ export type JobUpdate =
   | { type: 'reply'; text: string }
   /** The words heard, once listening is done (main reads them from the transcript). */
   | { type: 'heard'; words: string[] }
+  /** A picture of what the AI just changed, made before its draft: a still at output second `t`, or the
+   * 2 s window [from, to] around it. file = the engine's output path; main turns it into `image` / `video`. */
+  | { type: 'moment'; kind: 'still'; t: number; file: string }
+  | { type: 'moment'; kind: 'window'; from: number; to: number; file: string }
 
 type Ids = { jobId: string; slug: string | null }
 
@@ -193,6 +197,9 @@ export type JobEvent = Ids &
     | { type: 'render'; version: number; draft: boolean; firstLook: boolean; video: string | null }
     | { type: 'reply'; text: string }
     | { type: 'heard'; words: string[] }
+    /** image / video = reel-media URLs of copies the next moments run never overwrites */
+    | { type: 'moment'; kind: 'still'; t: number; image: string }
+    | { type: 'moment'; kind: 'window'; from: number; to: number; video: string }
     | { type: 'done'; summary: string; version?: number }
     | { type: 'error'; code: string; userMessage: string }
     | { type: 'cancelled' }

@@ -70,7 +70,7 @@ Projects live in `<Documents>/Reel Studio/Projects/<slug>/`. The shared **Librar
 <slug>/
   project.json            the edit (schema below), the only file the AI changes
   media/                  copies (or hard links) of the user's raw takes for this project
-  work/                   engine caches: transcript.json, audio.wav, face.json, layers/, proxies; safe to delete
+  work/                   engine caches: transcript.json, audio.wav, face.json, layers/, proxy/ (preview copies); safe to delete
   versions/v1/            project.json snapshot + export.mp4 + cover.png + verify.json + notes.md
   versions/v2/ ...
   versions/preview/       the one scratch folder for drafts, overwritten each time (see versions.md)
@@ -140,11 +140,14 @@ look on PATH / repo-relative.
 
 ```
 {"event":"progress","stage":"transcribe","pct":42,"message":"Listening to your video"}
+{"event":"progress","stage":"moments","pct":40,"message":"Here's your change","ready":{"kind":"still","t":2.4,"file":"..."}}
 {"event":"done","result":{...}}
 {"event":"error","code":"NO_AUDIO","message":"<developer detail>","userMessage":"This video has no sound. Try a different file."}
 ```
 
-Exit code 0 on done, 1 on error. The `message` in progress events is user-facing and plain.
+Exit code 0 on done, 1 on error. The `message` in progress events is user-facing and plain. A progress
+event may carry `ready`, a file the app can show right away: `{"kind":"still","t":<output s>,"file"}` or
+`{"kind":"window","from","to","file"}` (only `moments` sends them).
 
 | command | does |
 |---|---|
@@ -154,10 +157,12 @@ Exit code 0 on done, 1 on error. The `message` in progress events is user-facing
 | `transcribe` | faster-whisper word timestamps -> `work/transcript.json` with stable ids |
 | `analyze` | audio envelope, pause list, retake groups (lines said more than once), face box track, a deterministic default cut |
 | `autocut` | writes a deterministic baseline `cut.keep`; the AI then refines it |
-| `render [--draft] [--window a:b]` | renders project.json -> `versions/vN/{export.mp4, cover.png, verify.json}`; `--draft` is a fast preview |
+| `render [--draft] [--window a:b]` | renders project.json -> `versions/vN/{export.mp4, cover.png, verify.json}`; `--draft` is a fast preview. A final is joined from ~2 s chunks cached in `work/render/chunks/` by everything that draws into them (`chunks.py`), so an edit re-encodes only the chunks it changed; a take with uneven frame times, or any failure there, renders it in one pass |
+| `proxy` | makes the preview copy of each take bigger than 1080p or HDR: `work/proxy/<sid>-<key>.mp4` (H.264, every frame a keyframe, short side 1080, SDR, no sound) + its `.json` sidecar. Drafts and windows read it when it matches the take as it is now; finals and covers read the original. The app starts it after import, at below-normal priority |
 | `cover` | renders cover.png only |
 | `verify <mp4>` | A/V sync, loudness (-14 LUFS target), duration, black frames, caption-safe placement report |
-| `frames --times t1,t2,...` | extracts PNG frames from the latest render (for the AI to look at) |
+| `moments [--mark] [--no-draft]` | what changed on screen since `work/moments/base.json` (the state last shown), as output intervals (`moments.py`): stills inside them (at most 3, sent as `ready` as each is drawn), the 2 s window around the first (`ready`), then the draft; the result has `intervals`, `changes`, `stills`, `window` and `draft` (the render result). The base becomes this state only when the run finishes. `--mark` only writes the base |
+| `frames --times t1,t2,...` | PNG stills of the edit for the AI to look at: cut from the newest render that still shows the project, or drawn straight from the project when none does |
 | `search-images`, `fetch-image`, `download-media` | find a freely licensed image, fetch one by URL, download a video or song from a link |
 | `attach --project <dir> <file> [--name N]` | a picture, GIF or short clip the user attached to a note -> `work/assets/attach-<id>-<stem>.<ext>` + sidecar `<asset>.attach.json` (name, kind, bytes, size, duration, sound, thumb) + a 320 px still in `work/thumbs/`. JPG/PNG copied; HEIC, still GIF/WebP, BMP -> PNG; animated GIF/WebP -> silent H.264 mp4 (looped to at least 3 s); clips copied. Limits: pictures 25 MB, clips and GIFs 200 MB and 60 s; anything else is refused with a plain message and nothing is written |
 | `doctor` | checks ffmpeg, the speech model, fonts, GPU; prints a human report |
@@ -170,7 +175,7 @@ x64. Encoders: libx264 for the final export; drafts use `h264_videotoolbox` on m
 
 | Area | Modules |
 |---|---|
-| Core | `cli.py`, `project.py` (load/save/validate, word-anchor to output-time mapping), `schema/`, `probe.py`, `classify.py`, `transcribe.py`, `analyze.py` (pauses, retakes, default cut), `cut.py`, `captions.py`, `render.py` (orchestration and the final ffmpeg graph), `verify.py`, `frames.py`, `doctor.py` |
+| Core | `cli.py`, `project.py` (load/save/validate, word-anchor to output-time mapping), `schema/`, `probe.py`, `classify.py`, `transcribe.py`, `analyze.py` (pauses, retakes, default cut), `cut.py`, `captions.py`, `render.py` (orchestration and the final ffmpeg graph), `chunks.py` (the chunks of a final and their cache), `verify.py`, `frames.py`, `doctor.py` |
 | Compositing | `broll.py` (treatments to layers), `placement.py` (face-aware safe boxes), `zoom.py`, `music.py` (track analysis, level presets, automation, ducking, loudness), `cover.py`, `assets.py` (images from the web, media from a link via yt-dlp), `templates/` |
 
 The core renders by composing: cut video (+ zooms) -> overlay layers by z -> captions burned last -> mux the
@@ -295,7 +300,9 @@ transparent layer. No CDN is used at run time; any JS is vendored.
 export type AgentEvent =
   | { type: 'status'; message: string; pct?: number }        // plain words, shown in the Working screen / chat
   | { type: 'tool'; name: string; summary: string }           // e.g. "Added b-roll on 'twenty bucks'"
-  | { type: 'render'; version: number; draft: boolean };
+  | { type: 'render'; version: number; draft: boolean }
+  | { type: 'moment'; kind: 'still'; t: number; file: string }              // what an AI reply changed, before its draft
+  | { type: 'moment'; kind: 'window'; from: number; to: number; file: string };
 export interface AgentResult { summary: string; version: number; styleRulesAdded: string[]; changed: string[] }
 export interface ScriptResult { hook: string; script: string; onScreenText: string[] }
 

@@ -548,6 +548,8 @@ def _save_png(img, ctx, stem: str) -> Path:
 # --- video helpers (ffmpeg) --------------------------------------------------------------------
 
 def _enc(ctx) -> list:
+    """Encoder settings for b-roll clips. Drafts and exports share work/layers, so every file encoded
+    with these must carry them in its name, or an export reuses a draft's fast, lossy clip."""
     if getattr(ctx, "draft", False):
         return ["-c:v", "libx264", "-preset", "ultrafast", "-crf", "23", "-pix_fmt", "yuv420p"]
     return ["-c:v", "libx264", "-preset", "medium", "-crf", "17", "-pix_fmt", "yuv420p"]
@@ -595,7 +597,7 @@ def _video_full(ctx, src: Path, cin: float, dur: float, fit: str, bg: str, stem:
     W, H, fps = fmt_of(ctx)
     d = layers_dir(ctx)
     # the clip's window is part of the name: a b-roll re-anchored to a longer span must not reuse the old cut
-    out = d / f"{stem}-{_key(round(cin, 3), round(dur, 3))}.mp4"
+    out = d / f"{stem}-{_key(round(cin, 3), round(dur, 3), _enc(ctx))}.mp4"
     if out.exists():
         return out
     if fit == "contain":
@@ -647,7 +649,7 @@ def _split_video(ctx, t0: float, t1: float, top_src: Path, top_kind: str, cin: f
     # the speaker half is cut from the source with reframe_vf: a flipped take must not reuse an
     # unflipped file (an unmirrored project keeps the key it always had)
     flip = ("mirror",) if any_mirrored(ctx) else ()
-    out = d / f"{stem}-{_key(round(t0, 3), round(t1, 3), round(cin, 3), *flip)}.mp4"
+    out = d / f"{stem}-{_key(round(t0, 3), round(t1, 3), round(cin, 3), *flip, _enc(ctx))}.mp4"
     if out.exists():
         return out
     dur = t1 - t0
@@ -1053,6 +1055,9 @@ def _t_phone(ctx, plan, params, kind, src, zones, face, frame):
             th_auto, _, _ = split_geometry(ctx, face, {})
             params = {**params, "split": max(th_auto / H, 0.45)}
         th, _, _ = split_geometry(ctx, face, params)
+        # th sizes the band and the phone in it, and comes partly from the caption band, which the
+        # stem does not carry
+        stem = f"{stem}-{_key(W, H, th)}"
         from PIL import Image
         bgc = _rgba(params.get("background", "#EDEBE7"))
         top = Image.new("RGBA", (W, th), bgc)
@@ -1099,7 +1104,9 @@ def _phone_split(ctx, plan, card_mov, top_bg_png, card_size, face, params, stem)
     d = layers_dir(ctx)
     th, _, _ = split_geometry(ctx, face, params)
     dur = plan["t1"] - plan["t0"]
-    top = d / f"{stem}-top.mp4"
+    # the length and frame rate are part of the name too: a phone re-anchored to a longer span, or a render at
+    # another rate, must not reuse this band
+    top = d / f"{stem}-top-{_key(_enc(ctx), fps, round(dur, 3))}.mp4"
     if not top.exists():
         cw, chh = card_size
         run([ffmpeg_bin(ctx), "-y", "-v", "error", "-nostdin",

@@ -186,6 +186,23 @@ describe('tool implementations', () => {
     expect(r.note).toMatch(/Remake each one now/);
   });
 
+  it('look_at_frames passes on what its stills could not show, as render_draft does', async () => {
+    const { ctx, host, dir } = await ctxFor();
+    const p = await loadProject(dir);
+    p.broll.push({ id: 'b7', anchor: { from: 'w29', to: 'w30' }, treatment: 'animation', asset: 'work/assets/anim-big-quote-1.mov', params: {} } as any);
+    await saveProject(dir, p);
+    host.framesExtra = { source: 'edit', warnings: ['music skipped: no such file'], broll: [
+      { id: 'b1', treatment: 'side-card', skipped: "That picture couldn't be downloaded." },
+      { id: 'b7', treatment: 'animation', remake: 'This animation now covers your face.', clash: ['face'] }] };
+    const r = JSON.parse((await executeTool(ctx, 'look_at_frames', { times: [1.0] })).content);
+    expect(r.warnings).toEqual(['music skipped: no such file']);
+    expect(r.brollShownDifferently).toEqual([{ id: 'b1', treatment: 'side-card', skipped: "That picture couldn't be downloaded." }]);
+    expect(r.remakeAnimations).toEqual([{ id: 'b7', problem: 'This animation now covers your face.', covers: ['face'],
+      fix: { tool: 'update_broll', args: { id: 'b7', anchor: { from: 'w29', to: 'w30' } } } }]);
+    expect(r.note).toMatch(/do not retry/);
+    expect(r.note).toMatch(/Remake each one now/);
+  });
+
   it('search_images degrades gracefully when the engine has no search', async () => {
     const { ctx, host } = await ctxFor();
     host.runEngine = async () => { throw { code: 'UNKNOWN_COMMAND', userMessage: 'no search' }; };
@@ -206,7 +223,6 @@ describe('tool implementations', () => {
 
   it('render, frames (images attached), cover, zoom, captions, style, finish', async () => {
     const { ctx, root, events } = await ctxFor();
-    expect((await executeTool(ctx, 'look_at_frames', { times: [1], words: null })).content).toMatch(/render_draft first/);
     await executeTool(ctx, 'set_cut', { keep: [{ from: 'w16', to: 'w56' }] });
     const rd = JSON.parse((await executeTool(ctx, 'render_draft', {})).content);
     expect(rd.version).toBe(1);

@@ -35,7 +35,8 @@ import {
 } from './store'
 import { addToLibrary, isVideo, listLibrary, uniqueDest } from './library'
 import { createJobManager } from './jobs'
-import { createLiveVideos } from './live-video'
+import { createLiveMoments, createLiveVideos } from './live-video'
+import { createProxyBuilds } from './proxy-builds'
 import { rememberQuestion, styleConsent } from './style-consent'
 import type { AgentResult } from './ai-types'
 import { loadAI } from './ai'
@@ -120,6 +121,25 @@ const runEngine: RunEngine = createEngineRunner({
   onSpawn: (pid) => pidRegistry?.add(pid),
   onExit: (pid) => pidRegistry?.remove(pid)
 })
+// Its own runner per build, with the same engine setup, so removing a project can wait for the exit.
+const proxies = createProxyBuilds(
+  (hooks) =>
+    createEngineRunner({
+      python: pythonExe,
+      env: engineEnv,
+      cwd: engineDir,
+      log,
+      onSpawn: (pid) => {
+        pidRegistry?.add(pid)
+        hooks.onSpawn(pid)
+      },
+      onExit: (pid) => {
+        pidRegistry?.remove(pid)
+        hooks.onExit(pid)
+      }
+    }),
+  log
+)
 
 const host: EngineHost = {
   runEngine,
@@ -168,7 +188,9 @@ const jobs = createJobManager(
       ((await readProject(slug)).sources ?? []).reduce((a: number, s: { duration?: number }) => a + (Number(s?.duration) || 0), 0)
   },
   // render events carry a playable URL (a stable copy for drafts: main/live-video.ts)
-  ((live) => (slug: string, e) => live(projectDir(slug), e))(createLiveVideos())
+  ((live) => (slug: string, e) => live(projectDir(slug), e))(createLiveVideos()),
+  // and so do the pictures of each change made before its draft
+  ((live) => (slug: string, e) => live(projectDir(slug), e))(createLiveMoments())
 )
 const models = createModelManager(runEngine, (s) => broadcast('model:progress', s))
 // "Update available" notice (main/update-check.ts): one anonymous GET a day, never in test runs.
@@ -287,6 +309,7 @@ function startFirstEdit(slug: string, initArgs: { title: string; files: string[]
         signal
       )
     }
+    proxies.start(slug, dir)
     const provider = await ai.active().catch(() => null)
     // A render event with firstLook = the quick no-AI draft is ready while the AI keeps editing; the
     // Working screen plays it (shared/live.ts) and says what it is. Once listening is done (the first
@@ -575,6 +598,7 @@ function registerIpc(): void {
       slug,
       'note',
       async (emit, signal) => {
+        proxies.start(slug, dir) // a project from before preview copies existed gets them now
         const opts = files.length ? { attachments: files.map((f) => f.asset) } : undefined
         const r: AgentResult = await ai.applyNote(dir, note, (e) => emit(e), signal, opts)
         const extra = r.notice?.userMessage ? ` ${r.notice.userMessage}` : ''
@@ -635,7 +659,10 @@ function registerIpc(): void {
       jobs.cancel(running.id)
       await running.done
     }
-    await fs.rm(projectDir(slug), { recursive: true, force: true })
+    await proxies.stop(slug)
+    // A cancelled engine's FFmpeg can hold its files for a moment after the cancel returns, and
+    // Windows refuses to delete an open file (EBUSY/EPERM): retry for a few seconds.
+    await fs.rm(projectDir(slug), { recursive: true, force: true, maxRetries: 8, retryDelay: 250 })
   })
 
   handle('jobs:cancel', (_e, id: string) => jobs.cancel(id))
@@ -819,7 +846,8 @@ app.whenReady().then(async () => {
       settingsDir: join(settingsDir(), 'ai'),
       dev: DEV_PROVIDERS,
       secretStore: safeStorage,
-      cliEnv: cliBaseEnv
+      cliEnv: cliBaseEnv,
+      moments: true
     },
     log
   )

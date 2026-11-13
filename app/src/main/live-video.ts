@@ -10,6 +10,7 @@ import type { JobUpdate } from '../shared/api'
 import { mediaUrl } from './media-url'
 
 type Render = Extract<JobUpdate, { type: 'render' }>
+type Moment = Extract<JobUpdate, { type: 'moment' }>
 
 export const LIVE_DIR = join('work', 'live')
 
@@ -38,5 +39,25 @@ export function createLiveVideos(): (projectDir: string, e: Render) => Promise<s
       // a locked copy target (Windows): the engine's own file still plays
       return mediaUrl(src, (await fs.stat(src)).mtimeMs)
     }
+  }
+}
+
+/** The same for a moment (a still or the 2 s window, engine `moments`): the engine deletes or replaces
+ * those files on its next run, so each is played from a copy in work/live/. Stills cycle through four
+ * names and windows through two, so the copies on screen (at most three stills and a window per run)
+ * are never the ones being written. Files outside this project are refused. */
+export function createLiveMoments(): (projectDir: string, e: Moment) => Promise<string | null> {
+  const turn = new Map<string, number>()
+  return async (projectDir, e) => {
+    const vdir = join(projectDir, 'versions', 'preview')
+    if (!inside(vdir, e.file) || !existsSync(e.file)) return null
+    const key = `${projectDir}\0${e.kind}`
+    const n = (turn.get(key) ?? 0) + 1
+    turn.set(key, n)
+    const name = e.kind === 'still' ? `moment-${n % 4}.png` : `moment-window-${n % 2 ? 'a' : 'b'}.mp4`
+    const dest = join(projectDir, LIVE_DIR, name)
+    await fs.mkdir(join(projectDir, LIVE_DIR), { recursive: true })
+    await fs.copyFile(e.file, dest)
+    return mediaUrl(dest, Date.now())
   }
 }

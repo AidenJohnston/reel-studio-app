@@ -124,11 +124,14 @@ def text_run(cmd: list, timeout: float, what: str, check: bool = True, cwd=None,
 
 
 _TIME_RE = re.compile(r"out_time_us=(\d+)")
+_FRAME_RE = re.compile(r"^frame=(\d+)")
 
 
 def ffmpeg_progress(cmd: list, duration: float, on_pct: Callable[[float], None], timeout: float,
-                    what: str, cwd=None, user_message: Optional[str] = None) -> str:
-    """Run an ffmpeg command that has `-progress pipe:1 -nostats` and report 0-100 as it encodes.
+                    what: str, cwd=None, user_message: Optional[str] = None, frames: Optional[int] = None) -> str:
+    """Run an ffmpeg command that has `-progress pipe:1 -nostats` and report 0-100 as it encodes: by
+    output time, or by the first output's frame count out of `frames` when that is given (FFmpeg reports
+    the time of one output only, which is no measure when each output holds a different part).
     Returns stderr (the caller may inspect libass' fontselect lines)."""
     cmd = [str(c) for c in cmd]
     try:
@@ -156,6 +159,11 @@ def ffmpeg_progress(cmd: list, duration: float, on_pct: Callable[[float], None],
     timer.start()
     try:
         for line in proc.stdout:
+            if frames:
+                m = _FRAME_RE.search(line)
+                if m:
+                    on_pct(min(100.0, int(m.group(1)) / frames * 100.0))
+                continue
             m = _TIME_RE.search(line)
             if m and duration > 0:
                 on_pct(min(100.0, int(m.group(1)) / 1e6 / duration * 100.0))

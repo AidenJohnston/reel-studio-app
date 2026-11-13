@@ -1,6 +1,7 @@
 // Mirror of the @reelstudio/ai interface (docs/architecture.md section 8). The real package is loaded at
 // runtime when it exists; until then ai-mock.ts implements the same shape.
 import type { JobUpdate } from '../shared/api'
+import type { EngineProgress } from './engine'
 
 /** What @reelstudio/ai emits: the job contract minus `heard` (main adds that one itself). */
 export type AgentEvent = Exclude<JobUpdate, { type: 'heard' }>
@@ -32,7 +33,7 @@ export interface EngineHost {
   runEngine(
     command: string,
     args: string[],
-    onProgress?: (p: { stage: string; pct: number; message: string }) => void,
+    onProgress?: (p: EngineProgress) => void,
     signal?: AbortSignal
   ): Promise<any>
   renderAnimation(template: string, params: Record<string, unknown>, outPath: string): Promise<string>
@@ -148,6 +149,8 @@ export interface CreateAIOptions {
   secretStore?: SecretStore
   /** the environment the person's own CLIs get (main's test switch can swap in a throwaway home) */
   cliEnv?: () => NodeJS.ProcessEnv
+  /** draw what each reply of the AI changed before its draft (`moment` events) */
+  moments?: boolean
 }
 
 export type CreateAI = (opts: CreateAIOptions) => AI
