@@ -8,7 +8,8 @@ for and does not find (`os.stat`, `os.path.exists`, `os.path.isfile`, which `Pat
 `Path.is_file` use) is kept as absent: an optional input such as a face track made later changes the
 video as much as an edited one. A file the render writes itself (a face track it detects and caches)
 is an input too, with the content it ends the render with: every file is hashed when recording stops,
-and a path looked for and not found is looked at again then. While a render records (`start`), the paths under the project or the
+and a path looked for and not found is looked at again then. A file written and gone by then was a
+temporary one (an atomic write's `<name>.<pid>.tmp`): only what it was renamed to counts. While a render records (`start`), the paths under the project or the
 Reel Studio root are kept, except what the engine itself writes (GENERATED) and project.json, which
 the snapshot holds. `stop()` returns them as {key: digest}: a key relative to the project
 ("project/...") or the root ("root/..."), so a moved Reel Studio folder keeps its keys, and a digest
@@ -55,7 +56,8 @@ def _key(rec: dict, path) -> Optional[tuple]:
 
 
 def _keep(path, written: bool = False) -> None:
-    """`path` is read (or, `written`, made) by the render: an input, hashed when recording stops."""
+    """`path` is read (or, `written`, made) by the render: an input, hashed when recording stops. A
+    written one that is gone by then was temporary and is dropped."""
     rec = _rec
     if rec is None or not isinstance(path, (str, os.PathLike)):
         return
@@ -69,7 +71,10 @@ def _keep(path, written: bool = False) -> None:
     found = _key(rec, path)
     if found:
         with _lock:
-            rec["files"][found[0]] = found[1]
+            if written:
+                rec["written"].setdefault(found[0], found[1])
+            else:
+                rec["files"][found[0]] = found[1]
 
 
 def _looked_for(path) -> None:
@@ -123,6 +128,8 @@ def _hook(event: str, args) -> None:
         path, mode, flags = args
         writes = (mode and any(c in mode for c in "wax+")) or (flags or 0) & (os.O_WRONLY | os.O_RDWR | os.O_CREAT)
         _keep(path, written=bool(writes))
+    elif event == "os.rename":           # os.rename and os.replace: the file is now at its new name
+        _keep(args[1], written=True)
     elif event == "subprocess.Popen":
         _exe, argv, cwd, _env = args
         for a in _arguments(argv)[1:]:
@@ -147,7 +154,7 @@ def start(project_dir: Path, root: Optional[Path], aliases: Optional[dict] = Non
     global _rec
     norm = lambda p: os.path.normcase(os.path.realpath(os.fspath(p)))  # noqa: E731
     bases = [(norm(project_dir), "project")] + ([(norm(root), "root")] if root else [])
-    _rec = {"bases": sorted(bases, key=lambda b: -len(b[0])), "files": {}, "absent": {},
+    _rec = {"bases": sorted(bases, key=lambda b: -len(b[0])), "files": {}, "written": {}, "absent": {},
             "aliases": [(norm(a), os.path.realpath(os.fspath(r))) for a, r in (aliases or {}).items()]}
 
 
@@ -165,6 +172,9 @@ def stop() -> dict:
     if rec is None:
         return {}
     out = {k: digest(Path(p)) for k, p in {**rec["absent"], **rec["files"]}.items()}
+    for k, p in rec["written"].items():
+        if k not in out and _isfile(p):     # still there: made by the render (else a temporary file)
+            out[k] = digest(Path(p))
     return dict(sorted(out.items()))
 
 

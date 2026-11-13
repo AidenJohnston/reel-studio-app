@@ -6,6 +6,8 @@ from __future__ import annotations
 import hashlib
 import json
 import subprocess
+import sys
+from pathlib import Path
 
 import pytest
 
@@ -209,6 +211,20 @@ def test_files_added_for_later_edits_do_not_block_an_earlier_export(project, ren
     assert r["reused"] is False and renders[-1] == (False, 1)
 
 
+def test_the_same_edit_redrawn_by_another_engine_process_keeps_its_version(project):
+    """Recorded inputs hold no process-specific names (an atomic write's `<name>.<pid>.tmp`): captions on,
+    so the draft writes work/captions.json through one."""
+    edit(project, captions=dict(projmod.load(project)["captions"], enabled=True))
+    versions.save(project)
+    inputs = projmod.read_json(project / "versions" / "v1" / "inputs.json")
+    assert not [k for k in inputs if k.endswith(".tmp")]
+    (project / "versions" / "preview" / "render_draft.json").unlink()      # the next save draws again
+    r = subprocess.run([sys.executable, "-m", "reelengine", "save-version", "--project", str(project)],
+                       cwd=Path(versions.__file__).parents[1], capture_output=True, text=True, encoding="utf-8")
+    done = json.loads(r.stdout.strip().splitlines()[-1])
+    assert done["event"] == "done" and done["result"]["version"] == 1, r.stdout[-500:]
+
+
 def test_a_face_track_the_render_makes_is_saved_with_it_and_the_first_export_succeeds(project, renders):
     """A zoom with no focus is framed on the face: the draft detects the face track and caches it as
     work/face-<sid>.json, and the cover comes from its cache, so nothing reads that file back."""
@@ -244,6 +260,8 @@ def test_the_recorder_keeps_what_is_read_and_made_and_nothing_generated(tmp_path
     (proj / "work" / "layers" / "layers.json").read_text(encoding="utf-8")     # the engine's own report
     (tmp_path / "elsewhere.txt").read_text(encoding="utf-8")                   # outside the project and root
     (proj / "work" / "made.json").write_text("{}", encoding="utf-8")            # made by the render: an input
+    projmod.write_json(proj / "work" / "renamed.json", {"via": "a temporary file"})   # <name>.<pid>.tmp, renamed
+    projmod.write_json(proj / "work" / "captions.json", {"cues": []})          # an engine output, via a temporary file
     (view / "assets" / "b.json").read_text(encoding="utf-8")                   # read through a stand-in folder
     subprocess.run([compose_util.ffmpeg_bin(), "-v", "quiet", "-i", str(proj / "media" / "take.mp4"),
                     "-i", str(root / "Library" / "pic.png"), "-f", "null", "-"], capture_output=True)
@@ -252,7 +270,8 @@ def test_the_recorder_keeps_what_is_read_and_made_and_nothing_generated(tmp_path
     got = reads.stop()
     assert set(got) == {"project/work/assets/a.anim.json", "project/media/take.mp4", "root/Library/pic.png",
                         "project/work/assets/b.json", "project/work/face.json", "project/work/made.json",
-                        "project/work/late.json"}
+                        "project/work/late.json", "project/work/renamed.json"}
+    assert got["project/work/renamed.json"] == sha(proj / "work" / "renamed.json")   # the name it ended with
     assert got["project/work/late.json"] == sha(proj / "work" / "late.json")      # not absent: the render made it
     assert got["project/work/face.json"] is None
     assert got["project/work/made.json"] == sha(proj / "work" / "made.json")      # with the content it ended with

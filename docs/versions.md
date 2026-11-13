@@ -45,7 +45,8 @@ Rules:
    looks for and does not find (an optional input such as a face track), as absent, and every file it
    writes there itself (a face track it detects and caches). Each one goes into the render's manifest
    (`inputs`) with a digest taken when the render ends, so a file the render made counts with the content
-   it ended with: content for files up to 16 MB, size and time for larger ones (the takes), `null` for a
+   it ended with (a file written and gone by then, such as an atomic write's `<name>.<pid>.tmp`, was
+   temporary and only the name it was renamed to counts): content for files up to 16 MB, size and time for larger ones (the takes), `null` for a
    file still not there, so a file that appears later counts as a change. A draft in `preview/` is reused only while every file in its `inputs` is
    unchanged, the song included. `save-version` copies those `inputs` into `inputs.json`, keeps the
    current `vN` when it is this very video (the same edit signature, its `inputs.json` unchanged), and
