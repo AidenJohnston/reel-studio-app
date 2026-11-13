@@ -41,7 +41,8 @@ export async function readFinishedVideo(source: string, runEngine: RunEngine, si
 /**
  * One video, cover and caption file per platform. The render is copied as it is unless a platform needs its audio
  * redone or the file is over its size limit. Platform limits only warn in the dialog, so nothing here refuses a caption
- * or a length. Nothing is left behind if this fails or stops.
+ * or a length. Nothing is left behind if this fails or stops, except the staging folder of an engine that would not
+ * stop (ENGINE_STUCK), which the next start removes.
  */
 export async function exportPlatforms({ source, chosenCover, folder, name, request, runEngine, signal, onProgress }: {
   source: string
@@ -59,6 +60,8 @@ export async function exportPlatforms({ source, chosenCover, folder, name, reque
   await fs.mkdir(folder, { recursive: true })
   const stage = await makeStagingFolder(folder)
   const placed: string[] = []
+  // An engine that would not stop (ENGINE_STUCK, engine.ts) may still be writing into the staging folder.
+  let stuck = false
   try {
     const cover = join(stage, 'cover.jpg')
     // The scrub bar's end is the duration itself; the engine picks the last frame it can decode.
@@ -100,10 +103,14 @@ export async function exportPlatforms({ source, chosenCover, folder, name, reque
     // Windows can hold a just-written file for a moment; a removal that still fails must not hide why we stopped.
     // Node documents maxRetries as ignored unless recursive is true, so it is set even for a single file.
     await Promise.allSettled(placed.map((file) => fs.rm(file, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 })))
-    throw signal?.aborted ? { code: 'CANCELLED', userMessage: 'Stopped.' } : error
+    // Stop aborts the signal before the runner finds the engine would not end: that is still ENGINE_STUCK, so the job
+    // keeps the project closed (jobs.ts) and the dialog says to restart, instead of a normal "Stopped."
+    stuck = (error as { code?: string })?.code === 'ENGINE_STUCK'
+    throw signal?.aborted && !stuck ? { code: 'CANCELLED', userMessage: 'Stopped.' } : error
   } finally {
-    // Windows keeps a stopped ffmpeg's output locked for a moment; the startup sweep removes what is left.
-    await fs.rm(stage, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 }).catch(() => undefined)
+    // Windows keeps a stopped ffmpeg's output locked for a moment; the startup sweep removes what is left. A stuck
+    // engine's folder is left to that sweep, which runs after leftover engines are stopped (index.ts).
+    if (!stuck) await fs.rm(stage, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 }).catch(() => undefined)
   }
 }
 

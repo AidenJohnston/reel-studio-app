@@ -154,6 +154,30 @@ describe('platform files through the real engine', () => {
     expect(await fs.readdir(folder)).toEqual(['earlier export.mp4'])
   })
 
+  it('fails if an engine that would not stop is reported as a normal Stop, or its staging folder is removed under it', async () => {
+    const folder = join(scratch, 'stuck engine')
+    mkdirSync(folder)
+    const stop = new AbortController()
+    const stuck = { code: 'ENGINE_STUCK', userMessage: "Part of Reel Studio's video engine would not stop." }
+    // like engine.ts: Stop aborts the signal first, then the runner finds the engine still alive after the kill
+    const stubborn = (async (command: string, args: string[]) => {
+      if (command === 'export-probe') return { hasVideo: true, duration: 3, sizeBytes: 1000, audioBitrate: 192_000, editList: true }
+      if (command === 'export-cover') return writeFileSync(args[args.indexOf('--dest') + 1], 'cover')
+      writeFileSync(args[args.indexOf('--dest') + 1], 'half written')
+      stop.abort()
+      throw stuck
+    }) as unknown as typeof runEngine
+    await expect(exportPlatforms({ source: join(scratch, 'unused.mp4'), chosenCover: null, folder, name: 'Stuck',
+      request: { platforms: ['instagram'], caption: '', coverSeconds: null }, runEngine: stubborn, signal: stop.signal }))
+      .rejects.toMatchObject({ code: 'ENGINE_STUCK' })
+    const left = await fs.readdir(folder)
+    expect(left).toHaveLength(1)
+    expect(left[0].startsWith('.platform-export-')).toBe(true)
+    // the next start removes it
+    await sweepExportStaging(folder)
+    expect(await fs.readdir(folder)).toEqual([])
+  })
+
   it('fails if Stop as the second platform lands leaves files behind', async () => {
     const source = finalRender(join(scratch, 'late stop.mp4'), 3)
     const folder = join(scratch, 'late stop')
