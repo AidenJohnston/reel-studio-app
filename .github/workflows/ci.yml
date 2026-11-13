@@ -70,6 +70,9 @@ jobs:
       - run: npm run build -w ai
       - run: npm run typecheck
       - run: npm test
+      # The git and agent hooks run on contributors' machines, so they are tested on all three systems.
+      - name: Leak check hook tests
+        run: python scripts/leak-check/test_leak_check.py
       - run: npm run build -w app
 
   engine:

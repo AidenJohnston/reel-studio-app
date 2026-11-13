@@ -23,7 +23,14 @@ export const JOBS = {
   node: [/^(app|ai|packaging)\//, /^package(-lock)?\.json$/],
   engine: [/^engine\//, /^packaging\/(requirements[^/]*\.txt|hash_requirements\.py)$/],
   animations: [/^templates\//],
-  none: [/^scripts\/leak-check\//, /^\.github\/workflows\/leak-check\.yml$/],
+  none: [
+    /^scripts\/leak-check\//,
+    /^\.github\/workflows\/leak-check\.yml$/,
+    // The leak check's hooks: tested by the Node job, which always runs.
+    /^\.githooks\//,
+    /^\.claude\/settings\.json$/,
+    /^\.codex\/hooks\.json$/,
+  ],
 };
 const JOB_NAMES = ["engine", "animations"];
 

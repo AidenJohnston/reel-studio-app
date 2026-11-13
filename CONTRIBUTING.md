@@ -16,7 +16,7 @@ Thanks for helping. Bug reports, fixes and small improvements are welcome.
 See "Build from source" in the [README](README.md). The short version:
 
 ```
-npm install && npm run build -w ai
+npm install && npm run build -w ai      # also turns on the leak-check git hooks (docs/leak-check.md)
 cd engine && python -m venv .venv && .venv/bin/pip install -e ".[dev]"    # Windows: .venv\Scripts\pip
 ```
 
@@ -27,14 +27,18 @@ npm test                        # app + ai
 npm run typecheck
 cd engine && python -m pytest tests
 python scripts/leak-check/check.py   # also runs on every pull request
+python scripts/leak-check/test_leak_check.py   # if you change the leak check or its hooks
 ```
 
 CI runs Node checks on Ubuntu, macOS, and Windows, plus engine and animation tests on Ubuntu.
 Electron e2e tests run locally with `npm run e2e`; CI does not run them.
 
 The leak check refuses private names, personal paths, e-mail addresses, media files and anything over 5 MB.
-Its list of private terms is stored only as fingerprints, so a finding names the line, not the word. If it
-flags something that is not private, say so in the pull request.
+Its list of private terms is stored only as fingerprints, so a finding names the line, not the word. It runs
+before each commit (on the staged files and the message), before an agent posts PR text with `gh`, and in CI on
+every pull request's files, title and body; [docs/leak-check.md](docs/leak-check.md) says how to set up, read and
+undo each one. If it flags something that is not private, reword the line and say so in the pull request.
+`git commit --no-verify` is for a real hotfix only, and the pull request must say you used it.
 
 Tests that read your own videos or music are marked `real` and skip themselves when the files are absent;
 put them under a `testdata/` folder (it is git-ignored) or point `REELENGINE_TEST_TAKES` and
