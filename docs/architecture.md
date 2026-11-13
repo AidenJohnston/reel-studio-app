@@ -155,6 +155,7 @@ Exit code 0 on done, 1 on error. The `message` in progress events is user-facing
 | `analyze` | audio envelope, pause list, retake groups (lines said more than once), face box track, a deterministic default cut |
 | `autocut` | writes a deterministic baseline `cut.keep`; the AI then refines it |
 | `render [--draft] [--window a:b]` | renders project.json -> `versions/vN/{export.mp4, cover.png, verify.json}`; `--draft` is a fast preview |
+| `anim-jobs` | animation clips the current cut needs re-rendered (beats re-timed to their words): `{jobs: [{id, template, params, out}]}` |
 | `cover` | renders cover.png only |
 | `verify <mp4>` | A/V sync, loudness (-14 LUFS target), duration, black frames, caption-safe placement report |
 | `frames --times t1,t2,...` | extracts PNG frames from the latest render (for the AI to look at) |
@@ -190,7 +191,7 @@ class RenderCtx:
     progress: Callable[[str, float, str], None]
 
 broll.build_layers(ctx) -> list[Layer]   # Layer(path, kind:'image'|'video', t0, t1, x, y, w, h, rotate_deg, z, fade_in, fade_out)
-zoom.build_zooms(ctx) -> list[ZoomSpan]  # ZoomSpan(t0, t1, scale, cx, cy)
+zoom.build_zooms(ctx) -> list[ZoomSpan]  # ZoomSpan(t0, t1, scale, cx, cy, ramp_in, ramp_out)
 music.build_audio(ctx, voice_wav) -> Path   # final mixed wav at -14 LUFS integrated
 cover.render(ctx, out_png) -> Path
 ```
@@ -285,7 +286,16 @@ forehead down to just above the brows, and the sides of the head.
 **Animations** (`templates/animations/`): HTML templates (`stat-count-up`, `big-quote`, `list-reveal`,
 `logo-pop`, `price-tag`, `typing-terminal`), each exposing `window.__setup(params)` and `window.__seek(t)`.
 The Electron main process renders them in an offscreen window frame by frame into ffmpeg, producing a
-transparent layer. No CDN is used at run time; any JS is vendored.
+transparent layer. No CDN is used at run time; any JS is vendored. A frame is a pure function of frame time
+(one paused timeline, no clock, timers or randomness; `templates/animations` tests check it).
+
+An animation follows a re-cut. Its beats (each quote word, list item, label or typed line) and its free region
+above the face come from the words of its anchor, so `engine/reelengine/anim_timing.py` re-times every
+animation against the current cut. When that differs from what its clip was rendered with, the clip to play is
+`work/animations/<template>-<key>.mov`, keyed by the spec and the re-timed params: the same project.json
+always plays the same clip. Before every `render` the app asks `anim-jobs` which of those are missing and
+renders them (`app/src/main/anim-retime.ts`); until one exists the old clip plays and layers.json says
+`retime: "pending"`.
 
 ## 8. App and AI interface
 

@@ -40,8 +40,15 @@ function renderModule(): Promise<RenderModule> {
 let adapter: Adapter | null = null
 let queue: Promise<unknown> = Promise.resolve()
 
-export function renderAnimation(template: string, params: Record<string, unknown>, outPath: string): Promise<string> {
+/** `signal` stops it: before it starts (it may wait behind other renders) or between frames. */
+export function renderAnimation(
+  template: string,
+  params: Record<string, unknown>,
+  outPath: string,
+  signal?: AbortSignal
+): Promise<string> {
   const run = async (): Promise<string> => {
+    if (signal?.aborted) throw { code: 'CANCELLED', userMessage: 'Stopped.' }
     const mod = await renderModule()
     adapter ??= mod.createElectronAdapter(BrowserWindow)
     try {
@@ -50,14 +57,17 @@ export function renderAnimation(template: string, params: Record<string, unknown
         params,
         outPath,
         adapter,
+        signal,
         ffmpeg: ffmpegPath(),
         templatesRoot: template === TEST_TEMPLATE ? testAnimationDir() : templatesDir()
       })
       return r.path
     } catch (e) {
-      // After a timeout or crash the window may be stuck: start fresh next time.
-      await adapter?.close().catch(() => {})
-      adapter = null
+      // After a timeout or crash the window may be stuck: start fresh next time (a cancel is neither).
+      if (!signal?.aborted) {
+        await adapter?.close().catch(() => {})
+        adapter = null
+      }
       throw e
     }
   }

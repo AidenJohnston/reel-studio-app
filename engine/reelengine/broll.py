@@ -38,7 +38,7 @@ import re
 from pathlib import Path
 from typing import Optional
 
-from . import placement
+from . import anim_timing, placement
 from .compose_util import (EngineError, _get, any_mirrored, ffmpeg_bin, fmt_of, kind_of, layers_dir, load_font, log,
                            open_image, probe, reframe_rect, reframe_vf, report, resolve_asset, run, source_mirrored,
                            source_path, source_spans, word_end, word_ids_between, word_start)
@@ -548,6 +548,8 @@ def _save_png(img, ctx, stem: str) -> Path:
 # --- video helpers (ffmpeg) --------------------------------------------------------------------
 
 def _enc(ctx) -> list:
+    """Encoder settings for b-roll clips. Drafts and exports share work/layers, so every file encoded
+    with these must carry them in its name, or an export reuses a draft's fast, lossy clip."""
     if getattr(ctx, "draft", False):
         return ["-c:v", "libx264", "-preset", "ultrafast", "-crf", "23", "-pix_fmt", "yuv420p"]
     return ["-c:v", "libx264", "-preset", "medium", "-crf", "17", "-pix_fmt", "yuv420p"]
@@ -595,7 +597,7 @@ def _video_full(ctx, src: Path, cin: float, dur: float, fit: str, bg: str, stem:
     W, H, fps = fmt_of(ctx)
     d = layers_dir(ctx)
     # the clip's window is part of the name: a b-roll re-anchored to a longer span must not reuse the old cut
-    out = d / f"{stem}-{_key(round(cin, 3), round(dur, 3))}.mp4"
+    out = d / f"{stem}-{_key(round(cin, 3), round(dur, 3), _enc(ctx))}.mp4"
     if out.exists():
         return out
     if fit == "contain":
@@ -647,7 +649,7 @@ def _split_video(ctx, t0: float, t1: float, top_src: Path, top_kind: str, cin: f
     # the speaker half is cut from the source with reframe_vf: a flipped take must not reuse an
     # unflipped file (an unmirrored project keeps the key it always had)
     flip = ("mirror",) if any_mirrored(ctx) else ()
-    out = d / f"{stem}-{_key(round(t0, 3), round(t1, 3), round(cin, 3), *flip)}.mp4"
+    out = d / f"{stem}-{_key(round(t0, 3), round(t1, 3), round(cin, 3), *flip, _enc(ctx))}.mp4"
     if out.exists():
         return out
     dur = t1 - t0
@@ -1053,6 +1055,9 @@ def _t_phone(ctx, plan, params, kind, src, zones, face, frame):
             th_auto, _, _ = split_geometry(ctx, face, {})
             params = {**params, "split": max(th_auto / H, 0.45)}
         th, _, _ = split_geometry(ctx, face, params)
+        # th sizes the band and the phone in it, and comes partly from the caption band, which the
+        # stem does not carry
+        stem = f"{stem}-{_key(W, H, th)}"
         from PIL import Image
         bgc = _rgba(params.get("background", "#EDEBE7"))
         top = Image.new("RGBA", (W, th), bgc)
@@ -1099,7 +1104,9 @@ def _phone_split(ctx, plan, card_mov, top_bg_png, card_size, face, params, stem)
     d = layers_dir(ctx)
     th, _, _ = split_geometry(ctx, face, params)
     dur = plan["t1"] - plan["t0"]
-    top = d / f"{stem}-top.mp4"
+    # the length and frame rate are part of the name too: a phone re-anchored to a longer span, or a render at
+    # another rate, must not reuse this band
+    top = d / f"{stem}-top-{_key(_enc(ctx), fps, round(dur, 3))}.mp4"
     if not top.exists():
         cw, chh = card_size
         run([ffmpeg_bin(ctx), "-y", "-v", "error", "-nostdin",
@@ -1400,10 +1407,15 @@ def build_layers(ctx) -> list:
             elif tname == "animation" and (src is None or animation_sidecar(src) is None):
                 raise EngineError("ANIM_NOT_ANIMATION", f"{plan['id']}: animation treatment without an animation file",
                                   "This b-roll is set to show an animation, but its file isn't one. Make the animation again.")
+            retime = None
+            if tname == "animation":
+                src, retime = _current_animation(ctx, it, src)
             zones, face, frame = zones_for(ctx, plan["t0"], plan["t1"])
             layers, rec = fn(ctx, plan, params, kind, src, zones, face, frame)
             if asked != tname:
                 rec["note"] = f"an animation is shown full-frame as rendered (asked for {asked})"
+            if retime:
+                rec["retime"] = retime
         except EngineError as e:
             log(f"broll {plan['id']}: {e.message}")
             records.append({"id": plan["id"], "treatment": tname,
@@ -1420,9 +1432,9 @@ def build_layers(ctx) -> list:
         out += layers
         hiding = tname in FACE_HIDING or rec.get("zone") in ("full", "split-top")
         if tname == "animation" and not hiding and rec.get("bbox"):
-            # An animation's position was fixed when it was rendered. If the cut (or the framing under
-            # it) changed since, it can now sit on the face or the captions: say so, so the editor
-            # remakes it (a card would simply be placed again; an animation can't be).
+            # A re-timed clip is placed for this cut (anim_timing). Until it is rendered the old one
+            # plays, and if the cut moved the face under it, it can sit on the face or the captions:
+            # say so, so the editor remakes it if the app could not re-render it.
             core = frame.get("core", face)
             clash = placement.violates(tuple(rec["bbox"]), (core[0], core[1], core[0] + core[2], core[1] + core[3]),
                                        placement.caption_band(_frame(ctx)))
@@ -1444,6 +1456,20 @@ def build_layers(ctx) -> list:
                                             "t1": round(L.t1, 3), "x": L.x, "y": L.y, "w": L.w, "h": L.h, "z": L.z}
                                            for L in out]}, indent=1), encoding="utf-8")
     return sorted(out, key=lambda L: L.z)
+
+
+def _current_animation(ctx, item: dict, src: Path) -> tuple[Path, Optional[str]]:
+    """The clip an animation item plays on this cut (see anim_timing): its own clip while its beats
+    and region still fit, else the clip re-timed to the cut. -> (path, "retimed" | "pending" | None);
+    "pending" = the re-timed clip is not rendered yet (the app renders it before the next render),
+    so the old one plays."""
+    p = anim_timing.plan(ctx, item, animation_sidecar(src) or {})
+    if p is None:
+        return src, None
+    if p["ready"]:
+        return p["out"], "retimed"
+    log(f"broll {item.get('id')}: re-timed animation not rendered yet; the old one plays")
+    return src, "pending"
 
 
 def anim_context(ctx, word_from: str, word_to: str, duration: Optional[float] = None, lead: float = LEAD) -> dict:

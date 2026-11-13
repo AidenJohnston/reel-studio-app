@@ -273,13 +273,25 @@ def cmd_analyze_music(args):
 def cmd_anim_context(args):
     """Free region above the eyebrows + word times for an animation over --from..--to (see
     broll.anim_context). The AI calls this before rendering an animation."""
-    from . import broll, project as projmod, render, tools
+    from . import broll
+    return broll.anim_context(_anim_ctx(args), args.word_from, args.word_to, args.duration)
+
+
+def _anim_ctx(args):
+    """A draft render context for the project (cut, words, face track): nothing is rendered."""
+    from . import project as projmod, render, tools
     pdir = _project(args).resolve()
     proj = projmod.load(pdir)
     words = projmod.load_transcript(pdir, proj)["words"]
     tl = projmod.timeline(pdir, proj, words)
-    ctx = render.make_ctx(pdir, proj, tl, True, tools.root_dir(args.root), pdir / "work" / "render")
-    return broll.anim_context(ctx, args.word_from, args.word_to, args.duration)
+    return render.make_ctx(pdir, proj, tl, True, tools.root_dir(args.root), pdir / "work" / "render")
+
+
+def cmd_anim_jobs(args):
+    """Animation clips the current cut needs re-rendered (beats re-timed to the words, see
+    anim_timing). The app renders each one before a render."""
+    from . import anim_timing
+    return {"jobs": anim_timing.jobs(_anim_ctx(args))}
 
 
 def cmd_attach(args):
@@ -374,6 +386,8 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--from", dest="word_from", required=True)
     sp.add_argument("--to", dest="word_to", required=True)
     sp.add_argument("--duration", type=float)
+    sp.add_argument("--root")
+    sp = add("anim-jobs", cmd_anim_jobs, "animation clips to re-render for the current cut")
     sp.add_argument("--root")
     sp = add("attach", cmd_attach, "add a picture, GIF or short clip attached to a note")
     sp.add_argument("file")
