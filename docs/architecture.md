@@ -71,7 +71,7 @@ Projects live in `<Documents>/Reel Studio/Projects/<slug>/`. The shared **Librar
   project.json            the edit (schema below), the only file the AI changes
   media/                  copies (or hard links) of the user's raw takes for this project
   work/                   engine caches: transcript.json, audio.wav, face.json, layers/, proxies; safe to delete
-  versions/v1/            project.json snapshot + export.mp4 + cover.png + verify.json + notes.md
+  versions/v1/            project.json snapshot + export.mp4 + cover.png + verify.json + notes.md (+ ai-run.json)
   versions/v2/ ...
   versions/preview/       the one scratch folder for drafts, overwritten each time (see versions.md)
 ```

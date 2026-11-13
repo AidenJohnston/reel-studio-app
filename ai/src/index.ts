@@ -318,13 +318,13 @@ export function createAI(opts: CreateAIOptions) {
     switch (st.id) {
       case 'claude': return new AnthropicProvider({ apiKey: (await claudeKey())!, model: s.claudeModel, baseURL: opts.anthropicBaseURL, fetch: opts.fetch });
       case 'claude-cli': {
-        const bin = (await localClaude()).bin;
+        const { bin, version } = await localClaude();
         // one live `claude` process per run (providers/cli.ts): ~2.5 s less per model turn
-        return new ClaudeCliProvider({ model: s.cliModel, session: true, env: env(), ...(bin ? { bin } : {}) });
+        return new ClaudeCliProvider({ model: s.cliModel, session: true, env: env(), ...(bin ? { bin } : {}), ...(version ? { cliVersion: version } : {}) });
       }
       case 'codex-cli': {
-        const bin = (await localCodex()).bin;
-        return new CodexCliProvider({ model: s.codexModel, env: env(), ...(bin ? { bin } : {}) });
+        const { bin, version } = await localCodex();
+        return new CodexCliProvider({ model: s.codexModel, env: env(), ...(bin ? { bin } : {}), ...(version ? { cliVersion: version } : {}) });
       }
       case 'custom':
         // read the address and its key together, never halfway through a save that changes both

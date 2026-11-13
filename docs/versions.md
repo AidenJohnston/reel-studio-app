@@ -7,7 +7,7 @@ never a pile of preview-only folders an AI run left behind.
 
 ```
 <project>/versions/
-  v1/            a VERSION: export.mp4 + cover.png + verify.json + render.json + project.json (+ notes.md)
+  v1/            a VERSION: export.mp4 + cover.png + verify.json + render.json + project.json (+ notes.md, ai-run.json)
   v2/
   preview/       the ONE scratch folder for previews, overwritten every time:
                  draft.mp4, window_<a>-<b>.mp4 (only the latest window), cover.png, verify.json,
@@ -48,6 +48,11 @@ Rules:
   no `export.mp4` (the final render failed and the run fell back to its preview), show
   `versions/preview/draft.mp4` and offer to try the final render again.
 - `versions/vN/notes.md` (written by the ai package) is the note text for that chip.
+- `versions/vN/ai-run.json` (written by the ai package when a model call was answered) records each call of the
+  runs that made the version (a note that changes only the post caption keeps the version, and its calls are
+  added, with `usage` summed over all of them): provider, the model asked for, the model and CLI version the CLI reported, effort,
+  and tokens including cache reads and writes. A value the CLI did not report is the string `"not reported"`,
+  never 0. It is measurement only; the app does not show it.
 
 ## ai package
 

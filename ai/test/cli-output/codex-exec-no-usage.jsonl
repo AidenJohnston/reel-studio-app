@@ -1,0 +1,3 @@
+{"type":"thread.started","thread_id":"0199a0c1-0000-7000-8000-000000000002"}
+{"type":"turn.started"}
+{"type":"item.completed","item":{"id":"item_0","type":"agent_message","text":"{\"thought\":\"done\",\"tool_calls\":[{\"name\":\"finish\",\"arguments\":{\"summary_for_user\":\"I tightened the pauses.\"}}]}"}}

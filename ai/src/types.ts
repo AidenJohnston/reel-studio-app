@@ -99,8 +99,29 @@ export interface CompletionRequest {
   signal?: AbortSignal;
 }
 export interface TokenUsage { input?: number; output?: number; cacheRead?: number; cacheWrite?: number }
+
+/** A value the CLI's output did not carry. Kept apart from 0 so a missing count never reads as "none used". */
+export const NOT_REPORTED = 'not reported' as const;
+export type Reported<T> = T | typeof NOT_REPORTED;
+
+/** What one model call ran on and used, as the CLI's own output reported it (providers/cli.ts). Measurement
+ * only: the token budget still reads `usage`. */
+export interface CallProvenance {
+  provider: ProviderId;
+  /** the model the app passed to the CLI; null = none passed, so the CLI used its own default */
+  requestedModel: string | null;
+  /** model ids from the CLI's output for this call, never copied from the request */
+  reportedModels: Reported<string[]>;
+  cliVersion: Reported<string>;
+  /** the effort the app passed; null = none passed (the CLI's default). Neither CLI reports the effort it used. */
+  effort: string | null;
+  /** input = input tokens neither read from nor written to the prompt cache, as Anthropic counts it */
+  usage: { input: Reported<number>; output: Reported<number>; cacheRead: Reported<number>; cacheWrite: Reported<number> };
+}
+
 export interface CompletionResponse {
   text: string; toolCalls: ToolCall[]; raw?: unknown; usage?: TokenUsage;
+  provenance?: CallProvenance;
   /** the reply meant to call tools but could not be read (the loop re-asks with a format correction) */
   malformed?: boolean;
   /** the calls were read from a non-protocol format (XML-style) */

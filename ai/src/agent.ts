@@ -175,6 +175,7 @@ async function agentLoop(o: RunAgentOptions): Promise<RunAgentResult> {
         o.onEvent({ type: 'status', message: thinkingMessage(messages), phase: 'edit', thinking: true });
         res = await o.provider.complete({ system: o.system, messages: sent, tools, signal: o.signal });
         tokens += effectiveTokens(res.usage, o.system.length + JSON.stringify(sent).length);
+        if (res.provenance) o.ctx.state.aiCalls.push(res.provenance);
         break;
       } catch (e: any) {
         if (o.signal?.aborted) throw new AIError('cancelled', 'Stopped.');

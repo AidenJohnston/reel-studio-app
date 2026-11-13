@@ -7,7 +7,7 @@ import * as fs from 'node:fs';
 import * as fsp from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { AIError, ChatMessage, CompletionRequest, CompletionResponse, ImagePart, ModelProvider, ToolCall, ToolSchema } from '../types';
+import { AIError, CallProvenance, ChatMessage, CompletionRequest, CompletionResponse, ImagePart, ModelProvider, NOT_REPORTED, Reported, ToolCall, ToolSchema } from '../types';
 import { childEnv, cliEnv } from '../safety';
 
 export function protocolPrompt(tools: ToolSchema[], jsonOnly: boolean): string {
@@ -208,7 +208,55 @@ function workDir(): string {
   return d;
 }
 
-export interface CliOptions { model?: string; bin?: string; /** base environment for the CLI (ANTHROPIC_* and OPENAI_* are always removed) */ env?: NodeJS.ProcessEnv; /** args placed before the CLI's own (e.g. a script path) */ binArgs?: string[]; timeoutMs?: number; cwd?: string; extraArgs?: string[] }
+export interface CliOptions { model?: string; bin?: string; /** base environment for the CLI (ANTHROPIC_* and OPENAI_* are always removed) */ env?: NodeJS.ProcessEnv; /** args placed before the CLI's own (e.g. a script path) */ binArgs?: string[]; timeoutMs?: number; cwd?: string; extraArgs?: string[];
+  /** what the CLI printed for `--version` when the app detected it (localClaude.ts, localCodex.ts) */
+  cliVersion?: string }
+
+// ---------------------------------------------------------------- provenance: what each call ran on
+
+function jsonLines(text: string): any[] {
+  return text.split('\n').map((l) => { try { return JSON.parse(l); } catch { return null; } }).filter((x) => x && typeof x === 'object');
+}
+
+function tokens(v: unknown): Reported<number> {
+  return typeof v === 'number' && Number.isFinite(v) && v >= 0 ? v : NOT_REPORTED;
+}
+
+/** One `claude -p --output-format stream-json --verbose` call: the `system/init` event (claude_code_version), the
+ * `assistant` events (message.model, what the API answered with) and the `result` event (usage). `<synthetic>` is
+ * the model name Claude Code puts on a message it wrote itself after an error, so it is not a model that ran. */
+export function claudeProvenance(events: any[], o: { requestedModel: string; effort?: string; cliVersion?: string }): CallProvenance {
+  const init = events.find((e) => e?.type === 'system' && e.subtype === 'init');
+  const u = events.filter((e) => e?.type === 'result').at(-1)?.usage;
+  const models = [...new Set(events.filter((e) => e?.type === 'assistant').map((e) => e.message?.model)
+    .filter((m): m is string => typeof m === 'string' && m !== '' && m !== '<synthetic>'))];
+  const version = typeof init?.claude_code_version === 'string' && init.claude_code_version ? init.claude_code_version : o.cliVersion;
+  return {
+    provider: 'claude-cli', requestedModel: o.requestedModel,
+    reportedModels: models.length ? models : NOT_REPORTED,
+    cliVersion: version ?? NOT_REPORTED,
+    effort: o.effort ?? null,
+    usage: { input: tokens(u?.input_tokens), output: tokens(u?.output_tokens), cacheRead: tokens(u?.cache_read_input_tokens), cacheWrite: tokens(u?.cache_creation_input_tokens) },
+  };
+}
+
+/** One `codex exec --json` call. Its events never name the model, so that stays "not reported". `turn.completed`
+ * carries usage in OpenAI's convention: cached_input_tokens and cache_write_input_tokens are PART of input_tokens,
+ * so they are taken out to match Claude's count. Codex leaves cache_write_input_tokens out when it is 0 and older
+ * versions never send it, so its absence is "not reported" and input then keeps any writes it may hold. */
+export function codexProvenance(stdout: string, o: { requestedModel: string | null; cliVersion?: string }): CallProvenance {
+  const u = jsonLines(stdout).filter((e) => e.type === 'turn.completed').at(-1)?.usage;
+  const total = tokens(u?.input_tokens);
+  const cacheRead = tokens(u?.cached_input_tokens);
+  const cacheWrite = tokens(u?.cache_write_input_tokens);
+  const input = total === NOT_REPORTED || cacheRead === NOT_REPORTED ? total
+    : Math.max(0, total - cacheRead - (cacheWrite === NOT_REPORTED ? 0 : cacheWrite));
+  return {
+    provider: 'codex-cli', requestedModel: o.requestedModel, reportedModels: NOT_REPORTED,
+    cliVersion: o.cliVersion ?? NOT_REPORTED, effort: null,
+    usage: { input, output: tokens(u?.output_tokens), cacheRead, cacheWrite },
+  };
+}
 
 function userLine(text: string, images: { label: string; img: ImagePart }[]): string {
   const content: any[] = [{ type: 'text', text }];
@@ -237,6 +285,9 @@ interface LiveSession {
   closed: boolean;
   waiter: Waiter | null;
   idle: NodeJS.Timeout | null;
+  /** the `system/init` event (sent once per process) and this turn's events so far, for claudeProvenance */
+  init: any;
+  turn: any[];
 }
 
 /** `claude -p` with all built-in tools, MCP, skills and settings disabled: it only returns text.
@@ -276,7 +327,7 @@ export class ClaudeCliProvider implements ModelProvider {
 
   private startSession(key: string): LiveSession {
     const child = spawn(this.o.bin ?? 'claude', this.args(), { cwd: this.o.cwd ?? workDir(), env: cliEnv(this.o.env), windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] });
-    const s: LiveSession = { child, key, next: 0, buf: '', closed: false, waiter: null, idle: null };
+    const s: LiveSession = { child, key, next: 0, buf: '', closed: false, waiter: null, idle: null, init: null, turn: [] };
     let errTail = '';
     child.stderr.setEncoding('utf8').on('data', (d: string) => { errTail = (errTail + d).slice(-800); });
     child.stdout.setEncoding('utf8').on('data', (d: string) => {
@@ -285,7 +336,12 @@ export class ClaudeCliProvider implements ModelProvider {
       while ((i = s.buf.indexOf('\n')) >= 0) {
         const l = s.buf.slice(0, i); s.buf = s.buf.slice(i + 1);
         let j: any; try { j = JSON.parse(l); } catch { continue; }
-        if (j?.type === 'result' && s.waiter) { const w = s.waiter; s.waiter = null; w.resolve(j); }
+        if (j?.type === 'system' && j.subtype === 'init') { s.init = j; continue; }
+        s.turn.push(j);
+        if (j?.type !== 'result') continue;
+        const events = s.init ? [s.init, ...s.turn] : s.turn;
+        s.turn = [];
+        if (s.waiter) { const w = s.waiter; s.waiter = null; w.resolve({ result: j, events }); }
       }
     });
     const gone = (why: string) => {
@@ -299,7 +355,7 @@ export class ClaudeCliProvider implements ModelProvider {
     return s;
   }
 
-  private async sessionTurn(req: CompletionRequest): Promise<any> {
+  private async sessionTurn(req: CompletionRequest): Promise<{ result: any; events: any[] }> {
     const key = conversationKey(req);
     const cur = this.live;
     const continues = !!cur && !cur.closed && cur.key === key && cur.next > 0 && req.messages.length > cur.next
@@ -313,7 +369,7 @@ export class ClaudeCliProvider implements ModelProvider {
       rendered = renderConversation(req);
     }
     if (s.idle) { clearTimeout(s.idle); s.idle = null; }
-    const result = await new Promise<any>((resolve, reject) => {
+    const turn = await new Promise<{ result: any; events: any[] }>((resolve, reject) => {
       let settled = false;
       const finish = (fn: () => void) => { if (settled) return; settled = true; clearTimeout(timer); req.signal?.removeEventListener('abort', abort); fn(); };
       const timer = setTimeout(() => finish(() => { s.waiter = null; this.dispose(); reject(new AIError('cli_timeout', 'The AI took too long to answer.', { retryable: true })); }), this.o.timeoutMs ?? 600_000);
@@ -329,11 +385,14 @@ export class ClaudeCliProvider implements ModelProvider {
     // an idle session must not outlive its run for long (a crashed caller never calls dispose)
     s.idle = setTimeout(() => { if (this.live === s) this.dispose(); }, 120_000);
     s.idle.unref?.();
-    return result;
+    return turn;
   }
 
   async complete(req: CompletionRequest): Promise<CompletionResponse> {
-    if (this.o.session && !req.jsonOnly) return this.toResponse(await this.sessionTurn(req), req);
+    if (this.o.session && !req.jsonOnly) {
+      const t = await this.sessionTurn(req);
+      return this.toResponse(t.result, t.events, req);
+    }
     const { text, images } = renderConversation(req);
     const line = userLine(text, images);
     const args = this.args();
@@ -344,19 +403,22 @@ export class ClaudeCliProvider implements ModelProvider {
       if (e instanceof AIError) throw e;
       throw new AIError('cli_missing', 'The claude command line tool is not installed or not on PATH.', { detail: e?.message });
     }
-    const result = r.stdout.split('\n').map((l) => { try { return JSON.parse(l); } catch { return null; } }).filter((x) => x && x.type === 'result').at(-1);
+    const events = jsonLines(r.stdout);
+    const result = events.filter((x) => x.type === 'result').at(-1);
     if (!result) throw new AIError('cli_error', 'The AI did not answer.', { retryable: true, detail: `exit ${r.code}: ${r.stderr.slice(-500) || r.stdout.slice(-500)}` });
-    return this.toResponse(result, req);
+    return this.toResponse(result, events, req);
   }
 
-  private toResponse(result: any, req: CompletionRequest): CompletionResponse {
+  private toResponse(result: any, events: any[], req: CompletionRequest): CompletionResponse {
     if (result.is_error) {
       const limited = /limit|quota|rate/i.test(String(result.result ?? '')) || result.api_error_status === 429;
       throw new AIError(limited ? 'cli_limited' : 'cli_error', limited ? 'The AI hit its usage limit. Try again later.' : 'The AI had a problem answering.', { retryable: !limited, detail: String(result.result ?? '').slice(0, 500) });
     }
     const reply = String(result.result ?? '');
     const parsed = req.jsonOnly ? { text: reply, toolCalls: [] } : parseProtocolReply(reply, req.tools);
-    return { ...parsed, raw: { reply }, usage: { input: result.usage?.input_tokens, output: result.usage?.output_tokens } };
+    // `usage` feeds the token budget (agent.ts) and stays input + output only, as before; `provenance` measures
+    const provenance = claudeProvenance(events, { requestedModel: this.model, effort: this.o.effort, cliVersion: this.o.cliVersion });
+    return { ...parsed, raw: { reply }, usage: { input: result.usage?.input_tokens, output: result.usage?.output_tokens }, provenance };
   }
 }
 
@@ -373,9 +435,10 @@ export class CodexCliProvider implements ModelProvider {
   private resolveBin(): string { return this.o.bin ?? 'codex'; }
 
   /** `--ignore-user-config`: the person's MCP servers, plugins and notify hooks from ~/.codex/config.toml never run
-   * for an edit (their sign-in still works: it is not in that file). */
+   * for an edit (their sign-in still works: it is not in that file). `--json` only changes stdout to JSONL events,
+   * read for usage (codexProvenance); the reply still comes from the `-o` file. */
   args(imageArgs: string[], out: string): string[] {
-    return ['exec', '--skip-git-repo-check', '--sandbox', 'read-only', '--ephemeral', '--color', 'never', '--ignore-user-config',
+    return ['exec', '--skip-git-repo-check', '--sandbox', 'read-only', '--ephemeral', '--color', 'never', '--ignore-user-config', '--json',
       ...(this.model ? ['-m', this.model] : []), ...imageArgs, '-o', out, ...(this.o.extraArgs ?? []), '-'];
   }
 
@@ -403,7 +466,8 @@ export class CodexCliProvider implements ModelProvider {
         const limited = /usage limit|rate limit|429|quota/i.test(all);
         throw new AIError(limited ? 'cli_limited' : 'cli_error', limited ? 'The AI hit its usage limit. Try again later.' : 'The AI did not answer.', { detail: all.slice(-600) });
       }
-      return req.jsonOnly ? { text: reply, toolCalls: [] } : parseProtocolReply(reply, req.tools);
+      const provenance = codexProvenance(r.stdout, { requestedModel: this.model ?? null, cliVersion: this.o.cliVersion });
+      return { ...(req.jsonOnly ? { text: reply, toolCalls: [] } : parseProtocolReply(reply, req.tools)), provenance };
     } finally {
       await fsp.rm(dir, { recursive: true, force: true }).catch(() => undefined);
     }

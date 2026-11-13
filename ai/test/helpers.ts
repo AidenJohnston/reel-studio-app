@@ -163,7 +163,7 @@ export class ScriptedModel implements ModelProvider {
     if (!s) return { text: '', toolCalls: [{ id: 'auto_finish', name: 'finish', args: { summary_for_user: 'Done.' } }] };
     if (s instanceof Error) throw s;
     const r = typeof s === 'function' ? await s(req) : s;
-    return { text: r.text ?? '', toolCalls: (r.toolCalls ?? []).map((c, k) => ({ id: c.id ?? `c${this.i}_${k}`, name: c.name, args: c.args })) as ToolCall[], ...(r.malformed ? { malformed: true } : {}) };
+    return { text: r.text ?? '', toolCalls: (r.toolCalls ?? []).map((c, k) => ({ id: c.id ?? `c${this.i}_${k}`, name: c.name, args: c.args })) as ToolCall[], ...(r.malformed ? { malformed: true } : {}), ...(r.provenance ? { provenance: r.provenance } : {}) };
   }
 }
 

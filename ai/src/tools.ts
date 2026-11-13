@@ -11,7 +11,7 @@ import {
 import { S, JSONSchema, validate, fillNulls } from './schema';
 import { ANIMATION_IDS, ENGINE_FED, TimedWord, alignWordTimes, animationParamsSchema, cleanParams, itemTimes, phraseTime, templateSpec } from './animations';
 import { chooseReadableLayout, minHeroPx } from './readable';
-import { AgentEvent, AIError, EngineHost, ImagePart, ToolSchema } from './types';
+import { AgentEvent, AIError, CallProvenance, EngineHost, ImagePart, ToolSchema } from './types';
 import { StyleStore, cleanRuleText, noteAsksToRemember } from './style';
 import { BlockedUrlError, LookupFn, UnsafePathError, guardedFetch, pathProblem, safeResolve, slugName, sniffImage } from './safety';
 
@@ -35,6 +35,8 @@ export interface ToolState {
   previewSkipped?: boolean;
   /** raw-take times of the cover stills the model was shown (set_cover on one of them is exact) */
   coverCandidates?: number[];
+  /** what each answered model call ran on, in order (written to versions/vN/notes.md) */
+  aiCalls: CallProvenance[];
 }
 
 export interface ToolContext {
@@ -70,7 +72,7 @@ export interface ToolDef extends ToolSchema {
 }
 
 export function newToolState(): ToolState {
-  return { changed: new Set(), styleRulesAdded: [], styleSuggestions: [], styleRuleIds: [], summaries: [], renders: [], finished: null, toolCalls: 0 };
+  return { changed: new Set(), styleRulesAdded: [], styleSuggestions: [], styleRuleIds: [], summaries: [], renders: [], finished: null, toolCalls: 0, aiCalls: [] };
 }
 
 // ---------------------------------------------------------------- helpers

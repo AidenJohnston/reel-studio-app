@@ -3,6 +3,7 @@ import * as fsp from 'node:fs/promises';
 import * as path from 'node:path';
 import { createAI, loadProject, AgentEvent, AIError, runAgent, newToolState, StyleStore, Prompts, pickTakes, ReplayProvider, RecordingProvider } from '../src';
 import { FakeHost, ScriptedModel, makeProject, call, tmpDir } from './helpers';
+import { writeAiRun } from '../src/provenance';
 
 const nullP = { tilt: null, scale: null, text: null };
 
@@ -109,6 +110,32 @@ describe('agent loop with a scripted model', () => {
     expect(m2.requests[0].system).toMatch(/Keep music quieter under talking\./);
     await ai.removeStyleRule(rules[0].id);
     expect(await ai.styleRules()).toEqual([]);
+  });
+
+  it('applyNote records what the run ran on in versions/vN/ai-run.json; a count one call did not report is not summed', async () => {
+    const { dir, host, settingsDir } = await setup();
+    const ran = { provider: 'claude-cli' as const, requestedModel: 'sonnet', cliVersion: '2.1.296', effort: null };
+    const first = { ...ran, reportedModels: ['claude-sonnet-5-5-20261001'], usage: { input: 10, output: 200, cacheRead: 9000, cacheWrite: 5000 } };
+    const second = { ...ran, reportedModels: 'not reported' as const, usage: { input: 10, output: 200, cacheRead: 9000, cacheWrite: 'not reported' as const } };
+    const model = new ScriptedModel([
+      { toolCalls: [call('set_gap_cap', { seconds: 0.3 })], provenance: first },
+      { toolCalls: [call('finish', { summary_for_user: 'I tightened the gaps between your sentences.' })], provenance: second },
+    ]);
+    const r = await createAI({ host, settingsDir, providerOverride: model, finalRender: false }).applyNote(dir, 'make the hook punchier', () => undefined);
+    const record = JSON.parse(await fsp.readFile(path.join(dir, 'versions', `v${r.version}`, 'ai-run.json'), 'utf8'));
+    expect(record).toEqual({ calls: [first, second], usage: { input: 20, output: 400, cacheRead: 18000, cacheWrite: 'not reported' } });
+  });
+
+  it('fails if a run that keeps the current version deletes the earlier run\'s calls from its ai-run.json', async () => {
+    const { dir } = await setup();
+    const ran = { provider: 'codex-cli' as const, requestedModel: null, reportedModels: ['gpt-5'], cliVersion: '0.9.0', effort: 'low' };
+    const edit = { ...ran, usage: { input: 100, output: 50, cacheRead: 0, cacheWrite: 0 } };
+    const post = { ...ran, usage: { input: 7, output: 3, cacheRead: 1, cacheWrite: 'not reported' as const } };
+    await writeAiRun(dir, 1, [edit]);
+    // a note that only rewrote the post caption: the engine keeps version 1
+    await writeAiRun(dir, 1, [post]);
+    const record = JSON.parse(await fsp.readFile(path.join(dir, 'versions', 'v1', 'ai-run.json'), 'utf8'));
+    expect(record).toEqual({ calls: [edit, post], usage: { input: 107, output: 53, cacheRead: 1, cacheWrite: 'not reported' } });
   });
 
   it('model mistakes are fed back, not fatal; nudges when the model stops calling tools', async () => {
