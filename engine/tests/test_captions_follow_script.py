@@ -58,6 +58,63 @@ def test_a_skipped_line_is_not_shown_and_the_rest_still_follows():
     assert text(out) == "First line here Then Neve closes it out"
 
 
+def test_a_short_skipped_sentence_is_not_shown():
+    for skipped in ("Skip.", "Skip this.", "Skip this line."):
+        script = f"First step done. {skipped} Then Neve works well."
+        assert text(shown(script, "First step done. Then Nave works well.")) == "First step done Then Neve works well"
+
+
+def test_a_word_left_out_shows_inside_its_own_sentence():
+    # "so" was left out at the start of the sentence the speaker said: it opens that sentence's line
+    words = heard("This is great. We went home.")
+    assert {"ids": ["w3"], "words": ["So", "we"]} in scriptalign.build("This is great. So we went home.", words)["groups"]
+    # left out at the end of one: it closes that one
+    words = heard("We went home. Then we slept.")
+    assert {"ids": ["w2"], "words": ["home", "now."]} in scriptalign.build("We went home now. Then we slept.", words)["groups"]
+
+
+def test_a_mishearing_never_brings_in_a_sentence_nobody_said():
+    out = text(shown("First step done. Skip this. Then Neve works.", "First step done. um Then Nave works."))
+    assert "Skip" not in out and "um" in out and out.endswith("Then Neve works")
+
+
+def test_the_off_script_limit_counts_words_not_number_keys():
+    # "four point oh five" is one key but four heard words: past GAP_MAX, so it is off-script, not "Neve"
+    out = text(shown("We use the Neve preamp daily.", "We use the four point oh five preamp daily.", {"digits": False}))
+    assert "Neve" not in out and "four point oh five" in out
+
+
+def test_markdown_marks_go_but_names_keep_their_characters():
+    assert text(shown("I write C# and F# code every day.", "I write C# and F# code every day.")) == "I write C# and F# code every day"
+    assert text(shown("I write C# code.", "I write C sharp code.")) == "I write C# code"
+    assert text(shown("I installed whisper_cpp today.", "I installed whisper cpp today.")) == "I installed whisper_cpp today"
+    units = [u for u, _ in scriptalign.script_units("# Hook\n- **Neve** is _great_, *really* [b-roll: mic] `__init__` C++")]
+    assert units == ["Hook", "Neve", "is", "great,", "really", "__init__", "C++"]
+
+
+def test_the_scripts_spelling_of_a_number_stays():
+    # the default digits pass would draw "25": the script spells it out, so it stays spelled out
+    assert text(shown("I waited twenty five days.", "I waited 25 days.")) == "I waited twenty five days"
+    assert text(shown("I waited twenty five days.", "I waited twenty five days.")) == "I waited twenty five days"
+    # words that follow no script still become digits
+    assert text(shown("We record every day.", "We record every day. I waited twenty five days.")) == "We record every day I waited 25 days"
+
+
+def test_a_script_without_spaces_aligns_to_whispers_words():
+    out = shown("今天我们使用Neve录音。声音非常清晰。", "今天 我们 使用 Nave 录音。 声音 非常 清晰。")
+    assert text(out) == text(shown("", "今天 我们 使用 Neve 录音。 声音 非常 清晰。"))   # as if heard right
+    words = heard("今日は Nave で 録音 します。")
+    groups = scriptalign.build("今日はNeveで録音します。", words)["groups"]
+    assert {"ids": ["w1"], "words": ["Neve"]} in groups
+    assert {"ids": ["w0"], "words": ["今日は"]} in groups           # drawn back as the script's own run
+
+
+def test_the_mapping_key_is_pinned():
+    # the same inputs and value as ai/test/script-follow.test.ts: the AI checks the key the same way
+    words = [{"id": "w0", "w": " Nave"}, {"id": "w1", "w": "今天。"}]
+    assert scriptalign._key('Use Neve, 4.0 — 今天。\n"quoted"', words) == "28dbbddf08b14e6e8e4ba9c2a5f1f6fac039eeb866b003c1c6aba2b2c7b9a579"
+
+
 def test_an_ad_lib_stays_as_heard():
     script = "We built this in a week. Then we shipped Flowly."
     said = "We built this in a week. Honestly I did not sleep at all that week. Then we shipped flatly."
@@ -96,7 +153,7 @@ def test_the_scripts_punctuation_breaks_the_lines():
 def test_more_or_fewer_script_words_share_the_heard_time():
     words = heard("This is Clodcode at work.")
     groups = scriptalign.build("This is Claude Code at work.", words)["groups"]
-    assert groups == [{"ids": ["w2"], "words": ["Claude", "Code"]}]
+    assert {"ids": ["w2"], "words": ["Claude", "Code"]} in groups
     out = captions.follow_script([dict(w, ids=[w["id"]]) for w in words], groups)
     claude, code = out[2], out[3]
     assert (claude["w"], code["w"]) == ("Claude", "Code")
@@ -179,6 +236,10 @@ def test_the_mapping_is_stored_and_the_same_inputs_give_the_same_mapping(tmp_pat
     again = scriptalign.mapping(tmp_path, proj, words)
     assert again["key"] != first["key"] and again["groups"] != first["groups"]
     assert json.loads((tmp_path / "work" / scriptalign.FILE).read_text(encoding="utf-8"))["key"] == again["key"]
+    # the script removed: the stored mapping goes with it
+    del proj["script"]
+    assert scriptalign.mapping(tmp_path, proj, words) is None
+    assert not (tmp_path / "work" / scriptalign.FILE).exists()
 
 
 def test_unrelated_speech_follows_nothing():

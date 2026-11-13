@@ -131,11 +131,17 @@ def _split(word: str):
 def digits_for_numbers(words: list) -> list:
     """Numbers on screen are digits: "three" -> "3", "twenty five" -> "25", "64 %" / "64 percent" ->
     "64%", "Number one" -> "Number 1". "one" stays a word unless it is clearly a count (after
-    "number"/"step"/..., or a list item opening a sentence: "One, ..."), so "the best one" is safe."""
+    "number"/"step"/..., or a list item opening a sentence: "One, ..."), so "the best one" is safe.
+    A word drawn from the script (`script`, follow_script) keeps the script's spelling: "twenty five"
+    stays as written there."""
     out: list = []
     i = 0
     while i < len(words):
         w = dict(words[i])
+        if w.get("script"):
+            out.append(w)
+            i += 1
+            continue
         lead, core, tail = _split(w["w"])
         val = _num_value(core)
         prev = out[-1] if out else None
@@ -147,7 +153,7 @@ def digits_for_numbers(words: list) -> list:
                 val = None
         if val is not None:
             # "twenty five" said as two words
-            if val in _TENS.values() and i + 1 < len(words) and not tail:
+            if val in _TENS.values() and i + 1 < len(words) and not tail and not words[i + 1].get("script"):
                 l2, c2, t2 = _split(words[i + 1]["w"])
                 v2 = _num_value(c2)
                 if not l2 and v2 is not None and 0 < v2 < 10:
@@ -159,7 +165,7 @@ def digits_for_numbers(words: list) -> list:
             w["w"] = f"{lead}{val}{tail}"
             core = str(val)
         # "64 %" / "64 percent" -> "64%"
-        if re.fullmatch(r"[$€£]?\d[\d,.]*", core) and not tail and i + 1 < len(words):
+        if re.fullmatch(r"[$€£]?\d[\d,.]*", core) and not tail and i + 1 < len(words) and not words[i + 1].get("script"):
             l2, c2, t2 = _split(words[i + 1]["w"])
             if (c2 == "%" or c2.lower() == "percent" or words[i + 1]["w"].strip().startswith("%")) and not l2:
                 rest = words[i + 1]["w"].strip()
@@ -289,18 +295,18 @@ def apply_corrections(words: list, corrections: dict, stats: Optional[dict] = No
 
 
 def _respell(src: list, shown: list) -> list:
-    """Transcript words `src` drawn as the script's words `shown`, at the same times. Word for word,
-    each keeps its own time and ids; otherwise the script's words share the stretch by length and all
-    carry every id, so they stay on one line, as the words of a phrase correction do."""
+    """Transcript words `src` drawn as the script's words `shown`, at the same times, marked `script`.
+    Word for word, each keeps its own time and ids; otherwise the script's words share the stretch by
+    length and all carry every id, so they stay on one line, as the words of a phrase correction do."""
     if len(src) == len(shown):
-        return [dict(w, w=t) for w, t in zip(src, shown)]
+        return [dict(w, w=t, script=True) for w, t in zip(src, shown)]
     s, e = src[0]["s"], src[-1]["e"]
     ids = [x for w in src for x in w["ids"]]
     weights = [max(1, len(_bare(t))) for t in shown]
     total, done, out = sum(weights), 0, []
     for t, n in zip(shown, weights):
         out.append({"s": round(s + (e - s) * done / total, 3), "e": round(s + (e - s) * (done + n) / total, 3),
-                    "w": t, "ids": ids})
+                    "w": t, "ids": ids, "script": True})
         done += n
     return out
 

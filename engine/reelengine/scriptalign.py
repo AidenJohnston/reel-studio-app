@@ -10,7 +10,10 @@ script words":
     shown as the script writes it; when the counts differ ("Clod code" -> "Claude Code", a word whisper
     dropped) the script's words share the transcript words' time;
   * where the speaker went off-script (an ad-lib, a skipped line) the transcript is kept: an extra
-    spoken word inside a span stays as heard, and a gap longer than GAP_MAX words ends the span;
+    spoken word inside a span stays as heard, a gap longer than GAP_MAX words ends the span, and a
+    script word nobody said is shown only inside a sentence the speaker did say;
+  * scripts without spaces (Chinese, Japanese) are read a character at a time on both sides, and
+    drawn back as the script's own runs of characters;
   * a line said twice (a retake) is matched each time: whatever speech is left unmatched is aligned
     against the whole script again.
 
@@ -31,11 +34,11 @@ from typing import Optional
 
 from .vocab import sound_key
 
-VERSION = 1
+VERSION = 2
 FILE = "script-align.json"
 MATCH, MISMATCH, GAP = 2, -1, -1     # alignment scores
 GAP_MAX = 3          # more unmatched words than this in a row (either side) ends a span: off-script
-MIN_MATCHES = 2      # a span needs this many exactly matched words
+MIN_MATCHES = 2      # a span needs this many exactly matched keys
 MIN_RATIO = 0.5      # ... and this share of its transcript words matched exactly
 ALIKE = 0.5          # spelling similarity that makes a word next to a span its misheard script word
 
@@ -66,13 +69,65 @@ def script_text(project_dir: Optional[Path], proj: dict) -> str:
     return ""
 
 
-def script_words(text: str) -> list:
-    """The script as caption words: stage directions in [brackets] and markdown marks dropped, dashes
-    between words made spaces, tokens with no letter or digit left out."""
-    text = re.sub(r"\[[^\]\n]*\]", " ", text or "")
-    text = re.sub(r"[#*_>`|]+", " ", text)
-    text = re.sub(r"\s*[—–]\s*", " ", text)
-    return [w for w in text.split() if re.search(r"\w", w)]
+# Only these markdown marks are taken out, so a name keeps its own characters ("C#", "snake_case").
+_MARKDOWN = (
+    (re.compile(r"\[([^\]\n]+)\]\([^)\n]*\)"), r"\1"),                     # [a link](url): its text
+    (re.compile(r"\[[^\]\n]*\]"), " "),                                    # [a stage direction]
+    (re.compile(r"^[ \t]*(?:#{1,6}|>+|[-*+])[ \t]+", re.M), ""),           # heading, quote, bullet
+    (re.compile(r"(?<![\w*])\*\*(?=\S)([^*\n]+?)(?<=\S)\*\*(?![\w*])"), r"\1"),   # **bold**
+    (re.compile(r"(?<![\w*])\*(?=\S)([^*\n]+?)(?<=\S)\*(?![\w*])"), r"\1"),       # *italic*
+    (re.compile(r"(?<!\w)_(?=\S)([^_\n]+?)(?<=\S)_(?!\w)"), r"\1"),               # _italic_
+    (re.compile(r"`([^`\n]+)`"), r"\1"),                                   # `code`
+    (re.compile(r"\s*[—–]\s*"), " "),                                      # a dash between words
+)
+# Scripts written without spaces: each of these characters is a word of its own
+_CJK = re.compile(r"[぀-ヿ㐀-䶿一-鿿豈-﫿ｦ-ﾟ]")
+_SENTENCE_END = re.compile(r"[.!?…。！？][\"'”’)\]」』]*$")
+
+
+def _pieces(token: str) -> list:
+    """'使用Neve录音。' -> ['使', '用', 'Neve', '录', '音。']: every CJK character starts a piece, as
+    does a letter or digit right after one; punctuation stays on the piece next to it."""
+    out, cjk_last = [], False        # cjk_last: the piece's last letter is a CJK character
+    for ch in token:
+        letter = bool(re.match(r"\w", ch))
+        if out and letter and re.search(r"\w", out[-1]) and (_CJK.match(ch) or cjk_last):
+            out.append(ch)
+        elif out:
+            out[-1] += ch
+        else:
+            out.append(ch)
+        if letter:
+            cjk_last = bool(_CJK.match(ch))
+    return out
+
+
+def script_units(text: str) -> list:
+    """The script as caption words: [(word, glued)], `glued` when it continues the word before without
+    a space (the characters of an unspaced script). Markdown marks and [stage directions] dropped,
+    words with no letter or digit left out."""
+    for pattern, repl in _MARKDOWN:
+        text = pattern.sub(repl, text or "")
+    out = []
+    for token in text.split():
+        glued = False
+        for piece in _pieces(token):
+            if re.search(r"\w", piece):
+                out.append((piece, glued))
+                glued = True
+    return out
+
+
+def _display(units: list, s0: int, s1: int) -> list:
+    """Script units s0..s1 as the words to draw: glued characters joined back into one word."""
+    out: list = []
+    for k in range(s0, s1 + 1):
+        word, glued = units[k]
+        if out and glued:
+            out[-1] += word
+        else:
+            out.append(word)
+    return out
 
 
 # --- normalised keys -----------------------------------------------------------------------------
@@ -89,9 +144,10 @@ _NUMERIC = re.compile(r"([$€£]?)(\d[\d,]*)(\.\d+)?([kmb]?)(%?)")
 
 
 def _core(word: str) -> str:
-    """'"Neve’s,' -> "neves": case, edge punctuation, apostrophes and hyphens don't count."""
+    """'"Neve’s,' -> "neves": case, edge punctuation, apostrophes and hyphens don't count. A name's
+    own marks do ("C#", "C++" are not "C")."""
     w = word.strip().lower().replace("’", "'")
-    w = re.sub(r"^[^\w$€£%]+|[^\w%]+$", "", w)
+    w = re.sub(r"^[^\w$€£%]+|(?<=[\w#+])[^\w%#+]+$|(?<![\w#+])[^\w%]+$", "", w)
     return w.replace("'", "").replace("-", "")
 
 
@@ -173,10 +229,16 @@ def _spoken_number(cores: list, i: int):
 def keys(words: list) -> list:
     """Caption words -> [(key, first word, last word)]. One word can give several keys ("$3,000" ->
     "3000", "dollar"; "25%" -> "25", "percent") and several words one key ("four point oh" -> "4.0");
-    a key's words are the ones it was read from. Punctuation-only words give none."""
+    a key's words are the ones it was read from. A word with CJK characters gives one key per piece
+    ("今天" -> "今", "天"), so heard words line up with a script written without spaces. Punctuation-only
+    words give none."""
     cores = [_core(w) for w in words]
     out, i = [], 0
     while i < len(words):
+        if _CJK.search(words[i]):
+            out += [(_core(p), i, i) for p in _pieces(words[i].strip()) if _core(p)]
+            i += 1
+            continue
         num = _written_number(words, cores, i) or _spoken_number(cores, i)
         if num:
             ks, j = num
@@ -199,7 +261,8 @@ def _exact(op: tuple, a: list, b: list) -> bool:
 def _local(a: list, b: list) -> tuple:
     """Best local alignment (Smith-Waterman) of key ids a (script) and b (heard) -> (score, ops), ops
     [(i or None, j or None)]: both = a match or a mishearing, i alone = a script word not heard, j
-    alone = a heard word not in the script. Ties go to the earliest end, then diagonal, up, left: the
+    alone = a heard word not in the script. Ties go to the latest end (an alignment that reaches on
+    through a mishearing to the next match beats one that stops before it), then diagonal, up, left: the
     result depends on nothing but a and b."""
     n, m = len(a), len(b)
     prev = [0] * (m + 1)
@@ -217,7 +280,7 @@ def _local(a: list, b: list) -> tuple:
                 cur[j], row[j] = u, 2
             elif left > 0:
                 cur[j], row[j] = left, 3
-            if cur[j] > best:
+            if cur[j] >= best > 0 or cur[j] > best:
                 best, bi, bj = cur[j], i, j
         prev = cur
     ops, i, j = [], bi, bj
@@ -236,20 +299,27 @@ def _local(a: list, b: list) -> tuple:
     return best, ops
 
 
-def _spans(ops: list, a: list, b: list) -> list:
+def _words_of(key_ids, keys_: list) -> set:
+    """The words some keys were read from: one key can stand for several ("four point oh")."""
+    return {w for x in key_ids for w in range(keys_[x][1], keys_[x][2] + 1)}
+
+
+def _spans(ops: list, a: list, b: list, sk: list, tk: list) -> list:
     """Split an alignment where the speaker left the script (more than GAP_MAX unmatched words in a
     row on either side). Each span starts and ends on an exact match."""
-    spans, cur, gap_s, gap_t = [], [], 0, 0
+    spans, cur, gap_s, gap_t = [], [], [], []
     for op in ops:
         if _exact(op, a, b):
-            if gap_s > GAP_MAX or gap_t > GAP_MAX:
+            if len(_words_of(gap_s, sk)) > GAP_MAX or len(_words_of(gap_t, tk)) > GAP_MAX:
                 spans.append(cur)
                 cur = []
             cur.append(op)
-            gap_s = gap_t = 0
+            gap_s, gap_t = [], []
             continue
-        gap_s += op[0] is not None
-        gap_t += op[1] is not None
+        if op[0] is not None:
+            gap_s.append(op[0])
+        if op[1] is not None:
+            gap_t.append(op[1])
         if cur:
             cur.append(op)
     spans.append(cur)
@@ -259,10 +329,11 @@ def _spans(ops: list, a: list, b: list) -> list:
     return [sp for sp in spans if sp]
 
 
-def _accepted(span: list, a: list, b: list) -> bool:
-    matched = sum(1 for op in span if _exact(op, a, b))
-    heard = sum(1 for _, j in span if j is not None)
-    return matched >= MIN_MATCHES and matched >= MIN_RATIO * heard
+def _accepted(span: list, a: list, b: list, tk: list) -> bool:
+    """MIN_MATCHES exact keys, and MIN_RATIO of the span's heard words matched exactly."""
+    exact = [op[1] for op in span if _exact(op, a, b)]
+    heard = _words_of([j for _, j in span if j is not None], tk)
+    return len(exact) >= MIN_MATCHES and len(_words_of(exact, tk)) >= MIN_RATIO * len(heard)
 
 
 def _alike(x: str, y: str) -> bool:
@@ -283,26 +354,44 @@ def _extend(span: list, a: list, b: list, names: list, lo: int, hi: int) -> list
     return span
 
 
-def _key_groups(span: list, a: list, b: list) -> list:
-    """A span -> [(script key indices, heard key indices)]. Each exact match is a group; the unmatched
+def _key_groups(span: list, a: list, b: list, sentence: list) -> list:
+    """A span -> [(script key indices, heard key indices)]. Each exact match is a group. The unmatched
     keys between two matches are one group when both sides have some (a mishearing, or the same words
-    split differently); script words not heard join the group before them (the script's phrasing is
-    shown); heard words not in the script stay as heard (an ad-lib) and are in no group."""
-    groups, gs, gt = [], [], []
+    split differently). Heard words not in the script stay as heard (an ad-lib) and are in no group.
+
+    `sentence` numbers each script key's sentence. Script words between two matches show only inside
+    a sentence the speaker said: a word left out joins the match of its own sentence, before or after
+    it, and a whole sentence nobody said ("Skip this line.") is not shown. A mishearing whose script
+    side reaches into such a sentence stays as heard."""
+    groups: list = []
+    gs: list = []
+    gt: list = []
+
+    def said(x, nxt):
+        prev = max(groups[-1][0]) if groups else None
+        return (prev is not None and sentence[x] == sentence[prev]) or (nxt is not None and sentence[x] == sentence[nxt])
+
     for op in span:
-        if _exact(op, a, b):
-            if gs and gt:
-                groups.append((gs, gt))
-            elif gs:
-                groups[-1][0].extend(gs)
-            groups.append(([op[0]], [op[1]]))
-            gs, gt = [], []
+        if not _exact(op, a, b):
+            if op[0] is not None:
+                gs.append(op[0])
+            if op[1] is not None:
+                gt.append(op[1])
             continue
-        if op[0] is not None:
-            gs.append(op[0])
-        if op[1] is not None:
-            gt.append(op[1])
-    if gs and gt:                # a word _extend took in after the last match
+        new = ([op[0]], [op[1]])
+        if gs and gt:
+            if all(said(x, op[0]) for x in gs):
+                groups.append((gs, gt))
+        else:
+            prev = max(groups[-1][0]) if groups else None
+            for x in gs:
+                if prev is not None and sentence[x] == sentence[prev]:
+                    groups[-1][0].append(x)
+                elif sentence[x] == sentence[op[0]]:
+                    new[0].append(x)
+        groups.append(new)
+        gs, gt = [], []
+    if gs and gt and all(said(x, None) for x in gs):   # a word _extend took in after the last match
         groups.append((gs, gt))
     return groups
 
@@ -328,6 +417,10 @@ def align(script: list, heard: list) -> tuple:
     left unmatched around and between matches (a retake, a line said twice) is aligned against the
     whole script again."""
     sk, tk = keys(script), keys(heard)
+    ends = [0]
+    for w in script:
+        ends.append(ends[-1] + bool(_SENTENCE_END.search(w)))
+    sentence = [ends[s0] for _, s0, _ in sk]        # the sentence each script key is in
     ids: dict = {}
     a = [ids.setdefault(k, len(ids)) for k, _, _ in sk]
     b = [ids.setdefault(k, len(ids)) for k, _, _ in tk]
@@ -342,15 +435,15 @@ def align(script: list, heard: list) -> tuple:
             continue
         ops = [(i, None if j is None else j + lo) for i, j in ops]
         free = lo
-        for sp in _spans(ops, a, b):
-            if not _accepted(sp, a, b):
+        for sp in _spans(ops, a, b, sk, tk):
+            if not _accepted(sp, a, b, tk):
                 continue
             sp = _extend(sp, a, b, names, free, hi)
             t0 = next(j for _, j in sp if j is not None)
             t1 = next(j for _, j in reversed(sp) if j is not None)
             todo.append((free, t0))
             free = t1 + 1
-            ranges += _word_ranges(_key_groups(sp, a, b), sk, tk)
+            ranges += _word_ranges(_key_groups(sp, a, b, sentence), sk, tk)
             spans.append([tk[t0][1], tk[t1][2]])
         if free > lo:            # something matched: look again in what is left after it
             todo.append((free, hi))
@@ -365,13 +458,14 @@ def align(script: list, heard: list) -> tuple:
 
 def build(script: str, words: list) -> dict:
     """Transcript words -> {"script", "groups": [{"ids", "words"}], "spans": [[first id, last id]]}.
-    A group draws transcript words `ids` as script words `words`; groups where both read the same are
-    left out. Spans are the stretches of speech that follow the script."""
-    sw = script_words(script)
+    A group draws transcript words `ids` as script words `words`, also where both read the same: a
+    word drawn from the script keeps the script's spelling (captions.follow_script). Spans are the
+    stretches of speech that follow the script."""
+    units = script_units(script)
     heard = [str(w["w"]).strip() for w in words]
-    ranges, spans = align(sw, heard)
-    groups = [{"ids": [words[t]["id"] for t in range(t0, t1 + 1)], "words": sw[s0:s1 + 1]}
-              for s0, s1, t0, t1 in ranges if sw[s0:s1 + 1] != heard[t0:t1 + 1]]
+    ranges, spans = align([u for u, _ in units], heard)
+    groups = [{"ids": [words[t]["id"] for t in range(t0, t1 + 1)], "words": _display(units, s0, s1)}
+              for s0, s1, t0, t1 in ranges]
     return {"script": script, "groups": groups,
             "spans": [[words[t0]["id"], words[t1]["id"]] for t0, t1 in spans]}
 
@@ -384,14 +478,17 @@ def _key(script: str, words: list) -> str:
 def mapping(project_dir: Optional[Path], proj: dict, words: list) -> Optional[dict]:
     """The script mapping for these transcript words, or None when captions don't follow a script
     (there is none, or captions.followScript is false). Read from work/script-align.json while its
-    key (this version, the script, the words) still matches, else built and stored there."""
+    key (this version, the script, the words) still matches, else built and stored there. With no
+    script or no words any stored mapping is removed, so nothing reads a script that is gone."""
     if (proj.get("captions") or {}).get("followScript") is False:
         return None
+    path = Path(project_dir) / "work" / FILE if project_dir is not None else None
     text = script_text(project_dir, proj)
     if not text.strip() or not words:
+        if path is not None:
+            path.unlink(missing_ok=True)
         return None
     key = _key(text, words)
-    path = Path(project_dir) / "work" / FILE if project_dir is not None else None
     if path is not None and path.is_file():
         try:
             data = json.loads(path.read_text(encoding="utf-8"))
@@ -407,4 +504,3 @@ def mapping(project_dir: Optional[Path], proj: dict, words: list) -> Optional[di
         except OSError:
             pass                 # a read-only project still gets its captions
     return data
-
