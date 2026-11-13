@@ -1,0 +1,55 @@
+name: Nightly
+
+# Installers from main for testers, kept as workflow artifacts. No tag or GitHub release: installed apps only take
+# updates from dl.getreelstudio.com.
+on:
+  schedule:
+    - cron: '23 8 * * *'
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - .github/workflows/nightly.yml
+      - .github/workflows/build-installers.yml
+      - scripts/ci/check-bundle.py
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: nightly-${{ github.event.pull_request.number || 'main' }}
+  cancel-in-progress: true
+
+jobs:
+  plan:
+    name: Plan
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      build: ${{ steps.plan.outputs.build }}
+      label: ${{ steps.plan.outputs.label }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+          sparse-checkout: app/package.json
+          sparse-checkout-cone-mode: false
+      - id: plan
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVENT: ${{ github.event_name }}
+        run: |
+          sha=$(git rev-parse HEAD)
+          version=$(node -p "require('./app/package.json').version")
+          echo "label=${version}-nightly.$(date -u +%Y%m%d).${sha:0:7}" >> "$GITHUB_OUTPUT"
+          # A scheduled run skips a main that hasn't changed since the last nightly that passed.
+          last=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/nightly.yml/runs?event=schedule&status=success&per_page=1" --jq '.workflow_runs[0].head_sha // ""')
+          if [ "$EVENT" = schedule ] && [ "$last" = "$sha" ]; then echo build=false; else echo build=true; fi >> "$GITHUB_OUTPUT"
+
+  build:
+    needs: plan
+    if: needs.plan.outputs.build == 'true'
+    uses: ./.github/workflows/build-installers.yml
+    with:
+      label: ${{ needs.plan.outputs.label }}
+      retention-days: 14
