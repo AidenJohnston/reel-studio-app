@@ -17,13 +17,15 @@ interface AnimJob {
 const STOPPED = { code: 'CANCELLED', userMessage: 'Stopped.' }
 
 /** `work`, or a rejection the moment `signal` aborts: Stop never waits for a render (one queued
- * behind another, or one between frames). The renderer gets the signal too and quits on its own. */
+ * behind another, or one between frames). The renderer gets the signal too and quits on its own;
+ * `work` always keeps a handler, so the render it abandons never becomes an unhandled rejection. */
 export function untilStopped<T>(work: Promise<T>, signal?: AbortSignal): Promise<T> {
   if (!signal) return work
-  if (signal.aborted) return Promise.reject(STOPPED)
   return new Promise<T>((resolve, reject) => {
     const stop = () => reject(STOPPED)
-    signal.addEventListener('abort', stop, { once: true })
+    if (signal.aborted) stop()
+    else signal.addEventListener('abort', stop, { once: true })
+    // after a Stop this settles nothing (the promise already rejected): it only keeps `work` handled
     work.then(resolve, reject).finally(() => signal.removeEventListener('abort', stop))
   })
 }
