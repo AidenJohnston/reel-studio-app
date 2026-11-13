@@ -94,6 +94,9 @@ const api: ReelApi = {
     damaged: () => call('style:damaged'),
     answer: (slug, messageId, yes) => call('style:answer', slug, messageId, yes)
   },
+  mirror: {
+    answer: (slug, messageId, action) => call('mirror:answer', slug, messageId, action)
+  },
   script: {
     write: (idea) => call('script:write', idea)
   },

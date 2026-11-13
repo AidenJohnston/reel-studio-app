@@ -37,7 +37,22 @@
           "rotation": { "type": "integer" },
           "originalName": { "type": "string" },
           "hdr": { "type": "boolean" },
-          "mirror": { "type": "boolean", "description": "the take is mirrored (a front-camera selfie: on-screen text reads backwards): the render flips the picture left to right. Absent = false" }
+          "mirror": { "type": "boolean", "description": "the take is mirrored (a front-camera selfie: on-screen text reads backwards): the render flips the picture left to right. Absent = false" },
+          "mirrorCheck": {
+            "type": "object",
+            "description": "what `init` saw when it looked for a mirrored take (mirror_detect.py); never read by the render. `answer` = what the user then chose in the chat",
+            "required": ["verdict"],
+            "properties": {
+              "verdict": { "enum": ["mirrored", "maybe-mirrored", "as-filmed", "unsure", "unknown"] },
+              "why": { "type": "string" },
+              "camera": { "enum": ["front", "back"] },
+              "letters": {
+                "type": "object",
+                "properties": { "asFilmed": { "type": "integer", "minimum": 0 }, "flipped": { "type": "integer", "minimum": 0 } }
+              },
+              "answer": { "enum": ["flipped", "kept", "undone"] }
+            }
+          }
         }
       }
     },

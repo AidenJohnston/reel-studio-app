@@ -27,6 +27,7 @@ import {
   readProject,
   readWords,
   recoverInterrupted,
+  serialized,
   titleFromFile,
   uniqueSlug,
   updateAppState,
@@ -53,7 +54,7 @@ import { aiChoiceSaved, carryOverDecision } from './ai-carryover'
 import type { AppInfo, DropResult, ExportResult, JobEvent, ProjectJson } from '../shared/api'
 import { noAiReply } from '../shared/notes'
 import { versionMessage } from '../shared/describe'
-import { mergeSourcesPatch } from '../shared/mirror'
+import { MIRROR_ANSWERS, answerMirror, declinedQuestion, mergeSourcesPatch, mirrorNotices, type MirrorAnswer, type MirrorQuestion } from '../shared/mirror'
 import { displayPath } from '../shared/display-path'
 import { registerPhoneIpc, stopPhoneShare } from './phone-ipc'
 import { checkNoteAttachments, forChat, pickClipboardType, registerAttachmentIpc } from './attachments'
@@ -280,12 +281,14 @@ function startFirstEdit(slug: string, initArgs: { title: string; files: string[]
   return jobs.start(slug, 'first-edit', async (emit, signal) => {
     if (initArgs && !existsSync(join(dir, 'project.json'))) {
       emit({ type: 'status', message: 'Copying your video', pct: 0 })
-      await runEngine(
+      const made = (await runEngine(
         'init',
         ['--project', dir, '--title', initArgs.title, '--slug', slug, ...initArgs.files],
-        (p) => emit({ type: 'status', message: 'Copying your video', pct: Math.round(p.pct * 0.01) }),
+        (p) => emit({ type: 'status', message: p.message || 'Copying your video', pct: Math.round(p.pct * 0.01) }),
         signal
-      )
+      )) as { sources?: ProjectJson['sources'] } | null
+      // init looked at each take for a mirrored picture (engine mirror_detect.py): a flip is never silent
+      for (const q of mirrorNotices(made?.sources)) await askMirror(slug, q)
     }
     const provider = await ai.active().catch(() => null)
     // A render event with firstLook = the quick no-AI draft is ready while the AI keeps editing; the
@@ -317,6 +320,11 @@ function startFirstEdit(slug: string, initArgs: { title: string; files: string[]
   })
 }
 
+/** A mirror question in the chat, with the takes it is about (its buttons act on those only). */
+function askMirror(slug: string, q: MirrorQuestion): Promise<void> {
+  return addChat(slug, 'editor', q.text, undefined, q.actions, undefined, undefined, q.sources)
+}
+
 /** The editor's reply into the chat, then one "Remember this for next time?" per My style rule the AI
  * proposed or saved (a saved one is taken out again until the user says Yes): main/style-consent.ts. */
 async function replyAskingAboutStyle(slug: string, r: AgentResult, summary: string): Promise<{ summary: string; version: number; quiet: true }> {
@@ -327,6 +335,10 @@ async function replyAskingAboutStyle(slug: string, r: AgentResult, summary: stri
   }
   await addChat(slug, 'editor', c.summary, r.version)
   for (const rule of c.suggestions) await addChat(slug, 'editor', rememberQuestion(rule), undefined, ['remember-yes', 'remember-no'], rule)
+  // the editor saw backwards writing in a take the user had said is the right way round: it may not flip
+  // it, so the user decides with one tap
+  const q = r.mirrorDeclined?.length ? declinedQuestion((await readProject(slug)).sources, r.mirrorDeclined) : null
+  if (q) await askMirror(slug, q)
   return { summary: c.summary, version: r.version, quiet: true }
 }
 
@@ -681,6 +693,30 @@ function registerIpc(): void {
     })
     await addChat(slug, 'editor', yes ? "Saved. I'll do that in your next videos too. You can remove it in My style." : 'OK, only for this video.')
   })
+
+  // "Undo flip" under "I flipped your video", or "Flip it" / "Keep as filmed" under "Flip it?" (shared/mirror.ts).
+  // Either way the buttons go and the editor answers; the page then makes a new version if the picture changed.
+  // One answer at a time per project: a second quick click finds the buttons gone and changes nothing.
+  handle('mirror:answer', (_e, slug: string, messageId: string, action: MirrorAnswer) =>
+    serialized(`mirror-answer:${slug}`, async () => {
+      if (!MIRROR_ANSWERS.includes(action)) return { change: '' }
+      if (jobs.forSlug(slug)) throw { code: 'BUSY', userMessage: 'I am still working on this video. Give me a moment, or press Stop.' }
+      const asked = (await readAppState(slug)).chat.find((x) => x.id === messageId)
+      if (!asked?.actions?.includes(action)) return { change: '' }
+      const p = await readProject(slug)
+      const r = answerMirror(p.sources, action, asked.sources ?? [])
+      if (r.reply) {
+        p.sources = r.sources
+        await writeProject(slug, p)
+      }
+      await updateAppState(slug, (s) => {
+        const x = s.chat.find((y) => y.id === messageId)
+        if (x) delete x.actions
+      })
+      if (r.reply) await addChat(slug, 'editor', r.reply)
+      return { change: r.change }
+    })
+  )
 
   handle('script:write', (_e, idea: string) => {
     if (!String(idea ?? '').trim()) throw { code: 'EMPTY', userMessage: 'Tell me your idea in a sentence or two first.' }

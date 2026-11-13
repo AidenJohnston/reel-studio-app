@@ -50,3 +50,18 @@ All additive (optional fields only), per docs/architecture.md section 3. Schema:
   grouped as before. Anchored on word ids, so a recut keeps them.
 - `work/captions.json` cues gain `tokens` (each word as drawn, before upper-casing, with the transcript word ids
   it came from; a word taken off the captions is `""`) and `run` (lines with different runs can't be joined).
+
+## 2026-11-12 (mirrored take found at import)
+
+- `sources[].mirrorCheck` (object, optional): what `init` saw when it looked at the take for a mirrored picture
+  (`engine/reelengine/mirror_detect.py`): `verdict` (`mirrored` / `maybe-mirrored` / `as-filmed` / `unsure` /
+  `unknown`), `why` (plain words the app may show), `camera` (`front` / `back`, from an iPhone file's lens tag)
+  and `letters` (letters of everyday words read as filmed and flipped). No timings, so the same take writes the
+  same record. The render never reads it: only `mirror` changes the picture, so renders stay deterministic.
+- `init` now writes `sources[].mirror = true` for a `mirrored` take. A `maybe-mirrored` one is left alone and the
+  app asks. The user's choice goes in `mirrorCheck.answer` (`undone` / `flipped` / `kept`): from the chat
+  buttons ("Undo flip", "Flip it", "Keep as filmed"), Undo in "What I did" or the "Flip picture" switch. So
+  nothing is undone or asked twice. After `undone` / `kept` only the user's own tap flips that take again: the AI
+  editor's `get_project` shows `userSaidAsFilmed`, its `set_mirror` refuses to flip the take whatever the note says,
+  and the app asks "Flip it?" instead. Each mirror question in the chat keeps the ids of its takes
+  (`ChatMessage.sources`, app state), and its buttons act on those takes only.

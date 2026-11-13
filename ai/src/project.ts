@@ -11,6 +11,8 @@ export interface Source {
   id: string; path: string; duration?: number; fps?: number; width?: number; height?: number; rotation?: number;
   /** the take is mirrored (front camera: on-screen text reads backwards); the engine flips the picture. Absent = false */
   mirror?: boolean;
+  /** what the engine saw at import (mirror_detect.py) and, in `answer`, what the user then chose in the chat */
+  mirrorCheck?: { verdict: string; answer?: 'flipped' | 'kept' | 'undone' };
   [k: string]: unknown;
 }
 export interface WordAnchor { from: string; to: string }
