@@ -132,6 +132,18 @@ describe('changed moments first', () => {
     expect(r.version).toBe(1);
   });
 
+  it('a run that starts after the last reply ends before the version is saved and before the note returns', async () => {
+    const { dir, host, settingsDir } = await setup();
+    // render_draft clears what changed, then the reply ends and the run of that edit starts: finish follows
+    const model = new ScriptedModel([
+      { toolCalls: [call('set_caption_style', { size: 90 }), call('render_draft'), call('finish', { summary_for_user: 'Smaller captions.' })] },
+    ]);
+    await createAI({ host, settingsDir, providerOverride: model, moments: true }).applyNote(dir, 'do what we said earlier', () => undefined);
+    expect(host.log).toContain('start moments 0');
+    expect(serial(host.log)).toBe(true);
+    expect(host.log.at(-1)).toBe('end save-version');
+  });
+
   it('a reply that only changes the music starts no run', async () => {
     const { dir, host, settingsDir } = await setup();
     const model = new ScriptedModel([

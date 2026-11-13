@@ -214,6 +214,9 @@ async function proofreadCaptions(deps: EditorDeps, provider: ModelProvider, ctx:
  * project snapshot plus that draft (engine `save-version`). The full-quality file is made once, when
  * they export (engine `export`, app main exportVersion). Returns the version saved. */
 async function finalize(deps: EditorDeps, ctx: ToolContext, onEvent: (e: AgentEvent) => void): Promise<number> {
+  // A run of this edit may have started after the last reply (agent.ts) even when a draft already shows
+  // it: it shares work/render/ and versions/preview/, so it ends before anything else runs or the task returns.
+  await ctx.moments?.before(ctx.state.edits);
   await refreshCredits(ctx).catch(() => undefined);
   // The post text is beside the video, not in it: a draft made before it was written still shows this edit.
   const stale = !ctx.state.renders.length || [...(ctx.state.dirty ?? [])].some((f) => f !== 'post');
