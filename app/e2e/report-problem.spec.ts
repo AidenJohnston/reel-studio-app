@@ -11,9 +11,9 @@ interface Got {
 }
 
 /** A stand-in for dl.getreelstudio.com/v1/support: answers `status` and keeps every report it parsed. */
-async function fakeServer(): Promise<{ server: Server; url: string; got: Got[]; status: { code: number } }> {
+async function fakeServer(): Promise<{ server: Server; url: string; got: Got[]; status: { code: number; body?: unknown } }> {
   const got: Got[] = []
-  const status = { code: 201 }
+  const status: { code: number; body?: unknown } = { code: 201 }
   const server = createServer((req, res) => {
     const chunks: Buffer[] = []
     req.on('data', (c: Buffer) => chunks.push(c))
@@ -21,7 +21,7 @@ async function fakeServer(): Promise<{ server: Server; url: string; got: Got[]; 
       const form = await new Response(Buffer.concat(chunks), { headers: { 'content-type': String(req.headers['content-type']) } }).formData()
       got.push({ headers: req.headers, form })
       res.writeHead(status.code, { 'content-type': 'application/json' })
-      res.end(status.code === 201 ? JSON.stringify({ ok: true, id: 'RS-ABCDEFGH' }) : JSON.stringify({ error: 'server error' }))
+      res.end(JSON.stringify(status.body ?? (status.code === 201 ? { ok: true, id: 'RS-ABCDEFGH' } : { error: 'server error' })))
     })
   })
   await new Promise<void>((r) => server.listen(0, '127.0.0.1', r))
@@ -87,6 +87,44 @@ test('Report a problem: review, send, and the way out when sending fails', async
     await shot(page, 'report-problem-failed')
     await page.getByTestId('report-copy').click()
     await expect.poll(() => app.evaluate(({ clipboard }) => clipboard.readText())).toContain('Second report')
+
+    // The server refuses a field (400): resending the same report would fail again, so there is no Try again. Edit
+    // leads, goes back to the form with the draft kept and the field marked, and sending needs a fresh review.
+    fake.status.code = 400
+    fake.status.body = { error: 'longer than 5000 characters', field: 'what' }
+    await page.getByTestId('report-edit').click() // from the 500 above: back to the form, nothing marked
+    await expect(page.getByTestId('report-what')).toHaveValue('Second report')
+    await expect(page.getByTestId('report-what')).not.toHaveAttribute('aria-invalid', 'true')
+    await page.getByTestId('report-review').click()
+    await page.getByTestId('report-send').click()
+    await expect(page.getByTestId('report-error')).toContainText('what: longer than 5000 characters')
+    await expect(page.getByTestId('report-retry')).toHaveCount(0)
+    await expect(page.getByTestId('report-edit')).toHaveClass(/primary/)
+    await expect(page.getByTestId('report-edit')).toBeFocused()
+    await shot(page, 'report-problem-refused')
+    await page.getByTestId('report-edit').click()
+    await expect(page.getByTestId('report-what')).toHaveAttribute('aria-invalid', 'true')
+    await expect(page.getByTestId('report-field-error')).toContainText('longer than 5000 characters')
+    await expect(page.getByTestId('report-send')).toHaveCount(0) // the form has no Send: only a fresh review does
+    await page.getByTestId('report-what').fill('Second report, shorter')
+    fake.status.code = 201
+    fake.status.body = undefined
+    const before = fake.got.length
+    await page.getByTestId('report-review').click()
+    await expect(page.getByTestId('report-preview')).toContainText('Second report, shorter')
+    await page.getByTestId('report-send').click()
+    await expect(page.getByTestId('report-id')).toHaveText('RS-ABCDEFGH')
+    expect(fake.got.length).toBe(before + 1)
+    expect(fake.got[fake.got.length - 1].form.get('what')).toBe('Second report, shorter')
+
+    // A field the page validates itself is marked through the same IPC error path (field passes main → page).
+    await page.getByTestId('report-done').click()
+    await page.getByTestId('report-problem-open').click()
+    await page.getByTestId('report-what').fill('Has a bad email')
+    await page.getByTestId('report-email').fill('not an email')
+    await page.getByTestId('report-review').click()
+    await expect(page.getByTestId('report-email')).toHaveAttribute('aria-invalid', 'true')
+    await expect(page.getByTestId('report-what')).not.toHaveAttribute('aria-invalid', 'true')
   } finally {
     await app.close()
     fake.server.close()

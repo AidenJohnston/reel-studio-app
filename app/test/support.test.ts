@@ -105,6 +105,54 @@ describe('Report a problem', () => {
     expect(p.screenshot).toBeNull()
   })
 
+  it('a form closed while prepare() gathers diagnostics keeps nothing', async () => {
+    let release!: (t: string) => void
+    const r = rig()
+    // diagnostics that answer only when the test says so
+    const slow = createSupport({
+      url: SUPPORT_REPORT_URL,
+      appVersion: '0.1.6',
+      os: 'Windows 10.0.26200 x64',
+      fetch: (async () => new Response('{"id":"RS-7K3F9QXA"}', { status: 201 })) as unknown as typeof fetch,
+      getKey: async () => KEY,
+      diagnostics: () => new Promise<string>((res) => (release = res)),
+      capture: async () => SHOT,
+      log: () => {}
+    })
+    await slow.capture()
+    const pending = slow.prepare(draft({ what: 'cancelled report', email: 'me@example.com', diagnostics: true, screenshot: true, key: true }))
+    await new Promise((res) => setTimeout(res, 0))
+    slow.discard() // Cancel while the diagnostics are still being gathered
+    release('Reel Studio diagnostics')
+    await expect(pending).rejects.toMatchObject({ code: 'SUPPORT_STALE' })
+    // nothing kept: no report to send, copy or mail, and no screenshot for the next form
+    expect(slow.asText('p1')).toBe('')
+    await expect(slow.send('p1')).rejects.toMatchObject({ code: 'SUPPORT_STALE' })
+    expect(decodeURIComponent(slow.mailto('p1'))).not.toContain('cancelled report')
+    const next = await slow.prepare(draft({ screenshot: true }))
+    expect(next.screenshot).toBeNull()
+    expect(r.sent.length).toBe(0)
+  })
+
+  it('a form closed while its screenshot is being taken keeps no screenshot', async () => {
+    let release!: (s: Screenshot) => void
+    const s = createSupport({
+      url: SUPPORT_REPORT_URL,
+      appVersion: '0.1.6',
+      os: 'x',
+      fetch: (async () => new Response('', { status: 500 })) as unknown as typeof fetch,
+      getKey: async () => null,
+      diagnostics: async () => '',
+      capture: () => new Promise<Screenshot>((res) => (release = res)),
+      log: () => {}
+    })
+    const opening = s.capture()
+    s.discard()
+    release(SHOT)
+    expect(await opening).toEqual({ available: false, hasKey: false })
+    expect((await s.prepare(draft({ screenshot: true }))).screenshot).toBeNull()
+  })
+
   it('checks the fields the person can fix', async () => {
     const r = rig()
     await expect(r.s.prepare(draft({ what: '   ' }))).rejects.toMatchObject({ code: 'SUPPORT_FIELD', field: 'what' })

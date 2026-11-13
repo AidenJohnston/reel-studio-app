@@ -13,7 +13,7 @@ import {
   setRootOverride,
   settingsDir
 } from './paths'
-import { createEngineRunner, killAllEngines, toUserError, type RunEngine } from './engine'
+import { createEngineRunner, killAllEngines, type RunEngine } from './engine'
 import { cpus, totalmem } from 'node:os'
 import { DIAGNOSTICS_LOG_BYTES, DIAGNOSTICS_LOG_LINES, diagnosticsReport, lastLines, logDuration, redactDiagnostics, type CliFacts } from './diagnostics'
 import { handleMediaProtocol, registerMediaScheme } from './media'
@@ -62,6 +62,7 @@ import { createUpdateService } from './update-check'
 import { PROTOCOL, createUpdateKeyService } from './update-key'
 import { setupPosting } from './posting-ipc'
 import { createSupport, encodeScreenshot, supportUrl } from './support'
+import { ipcErrorReply } from './ipc-error'
 import { createJobFeedback, createMainWindow, feedbackLog, installMenu, startDragOut, titleBarOverlay, windowStateFile, type AppCommand } from './window'
 
 const TEST = process.env.REELSTUDIO_TEST === '1'
@@ -243,10 +244,9 @@ function handle(channel: string, fn: Handler): void {
     try {
       return { ok: true, value: await fn(e, ...args) }
     } catch (err) {
-      const u = toUserError(err)
-      log(`[ipc ${channel}] ${u.code}: ${u.message ?? u.userMessage}`)
-      const link = (err as { link?: unknown })?.link
-      return { ok: false, error: { code: u.code, userMessage: u.userMessage, ...(typeof link === 'string' ? { link } : {}) } }
+      const { message, ...error } = ipcErrorReply(err)
+      log(`[ipc ${channel}] ${error.code}: ${message ?? error.userMessage}`)
+      return { ok: false, error }
     }
   })
 }

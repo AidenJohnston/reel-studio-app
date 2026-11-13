@@ -15,7 +15,10 @@ export function openReportProblem(context?: string): void {
 /** The caps the server applies (main/support.ts SUPPORT_CAPS). */
 const CAPS = { what: 5000, expected: 3000, email: 254 }
 
-type Step = { name: 'write' } | { name: 'review'; preview: SupportPreview } | { name: 'sending'; preview: SupportPreview } | { name: 'sent'; id: string; email: string | null } | { name: 'failed'; preview: SupportPreview; message: string }
+type Step = { name: 'write' } | { name: 'review'; preview: SupportPreview } | { name: 'sending'; preview: SupportPreview } | { name: 'sent'; id: string; email: string | null } | { name: 'failed'; preview: SupportPreview; message: string; code: string | null; field?: string }
+
+/** Failures the same report would hit again: the person has to change it (a field the server refused, or too large). */
+const NEEDS_EDIT = new Set(['SUPPORT_FIELD', 'SUPPORT_TOO_BIG'])
 
 const kb = (n: number): string => (n >= 1024 * 1024 ? `${(n / 1024 / 1024).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1024))} KB`)
 
@@ -58,8 +61,15 @@ export function ReportProblem({ context, screenshotAvailable, hasKey, onClose }:
       setStep({ name: 'sent', id: sent.id, email: preview.email })
     } catch (e) {
       if (errorCode(e) === 'SUPPORT_STALE') return void setStep({ name: 'write' })
-      setStep({ name: 'failed', preview, message: userMessage(e) })
+      setStep({ name: 'failed', preview, message: userMessage(e), code: errorCode(e), field: (e as { field?: string })?.field })
     }
+  }
+
+  /** Back to the form with the draft as typed. Sending again needs a fresh review: only prepare() makes a sendable
+   * report, so the one that failed can't be resent from the form. A refused field is marked there. */
+  const edit = (failed?: { message: string; field?: string }) => {
+    setFieldError(failed ?? null)
+    setStep({ name: 'write' })
   }
 
   const invalid = (f: string) => (fieldError?.field === f ? true : undefined)
@@ -239,13 +249,24 @@ export function ReportProblem({ context, screenshotAvailable, hasKey, onClose }:
             <button className="btn ghost" onClick={() => void reel.support.email(p.id).catch(() => {})} data-testid="report-email-instead">
               Email {SUPPORT_EMAIL}
             </button>
-            <button className="btn primary" onClick={() => void send(p)} data-testid="report-retry">
-              Try again
+            {/* Refused or too large: the same report would fail again, so Edit leads and there is no Try again. */}
+            <button
+              className={`btn ${NEEDS_EDIT.has(step.code ?? '') ? 'primary' : 'ghost'}`}
+              onClick={() => edit(NEEDS_EDIT.has(step.code ?? '') ? { message: step.message, field: step.field } : undefined)}
+              data-autofocus={NEEDS_EDIT.has(step.code ?? '') || undefined}
+              data-testid="report-edit"
+            >
+              Edit the report
             </button>
+            {!NEEDS_EDIT.has(step.code ?? '') && (
+              <button className="btn primary" onClick={() => void send(p)} data-testid="report-retry">
+                Try again
+              </button>
+            )}
           </>
         ) : (
           <>
-            <button className="btn ghost" onClick={() => setStep({ name: 'write' })} disabled={sending}>
+            <button className="btn ghost" onClick={() => edit()} disabled={sending} data-testid="report-back">
               Back
             </button>
             <button className="btn primary" onClick={() => void send(p)} disabled={sending} data-autofocus data-testid="report-send">

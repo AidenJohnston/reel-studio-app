@@ -109,23 +109,32 @@ export function createSupport(d: SupportDeps) {
   let shot: Screenshot | null = null
   let prepared: Prepared | null = null
   let seq = 0
+  // One per form: opening (capture) and closing (discard) bump it. An await that started under an older generation
+  // keeps nothing when it resumes, so a form closed while its screenshot or diagnostics were still being gathered
+  // leaves no report, text or key behind in memory.
+  let generation = 0
 
   return {
     /** When the form opens, before it is drawn: the window as it was. Kept in memory until sent or discarded. */
     async capture(): Promise<{ available: boolean; hasKey: boolean }> {
+      const gen = ++generation
       prepared = null
+      shot = null
+      let taken: Screenshot | null = null
       try {
-        shot = await d.capture()
+        taken = await d.capture()
       } catch (e) {
-        shot = null
         d.log(`[support] screenshot failed: ${String((e as Error)?.message ?? e).slice(0, 200)}`)
       }
       const hasKey = !!(await d.getKey().catch(() => null))
+      if (gen !== generation) return { available: false, hasKey }
+      shot = taken
       return { available: !!shot, hasKey }
     },
 
     /** What the review step shows, built once. `send()` sends exactly this. */
     async prepare(draft: SupportDraft): Promise<SupportPreview> {
+      const gen = generation
       const what = clean(draft?.what)
       const expected = clean(draft?.expected)
       const email = clean(draft?.email).toLowerCase()
@@ -140,6 +149,8 @@ export function createSupport(d: SupportDeps) {
         diagnostics = text.length > SUPPORT_CAPS.diagnostics ? '[…]\n' + text.slice(text.length - SUPPORT_CAPS.diagnostics + 4) : text
       }
       const key = draft.key === true ? await d.getKey() : null
+      // The form closed (or reopened) while this was gathering: keep nothing.
+      if (gen !== generation) throw fail('SUPPORT_STALE', 'This report was closed before it was ready.')
       prepared = {
         id: `p${++seq}`,
         fields: { what, expected, email, appVersion: d.appVersion, os: d.os },
@@ -207,6 +218,7 @@ export function createSupport(d: SupportDeps) {
 
     /** The form closed without sending: drop the screenshot and the prepared report. */
     discard(): void {
+      generation++
       shot = null
       prepared = null
     },
