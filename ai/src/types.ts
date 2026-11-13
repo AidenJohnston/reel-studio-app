@@ -13,7 +13,9 @@ export type AgentEvent =
   | { type: 'reply'; text: string }
 
 export interface AgentResult {
-  summary: string; version: number;
+  summary: string;
+  /** the version this task made or rendered again; absent when a note changed nothing (no edit, no saved My style rule) or its edit ended where it started */
+  version?: number;
   /** rules saved to My style because the user's note asked for it ("always...", "from now on...") */
   styleRulesAdded: string[];
   /** rules the AI only PROPOSES: show "Remember this for next time?" Yes / No; Yes = addStyleRule(text) */
