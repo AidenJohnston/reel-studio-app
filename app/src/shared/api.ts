@@ -340,8 +340,9 @@ export interface StyleRule {
   /** Set: the app measures this on every render, and a note can't finish while it fails. */
   check?: RuleCheck
   source?: { project: string; title: string; version: number }
-  /** `also`: other questions about this rule the person said Yes to after it was saved */
-  consent?: { proposal: string; at: string; also?: string[] }
+  /** `also`: other questions about this rule the person said Yes to after it was saved; `resumed`: the ones whose Yes
+   * turned it back on from paused */
+  consent?: { proposal: string; at: string; also?: string[]; resumed?: string[] }
 }
 
 /** A checked My style rule's machine form (ai/src/rules.ts is the one that validates it). */

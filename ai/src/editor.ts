@@ -127,14 +127,15 @@ function honestSummary(r: Pick<RunAgentResult, 'finished' | 'stoppedBy'>, state:
 }
 
 /** Undo what a failed note did to My style: rules it saved are removed, paused rules it turned back on are paused
- * again. A rule removed in My style since then stays removed. Returns the words of each rule it could not undo. */
+ * again. A rule removed in My style since then stays removed, and one approved or reworded since stays on.
+ * Returns the words of each rule it could not undo. */
 async function undoStyleRules(deps: EditorDeps, state: ToolState): Promise<string[]> {
   const left: string[] = [];
   for (const [i, id] of state.styleRuleIds.entries()) {
     await deps.style.remove(id).catch(() => { left.push(state.styleRulesAdded[i] ?? id); });
   }
   for (const r of state.styleRulesResumed) {
-    await deps.style.update(r.id, { paused: true }).catch((e) => { if (e?.code !== 'NOT_FOUND') left.push(r.text); });
+    await deps.style.pauseAgain(r).catch((e) => { if (e?.code !== 'NOT_FOUND') left.push(r.text); });
   }
   state.styleRuleIds = []; state.styleRulesAdded = []; state.styleRulesResumed = [];
   return left;

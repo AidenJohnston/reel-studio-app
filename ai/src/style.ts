@@ -22,8 +22,9 @@ export interface StyleRule {
   /** the engine measures this on every render (rules.ts); the rule's words are ruleText(check) */
   check?: RuleCheck;
   source?: StyleSource;
-  /** the question the person said Yes to; `also`: other questions about this rule they said Yes to after it was saved */
-  consent?: { proposal: string; at: string; also?: string[] };
+  /** the question the person said Yes to; `also`: other questions about this rule they said Yes to after it was saved;
+   * `resumed`: the questions whose Yes turned this rule back on from paused, so a later No pauses it again */
+  consent?: { proposal: string; at: string; also?: string[]; resumed?: string[] };
 }
 /** The active checked rules, and rules whose check this version can't read (saved by a newer Reel Studio):
  * those are named in every note's reply rather than skipped without a word. */
@@ -36,12 +37,11 @@ export type Approval = { status: 'saved' | 'exists'; rule: StyleRule } | { statu
 export const LOWERCASE_CAPTIONS = 'Use lowercase captions.';
 const isCaptionCase = (x: unknown): x is CaptionCaseRule => (x as CaptionCaseRule)?.kind === 'caption-case' && (x as CaptionCaseRule).case === 'lower';
 /** The later questions kept with a rule. My style.json can be edited by hand: anything but a list of IDs is none. */
-const alsoYes = (r: StyleRule): string[] => {
-  const also: unknown = r.consent?.also;
-  return Array.isArray(also) ? also.filter((x): x is string => typeof x === 'string') : [];
-};
+const ids = (x: unknown): string[] => (Array.isArray(x) ? x.filter((y): y is string => typeof y === 'string') : []);
+const alsoYes = (r: StyleRule): string[] => ids(r.consent?.also);
+const resumedYes = (r: StyleRule): string[] => ids(r.consent?.resumed);
 /** Every question the person said Yes to for this rule. */
-const answeredYes = (r: StyleRule): string[] => (r.consent ? [r.consent.proposal, ...alsoYes(r)] : []);
+export const answeredYes = (r: StyleRule): string[] => (r.consent ? [r.consent.proposal, ...alsoYes(r)] : []);
 
 /** A stored check's words, or null when this version can't read the check. */
 const checkedText = (c: unknown): string | null => { try { return ruleText(parseCheck(c)); } catch { return null; } };
@@ -204,8 +204,9 @@ export class StyleStore {
       if (typed) {
         // This question is kept with the rule, so removing the rule blocks it too, even when its reply was lost
         // and its buttons are still there.
-        typed.consent = typed.consent ? { ...typed.consent, also: [...alsoYes(typed), p.id] } : { proposal: p.id, at };
         const wasPaused = !!typed.paused;
+        typed.consent = typed.consent ? { ...typed.consent, also: [...alsoYes(typed), p.id] } : { proposal: p.id, at };
+        if (wasPaused) typed.consent.resumed = [...resumedYes(typed), p.id];
         delete typed.paused;
         await this.write(data);
         return { status: wasPaused ? 'saved' : 'exists', rule: typed };
@@ -224,13 +225,38 @@ export class StyleStore {
     });
   }
 
-  /** The person said No to `p`. If a Yes to it was saved before a crash cut off the reply, that rule goes,
-   * and the question is remembered as answered so it cannot save again. */
+  /** The person said No to `p`. If a Yes to it was saved before a crash cut off the reply, that Yes is undone: a rule
+   * it saved goes, and a paused rule it only turned back on is paused again. Either way the question is remembered as
+   * answered so it cannot save again. */
   async decline(p: StyleProposal): Promise<void> {
     return this.serial(async () => {
       const data = await this.read();
+      const forgotten = [...(data.forgotten ?? []), p.id];
+      const resumed = data.rules.find((r) => resumedYes(r).includes(p.id));
+      if (resumed) {
+        resumed.paused = true;
+        const rest = answeredYes(resumed).filter((id) => id !== p.id);
+        const back = resumedYes(resumed).filter((id) => id !== p.id);
+        if (!rest.length) delete resumed.consent;
+        else resumed.consent = { proposal: rest[0], at: resumed.consent!.at, ...(rest.length > 1 ? { also: rest.slice(1) } : {}), ...(back.length ? { resumed: back } : {}) };
+        await this.write({ ...data, forgotten });
+        return;
+      }
       if (!data.rules.some((r) => r.consent?.proposal === p.id)) return;
-      await this.write({ ...data, rules: data.rules.filter((r) => r.consent?.proposal !== p.id), forgotten: [...(data.forgotten ?? []), p.id] });
+      await this.write({ ...data, rules: data.rules.filter((r) => r.consent?.proposal !== p.id), forgotten });
+    });
+  }
+
+  /** Undo a failed note's resume of `r`: pause it again, unless the person said Yes to it or changed its words since
+   * (`answered`: its Yes answers when the note turned it back on). Then it stays on, as they last chose. */
+  async pauseAgain(r: { id: string; text: string; answered: string[] }): Promise<void> {
+    return this.serial(async () => {
+      const data = await this.read();
+      const rule = data.rules.find((x) => x.id === r.id);
+      if (!rule) throw { code: 'NOT_FOUND', userMessage: 'That rule is not in My style any more.' };
+      if (rule.text !== r.text || answeredYes(rule).some((id) => !r.answered.includes(id))) return;
+      rule.paused = true;
+      await this.write(data);
     });
   }
 

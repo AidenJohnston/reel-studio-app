@@ -12,7 +12,7 @@ import { S, JSONSchema, validate, fillNulls } from './schema';
 import { ANIMATION_IDS, ENGINE_FED, TimedWord, alignWordTimes, animationParamsSchema, cleanParams, itemTimes, phraseTime, templateSpec } from './animations';
 import { chooseReadableLayout, minHeroPx } from './readable';
 import { AgentEvent, AIError, EngineHost, ImagePart, ToolSchema } from './types';
-import { StyleStore, cleanRuleText, noteAsksToRemember } from './style';
+import { StyleStore, answeredYes, cleanRuleText, noteAsksToRemember } from './style';
 import { CHECK_PARAM, CheckChoice, CheckedRule, Lint, LintFailure, failureText, rulesFile, rulesFilePath } from './rules';
 import { BlockedUrlError, LookupFn, UnsafePathError, guardedFetch, pathProblem, safeResolve, slugName, sniffImage } from './safety';
 
@@ -35,7 +35,8 @@ export interface ToolState {
   /** ids of the rules above, so a failed note can take them back out of My style */
   styleRuleIds: string[];
   /** paused rules this note turned back on, so a failed note can pause them again */
-  styleRulesResumed: { id: string; text: string }[];
+  /** `answered`: the rule's Yes answers when this note turned it back on (StyleStore.pauseAgain) */
+  styleRulesResumed: { id: string; text: string; answered: string[] }[];
   /** every user-facing tool summary, in order (an honest "what I changed" when the agent stops early) */
   summaries: string[];
   renders: RenderInfo[];
@@ -1249,7 +1250,7 @@ const tools: ToolDef[] = [
           return { content: { ok: true, saved: r.rule.text }, summary: `Saved to My style: "${r.rule.text}"` };
         }
         if (r.resumed) {
-          ctx.state.styleRulesResumed.push({ id: r.rule.id, text: r.rule.text });
+          ctx.state.styleRulesResumed.push({ id: r.rule.id, text: r.rule.text, answered: answeredYes(r.rule) });
           return { content: { ok: true, alreadySaved: r.rule.text, turnedBackOn: true }, summary: `Turned back on in My style: "${r.rule.text}"` };
         }
         return { content: { ok: true, alreadySaved: r.rule.text } };

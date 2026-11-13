@@ -95,11 +95,11 @@ const isCaptionCase = (x: unknown): boolean => {
   const c = x as { kind?: unknown; case?: unknown } | null
   return c?.kind === 'caption-case' && c.case === 'lower'
 }
+const ids = (x: unknown): string[] => (Array.isArray(x) ? x.filter((y): y is string => typeof y === 'string') : [])
 /** Every question the person said Yes to for this rule (answeredYes in ai/src/style.ts). */
-const answeredYes = (r: StyleRule): string[] => {
-  const also: unknown = r.consent?.also
-  return r.consent ? [r.consent.proposal, ...(Array.isArray(also) ? also.filter((x): x is string => typeof x === 'string') : [])] : []
-}
+const answeredYes = (r: StyleRule): string[] => (r.consent ? [r.consent.proposal, ...ids(r.consent.also)] : [])
+/** The questions whose Yes turned this rule back on from paused (resumedYes in ai/src/style.ts). */
+const resumedYes = (r: StyleRule): string[] => ids(r.consent?.resumed)
 
 export const createMockAI: CreateAI = ({ host }) => {
   const styleFile = (): string => join(host.reelStudioRoot(), 'My style.json')
@@ -385,8 +385,9 @@ export const createMockAI: CreateAI = ({ host }) => {
         }
         const typed = s.rules.find((r) => isCaptionCase(r.payload))
         if (typed) {
-          typed.consent = typed.consent ? { ...typed.consent, also: [...answeredYes(typed).slice(1), proposal.id] } : { proposal: proposal.id, at }
           const wasPaused = !!typed.paused
+          typed.consent = typed.consent ? { ...typed.consent, also: [...answeredYes(typed).slice(1), proposal.id] } : { proposal: proposal.id, at }
+          if (wasPaused) typed.consent.resumed = [...resumedYes(typed), proposal.id]
           delete typed.paused
           await saveRules(s, s.rules)
           return { status: wasPaused ? ('saved' as const) : ('exists' as const) }
@@ -399,6 +400,18 @@ export const createMockAI: CreateAI = ({ host }) => {
     },
     async declineStyleProposal(proposal) {
       return withStyle(async (s) => {
+        // as the real store: a Yes that only turned a paused rule back on is undone by pausing it again
+        const resumed = s.rules.find((r) => resumedYes(r).includes(proposal.id))
+        if (resumed) {
+          resumed.paused = true
+          const rest = answeredYes(resumed).filter((id) => id !== proposal.id)
+          const back = resumedYes(resumed).filter((id) => id !== proposal.id)
+          if (!rest.length) delete resumed.consent
+          else resumed.consent = { proposal: rest[0], at: resumed.consent!.at, ...(rest.length > 1 ? { also: rest.slice(1) } : {}), ...(back.length ? { resumed: back } : {}) }
+          s.forgotten = [...(s.forgotten ?? []), proposal.id]
+          await saveRules(s, s.rules)
+          return
+        }
         if (!s.rules.some((r) => r.consent?.proposal === proposal.id)) return
         s.forgotten = [...(s.forgotten ?? []), proposal.id]
         await saveRules(s, s.rules.filter((r) => r.consent?.proposal !== proposal.id))

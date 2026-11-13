@@ -69,6 +69,18 @@ describe('My style in the stand-in AI', () => {
     expect(await ai.styleRules()).toEqual([])
   })
 
+  it('No after a crash, to a Yes that only turned the paused rule back on, pauses it again and keeps the rule', async () => {
+    const { ai } = standIn()
+    await ai.approveStyleProposal!(proposal)
+    await ai.updateStyleRule!((await ai.styleRules())[0].id, { paused: true })
+    const other: StyleProposal = { ...proposal, id: 'q2', source: { project: 'p2', title: 'Another video', version: 1 } }
+    expect(await ai.approveStyleProposal!(other)).toEqual({ status: 'saved' })
+    expect((await ai.styleRules())[0].paused).toBeUndefined()
+    await ai.declineStyleProposal!(other)
+    expect(await ai.styleRules()).toEqual([expect.objectContaining({ paused: true, consent: { proposal: 'q1', at: expect.any(String) } })])
+    expect(await ai.approveStyleProposal!(other)).toEqual({ status: 'forgotten' })
+  })
+
   it('the typed rule edited to the same words, typed loosely, stays a rule the app applies', async () => {
     const { ai } = standIn()
     await ai.approveStyleProposal!(proposal)

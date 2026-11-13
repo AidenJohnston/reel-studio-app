@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import * as fsp from 'node:fs/promises';
 import * as path from 'node:path';
 import { createAI, loadProject, AIError } from '../src';
+import { captionCaseProposal } from '../src/style';
 import { FakeHost, ScriptedModel, makeProject, call, tmpDir } from './helpers';
 
 const lowercase = (extra: Record<string, unknown> = {}) => call('set_caption_style', { case: 'lower', ...extra });
@@ -257,6 +258,50 @@ describe('answering the question', () => {
     const next = await newVideo(dir);
     await ai().firstEdit(next, () => undefined);
     expect(await caseOf(next)).toBe('lower');
+  });
+
+  /** A saved lowercase rule the person has since paused, and a question about it from another video. */
+  async function pausedRule() {
+    const s = await setup();
+    const a = (await s.ai(new ScriptedModel([{ toolCalls: [lowercase()] }, finish()])).applyNote(s.dir, 'make the captions lowercase', () => undefined)).styleProposal!;
+    await s.ai().approveStyleProposal(a);
+    await s.ai().updateStyleRule((await s.ai().styleRules())[0].id, { paused: true });
+    const b = captionCaseProposal({ project: 'p2', title: 'Another video', version: 1 });
+    return { ...s, a, b };
+  }
+
+  it('a failed note that turned the paused rule back on leaves it on when another video's Yes approved it meanwhile', async () => {
+    const { dir, host, ai, newVideo, b } = await pausedRule();
+    const other = await newVideo(dir);
+    host.failRender = true;
+    const running = new ScriptedModel([
+      { toolCalls: [lowercase(), call('add_style_rule', { rule: 'Use lowercase captions.' })] },
+      async () => { await ai().approveStyleProposal(b); return finish(); },
+    ]);
+    await expect(ai(running).applyNote(other, 'always use lowercase captions', () => undefined)).rejects.toBeTruthy();
+    const [rule] = await ai().styleRules();
+    expect(rule.paused).toBeUndefined();
+    expect(rule.consent?.also).toEqual([b.id]);
+  });
+
+  it('a failed note pauses again the rule it turned back on when nobody approved it meanwhile', async () => {
+    const { dir, host, ai, newVideo } = await pausedRule();
+    const other = await newVideo(dir);
+    host.failRender = true;
+    const running = new ScriptedModel([{ toolCalls: [lowercase(), call('add_style_rule', { rule: 'Use lowercase captions.' })] }, finish()]);
+    await expect(ai(running).applyNote(other, 'always use lowercase captions', () => undefined)).rejects.toBeTruthy();
+    expect((await ai().styleRules())[0].paused).toBe(true);
+  });
+
+  it('No after a crash, to a Yes that only turned the paused rule back on, pauses it again and keeps the rule', async () => {
+    const { ai, a, b } = await pausedRule();
+    expect(await ai().approveStyleProposal(b)).toMatchObject({ status: 'saved' });
+    expect((await ai().styleRules())[0].paused).toBeUndefined();
+    await ai().declineStyleProposal(b);
+    expect(await ai().styleRules()).toEqual([expect.objectContaining({ paused: true, consent: { proposal: a.id, at: expect.any(String) } })]);
+    expect(await ai().approveStyleProposal(b)).toEqual({ status: 'forgotten' });
+    // the first question still stands for the rule it saved
+    expect(await ai().approveStyleProposal(a)).toMatchObject({ status: 'saved' });
   });
 
   it('a Yes and a rule saved at once through two separate AI objects keep both', async () => {
