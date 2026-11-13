@@ -76,3 +76,25 @@ test('a take that only looks mirrored is asked about, and Flip it flips it', asy
   await page.screenshot({ path: join(OUT, 'mirror-detect-04-flipped-on-answer.png') })
   await app.close()
 })
+
+test('two quick answers settle once: the first wins, the second changes nothing', async () => {
+  test.setTimeout(20 * 60_000)
+  const media = makeMedia()
+  const take = join(BASE, 'my second maybe-mirrored take.mp4')
+  copyFileSync(media.video, take)
+  const { app, page } = await launch()
+  await passFirstRun(page)
+  await makeReel(page, take)
+  const slug = newest().slug
+  // both answers at once, straight to the main process (as a double click or two buttons would)
+  const got = await page.evaluate(async (slug) => {
+    const reel = (window as any).reel
+    const m = (await reel.projects.get(slug)).chat.find((x: any) => x.actions?.includes('mirror-flip'))
+    const answers = await Promise.all([reel.mirror.answer(slug, m.id, 'mirror-flip'), reel.mirror.answer(slug, m.id, 'mirror-keep')])
+    const chat = (await reel.projects.get(slug)).chat
+    return { answers, replies: chat.filter((x: any) => /^(Flipped\.|OK, I left it)/.test(x.text)).length, buttons: chat.some((x: any) => x.actions?.length) }
+  }, slug)
+  expect(got).toEqual({ answers: [{ change: 'flipped the picture' }, { change: '' }], replies: 1, buttons: false })
+  expect(newest().sources[0]).toMatchObject({ mirror: true, mirrorCheck: { answer: 'flipped' } })
+  await app.close()
+})

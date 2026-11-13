@@ -45,6 +45,8 @@ export function Reel({ slug, go, fresh }: { slug: string; go: Go; fresh?: boolea
   const notify = useNotify()
   const [d, setD] = useState<ProjectDetail | null>(null)
   const [selected, setSelected] = useState<number | null>(null)
+  /** the chat message whose flip buttons are being answered (they stay disabled meanwhile) */
+  const [answering, setAnswering] = useState<string | null>(null)
   const [note, setNote] = useState('')
   // The running job (a note, a re-render), folded from its events (shared/live.ts). null = nothing running.
   const [job, setJob] = useState<LiveState | null>(null)
@@ -261,12 +263,16 @@ export function Reel({ slug, go, fresh }: { slug: string; go: Go; fresh?: boolea
     }
   }
 
-  /** "Undo flip" / "Flip it" / "Keep as filmed" in the chat; a new version when the picture changed. */
-  const answerMirror = (a: MirrorAnswer, messageId: string) =>
-    reel.mirror
+  /** "Undo flip" / "Flip it" / "Keep as filmed" in the chat; a new version when the picture changed. The
+   * message's buttons stay disabled until the answer is in, so a second click can't race the first. */
+  const answerMirror = (a: MirrorAnswer, messageId: string) => {
+    setAnswering(messageId)
+    return reel.mirror
       .answer(slug, messageId, a)
       .then((r) => (r.change ? rerender(r.change, 'Flipping your video') : load()))
       .catch((e) => notify(userMessage(e), 'error'))
+      .finally(() => setAnswering(null))
+  }
 
   /** "Undo" on "Flipped the picture" in What I did: every take back as filmed, then a new version. */
   const undoFlip = () =>
@@ -559,7 +565,7 @@ export function Reel({ slug, go, fresh }: { slug: string; go: Go; fresh?: boolea
                           key={a}
                           className={`btn small${a === 'connect' ? '' : ' primary'}`}
                           onClick={() => runAction(a, m.id)}
-                          disabled={!!job && a !== 'connect'}
+                          disabled={(!!job && a !== 'connect') || answering === m.id}
                           data-testid={`action-${a}`}
                         >
                           {ACTION_LABELS[a]}

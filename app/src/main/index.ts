@@ -27,6 +27,7 @@ import {
   readProject,
   readWords,
   recoverInterrupted,
+  serialized,
   titleFromFile,
   uniqueSlug,
   updateAppState,
@@ -686,24 +687,27 @@ function registerIpc(): void {
 
   // "Undo flip" under "I flipped your video", or "Flip it" / "Keep as filmed" under "Flip it?" (shared/mirror.ts).
   // Either way the buttons go and the editor answers; the page then makes a new version if the picture changed.
-  handle('mirror:answer', async (_e, slug: string, messageId: string, action: MirrorAnswer) => {
-    if (!MIRROR_ANSWERS.includes(action)) return { change: '' }
-    if (jobs.forSlug(slug)) throw { code: 'BUSY', userMessage: 'I am still working on this video. Give me a moment, or press Stop.' }
-    const st = await readAppState(slug)
-    if (!st.chat.find((x) => x.id === messageId)?.actions?.includes(action)) return { change: '' }
-    const p = await readProject(slug)
-    const r = answerMirror(p.sources, action)
-    if (r.reply) {
-      p.sources = r.sources
-      await writeProject(slug, p)
-    }
-    await updateAppState(slug, (s) => {
-      const x = s.chat.find((y) => y.id === messageId)
-      if (x) delete x.actions
+  // One answer at a time per project: a second quick click finds the buttons gone and changes nothing.
+  handle('mirror:answer', (_e, slug: string, messageId: string, action: MirrorAnswer) =>
+    serialized(`mirror-answer:${slug}`, async () => {
+      if (!MIRROR_ANSWERS.includes(action)) return { change: '' }
+      if (jobs.forSlug(slug)) throw { code: 'BUSY', userMessage: 'I am still working on this video. Give me a moment, or press Stop.' }
+      const st = await readAppState(slug)
+      if (!st.chat.find((x) => x.id === messageId)?.actions?.includes(action)) return { change: '' }
+      const p = await readProject(slug)
+      const r = answerMirror(p.sources, action)
+      if (r.reply) {
+        p.sources = r.sources
+        await writeProject(slug, p)
+      }
+      await updateAppState(slug, (s) => {
+        const x = s.chat.find((y) => y.id === messageId)
+        if (x) delete x.actions
+      })
+      if (r.reply) await addChat(slug, 'editor', r.reply)
+      return { change: r.change }
     })
-    if (r.reply) await addChat(slug, 'editor', r.reply)
-    return { change: r.change }
-  })
+  )
 
   handle('script:write', (_e, idea: string) => {
     if (!String(idea ?? '').trim()) throw { code: 'EMPTY', userMessage: 'Tell me your idea in a sentence or two first.' }

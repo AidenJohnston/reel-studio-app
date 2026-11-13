@@ -267,10 +267,46 @@ def test_windows_reader_splits_the_pictures_and_keeps_their_order(monkeypatch):
     assert len(calls) == 4 and sorted(sum(calls, [])) == sorted(paths)
 
 
-def test_parse_reports_a_reader_that_said_nothing():
+def test_parse_keeps_a_failed_picture_apart_from_an_empty_one():
     with pytest.raises(RuntimeError):
         md._parse('{"error":"no-ocr-language"}', 2)
-    assert md._parse('{"i": 1, "lines": ["A"]}', 2) == [[], ["A"]]
+    out = '{"i": 0, "error": "vision failed"}\n{"i": 1, "lines": ["A"]}\n{"i": 2, "lines": []}'
+    assert md._parse(out, 4) == [None, ["A"], [], None]       # failed, read, read with no writing, missing
+
+
+def test_a_failed_reading_is_never_evidence(tmp_path, clips):
+    # each frame reads 11 letters as filmed and 22 flipped: 44 vs 88 is "unsure". If the as-filmed reading
+    # of two frames failed and counted as empty, 22 vs 88 would flip the take; those frames are dropped.
+    def read(paths):
+        return [None if p.endswith(("f0.jpg", "f1.jpg"))
+                else ["STAY CURIOUS", "FRESH COFFEE"] if p.endswith("-flip.jpg") else ["STAY CURIOUS"]
+                for p in paths]
+    r = md.detect(clips["mirrored"], tmp_path, words=WORDS, reader=read, reader_name="fake")
+    assert (r["verdict"], r["frames"], r["letters"]) == ("unsure", 2, {"asFilmed": 22, "flipped": 44})
+    r = md.detect(clips["mirrored"], tmp_path, words=WORDS, reader=lambda paths: [None] * len(paths))
+    assert r["verdict"] == "unknown" and "failed on every frame" in r["detail"]
+
+
+def test_a_setup_failure_never_stops_the_import(tmp_path, clips, monkeypatch):
+    def boom(*a, **k):
+        raise AttributeError("damaged model")
+    monkeypatch.setattr(md, "load_words", boom)
+    r = md.detect(clips["right"], tmp_path, reader=_fake_reader([]))
+    assert r["verdict"] == "unknown" and "damaged model" in r["detail"]
+    monkeypatch.setattr(md, "camera_facing", boom)
+    assert md.detect(clips["right"], tmp_path, words=WORDS, reader=_fake_reader([]))["verdict"] == "unknown"
+    # and init still makes the project
+    pdir = tmp_path / "proj"
+    initmod.run(pdir, "Setup failure", [clips["right"]])
+    assert projmod.load(pdir)["sources"][0]["mirrorCheck"]["verdict"] == "unknown"
+
+
+def test_a_damaged_tokenizer_is_no_vocabulary(tmp_path):
+    for i, bad in enumerate(([1, 2, 3], {"model": [1]}, {"model": {"vocab": 7}})):
+        m = tmp_path / f"models{i}" / "small.en"
+        m.mkdir(parents=True)
+        (m / "tokenizer.json").write_text(json.dumps(bad), encoding="utf-8")
+        assert md.load_words(m.parent) is None
 
 
 # --- the OS's own text recognition (Windows / macOS only) --------------------------------------------

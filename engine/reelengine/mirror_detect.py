@@ -73,7 +73,7 @@ _TOKEN = re.compile(r"[A-Za-z]+")
 _MIRROR_CHAR = {**{c: c for c in "AHIMOTUVWXYilovwx"}, "b": "d", "d": "b", "p": "q", "q": "p"}
 _WORDS: dict = {}
 
-Reader = Callable[[list], list]       # [picture paths] -> [[text lines] per picture]
+Reader = Callable[[list], list]       # [picture paths] -> [[text lines], or None when unread, per picture]
 
 
 # --- deciding --------------------------------------------------------------------------------------
@@ -172,8 +172,10 @@ def camera_facing(video: Path) -> Optional[str]:
 def _vocab_tokens(model: Path) -> Optional[Iterable[str]]:
     tj = model / "tokenizer.json"
     if tj.is_file():
-        v = (json.loads(tj.read_text(encoding="utf-8")).get("model") or {}).get("vocab")
-        return v.keys() if isinstance(v, dict) else v
+        j = json.loads(tj.read_text(encoding="utf-8"))
+        model = j.get("model") if isinstance(j, dict) else None
+        v = model.get("vocab") if isinstance(model, dict) else None
+        return v.keys() if isinstance(v, dict) else v if isinstance(v, list) else None
     vj = model / "vocabulary.json"
     if vj.is_file():
         return json.loads(vj.read_text(encoding="utf-8"))
@@ -211,6 +213,8 @@ def load_words(models: Optional[Path] = None) -> Optional[set]:
 # --- reading text with the OS ----------------------------------------------------------------------
 
 def _parse(out: str, n: int) -> list:
+    """The helper's JSON lines -> [text lines, or None for a picture it could not read]. A failed reading
+    is never an empty one: empty would count as "no writing" and could tip the verdict."""
     got = [None] * n
     for line in (out or "").splitlines():
         try:
@@ -221,7 +225,7 @@ def _parse(out: str, n: int) -> list:
             got[j["i"]] = [str(x) for x in j["lines"]]
     if all(g is None for g in got):
         raise RuntimeError(f"no text recognition result: {(out or '')[:300]}")
-    return [g or [] for g in got]
+    return got
 
 
 def _run(cmd: list, timeout: float) -> str:
@@ -304,17 +308,17 @@ def detect(video: Path, work: Path, duration: Optional[float] = None, words: Opt
 
     if os.environ.get("REELENGINE_MIRROR_DETECT", "").strip() == "0":
         return out(detail="turned off (REELENGINE_MIRROR_DETECT=0)")
-    res["camera"] = camera_facing(video)
-    if reader is None:
-        reader_name, reader = os_reader()
-        if reader is None:
-            return out(detail=f"no built-in text recognition on {sys.platform}")
-    if words is None:
-        words = load_words()
-        if not words:
-            return out(detail="no speech model vocabulary yet")
     tmp = Path(work) / "mirror-check"
     try:
+        res["camera"] = camera_facing(video)
+        if reader is None:
+            reader_name, reader = os_reader()
+            if reader is None:
+                return out(detail=f"no built-in text recognition on {sys.platform}")
+        if words is None:
+            words = load_words()
+            if not words:
+                return out(detail="no speech model vocabulary yet")
         shutil.rmtree(tmp, ignore_errors=True)
         tmp.mkdir(parents=True, exist_ok=True)
         if duration is None:
@@ -327,10 +331,14 @@ def detect(video: Path, work: Path, duration: Optional[float] = None, words: Opt
         if not pairs:
             return out(reader=reader_name, detail="could not read any frame")
         texts = reader([str(p) for ab in pairs for p in ab])
-        a = sum(score_lines(texts[2 * i], words) for i in range(len(pairs)))
-        b = sum(score_lines(texts[2 * i + 1], words) for i in range(len(pairs)))
+        # a frame counts only when BOTH sides were read: one failed side would look like "no writing"
+        read = [(x, y) for x, y in zip(texts[0::2], texts[1::2]) if x is not None and y is not None]
+        if not read:
+            return out(reader=reader_name, detail="text recognition failed on every frame")
+        a = sum(score_lines(x, words) for x, _ in read)
+        b = sum(score_lines(y, words) for _, y in read)
         return out(verdict=decide(a, b, res["camera"]), letters={"asFilmed": a, "flipped": b},
-                   frames=len(pairs), reader=reader_name)
+                   frames=len(read), reader=reader_name)
     except Exception as exc:  # noqa: BLE001 - detection is a nicety: it must never stop a project
         return out(reader=reader_name, detail=f"{type(exc).__name__}: {exc}"[:500])
     finally:

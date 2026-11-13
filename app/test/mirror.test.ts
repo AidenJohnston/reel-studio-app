@@ -146,9 +146,12 @@ describe('mirrored take found at import', () => {
     const main = src('main/index.ts')
     expect(main).toMatch(/for \(const n of mirrorNotices\(made\?\.sources\)\) await addChat\(slug, 'editor', n\.text, undefined, n\.actions\)/)
     expect(main).toMatch(/handle\('mirror:answer'[\s\S]{0,900}answerMirror\(p\.sources, action\)/)
+    // one answer at a time per project, and the message's buttons are disabled while it is answered
+    expect(main).toMatch(/handle\('mirror:answer',[\s\S]{0,120}serialized\(`mirror-answer:\$\{slug\}`/)
     expect(src('preload/index.ts')).toMatch(/answer: \(slug, messageId, action\) => call\('mirror:answer', slug, messageId, action\)/)
     const page = src('renderer/src/screens/Reel.tsx')
     expect(page).toMatch(/r\.change \? rerender\(r\.change, 'Flipping your video'\) : load\(\)/)
+    expect(page).toMatch(/disabled=\{\(!!job && a !== 'connect'\) \|\| answering === m\.id\}/)
     expect(page).toMatch(/case 'mirror':[\s\S]{0,200}testid: 'undo-flip'/)
     expect(page).toMatch(/withMirror\(d\.project\.sources, false\)/)
   })
