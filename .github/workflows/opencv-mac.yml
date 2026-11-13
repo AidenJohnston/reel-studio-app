@@ -63,8 +63,12 @@ jobs:
         with:
           path: ${{ steps.key.outputs.dir }}
           key: opencv-mac-arm64-${{ steps.key.outputs.key }}
+      # /usr/bin/python3 is the Python that comes with macOS's developer tools (3.9), the oldest one these scripts
+      # promise to run under; the runner's default python3 is newer and would hide 3.10+ calls.
       - name: Build OpenCV and the macOS runtime
-        run: python3 packaging/fetch_runtime.py
+        run: |
+          /usr/bin/python3 --version
+          /usr/bin/python3 packaging/fetch_runtime.py
       - name: The wheel has no FFmpeg, x264, x265 or other bundled library
         env:
           DIR: ${{ steps.key.outputs.dir }}

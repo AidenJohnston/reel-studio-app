@@ -293,7 +293,9 @@ def mac_requirements() -> tuple:
     if n != 1:
         raise SystemExit("expected one opencv-python-headless entry in %s, found %d" % (REQUIREMENTS_HASHED.name, n))
     out = CACHE / "requirements-runtime.mac-arm64.txt"
-    out.write_text(text, encoding="utf-8", newline="\n")
+    CACHE.mkdir(parents=True, exist_ok=True)
+    with out.open("w", encoding="utf-8", newline="\n") as f:  # Path.write_text(newline=) needs Python 3.10
+        f.write(text)
     return out, {"wheel": record["wheel"]["file"], "sha256": record["wheel"]["sha256"], "sdist_sha256": record["sdist"]["sha256"],
                  "cmake_args": record["cmake_args"], "build_seconds": record["build_seconds"]}
 
