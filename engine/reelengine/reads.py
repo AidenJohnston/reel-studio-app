@@ -3,11 +3,14 @@ drift from what the renderer really opens.
 
 Python's audit hook sees each file the engine opens for reading (`open`, in any thread) and each
 program it starts (`subprocess.Popen`, whose existing file arguments are ffmpeg's inputs). The project
-resolver notes every path it resolves for reading too (safepath.safe_resolve). While a render records
-(`start`), the files under the project or the Reel Studio root are kept, except what the engine itself
-writes (GENERATED) and project.json, which the snapshot holds. `stop()` returns them as
-{key: digest}: a key relative to the project ("project/...") or the root ("root/..."), so a moved
-Reel Studio folder keeps its keys, and a digest that changes when the file does.
+resolver notes every path it resolves for reading too (safepath.safe_resolve). A file the engine looks
+for and does not find (`os.stat`, `os.path.exists`, `os.path.isfile`, which `Path.exists` and
+`Path.is_file` use) is kept as absent: an optional input such as a face track made later changes the
+video as much as an edited one. While a render records (`start`), the paths under the project or the
+Reel Studio root are kept, except what the engine itself writes (GENERATED) and project.json, which
+the snapshot holds. `stop()` returns them as {key: digest}: a key relative to the project
+("project/...") or the root ("root/..."), so a moved Reel Studio folder keeps its keys, and a digest
+that changes when the file does, None for a file that was not there.
 """
 from __future__ import annotations
 
@@ -34,14 +37,9 @@ def generated(rel: str) -> bool:
     return any(rel == g or rel.startswith(g + "/") for g in GENERATED)
 
 
-def _keep(path) -> None:
-    rec = _rec
-    if rec is None or not isinstance(path, (str, os.PathLike)):
-        return
-    p = os.fspath(path)
-    if not os.path.isfile(p):
-        return
-    p = os.path.realpath(p)
+def _key(rec: dict, path) -> Optional[tuple]:
+    """(key, real path) of `path` when it lies under the project or the root and is not generated."""
+    p = os.path.realpath(os.fspath(path))
     # compared without case where the file system ignores it (normcase); the key keeps the file's own case
     for alias, real in rec["aliases"]:
         if os.path.normcase(p) == alias or os.path.normcase(p).startswith(alias + os.sep):
@@ -49,10 +47,68 @@ def _keep(path) -> None:
     for base, prefix in rec["bases"]:
         if os.path.normcase(p).startswith(base + os.sep):
             rel = p[len(base) + 1:].replace(os.sep, "/")
-            if not (prefix == "project" and generated(rel)):
-                with _lock:
-                    rec["files"][f"{prefix}/{rel}"] = p
+            return None if prefix == "project" and generated(rel) else (f"{prefix}/{rel}", p)
+    return None
+
+
+def _keep(path) -> None:
+    rec = _rec
+    if rec is None or not isinstance(path, (str, os.PathLike)):
+        return
+    _busy.on = True           # this check is not the engine looking for the file
+    try:
+        if not _isfile(path):
             return
+    finally:
+        _busy.on = False
+    found = _key(rec, path)
+    if found:
+        with _lock:
+            rec["files"][found[0]] = found[1]
+
+
+def _looked_for(path) -> None:
+    """`path` was looked for and is not there."""
+    rec = _rec
+    if rec is None or not isinstance(path, (str, os.PathLike)) or getattr(_busy, "on", False):
+        return
+    _busy.on = True           # realpath and friends stat too
+    try:
+        found = _key(rec, path)
+        if found:
+            with _lock:
+                rec["absent"].add(found[0])
+    finally:
+        _busy.on = False
+
+
+_busy = threading.local()
+_stat, _exists, _isfile = os.stat, os.path.exists, os.path.isfile
+
+
+def _stat_looked_for(path, *args, **kwargs):
+    try:
+        return _stat(path, *args, **kwargs)
+    except FileNotFoundError:
+        _looked_for(path)
+        raise
+
+
+def _exists_looked_for(path) -> bool:
+    found = _exists(path)
+    if not found:
+        _looked_for(path)
+    return found
+
+
+def _isfile_looked_for(path) -> bool:
+    found = _isfile(path)
+    if not found and not _exists(path):
+        _looked_for(path)
+    return found
+
+
+os.stat, os.path.exists, os.path.isfile = _stat_looked_for, _exists_looked_for, _isfile_looked_for
 
 
 def _hook(event: str, args) -> None:
@@ -87,7 +143,7 @@ def start(project_dir: Path, root: Optional[Path], aliases: Optional[dict] = Non
     global _rec
     norm = lambda p: os.path.normcase(os.path.realpath(os.fspath(p)))  # noqa: E731
     bases = [(norm(project_dir), "project")] + ([(norm(root), "root")] if root else [])
-    _rec = {"bases": sorted(bases, key=lambda b: -len(b[0])), "files": {},
+    _rec = {"bases": sorted(bases, key=lambda b: -len(b[0])), "files": {}, "absent": set(),
             "aliases": [(norm(a), os.path.realpath(os.fspath(r))) for a, r in (aliases or {}).items()]}
 
 
@@ -97,13 +153,19 @@ def note(path) -> None:
 
 
 def stop() -> dict:
-    """Stops recording; {key: digest} of everything read since start()."""
+    """Stops recording; {key: digest} of everything read since start(), and None for each file looked
+    for and not found (unless it was read later on)."""
     global _rec
     rec, _rec = _rec, None
-    return {} if rec is None else {k: digest(Path(p)) for k, p in sorted(rec["files"].items())}
+    if rec is None:
+        return {}
+    out = {k: digest(Path(p)) for k, p in rec["files"].items()}
+    out.update({k: None for k in rec["absent"] if k not in out})
+    return dict(sorted(out.items()))
 
 
 def digest(f: Path) -> Optional[str]:
+    """What a file is now: its content (its size and time when big), or None when it is not a file."""
     try:
         st = f.stat()
         if st.st_size > HASH_UP_TO:
@@ -120,7 +182,7 @@ def path_of(key: str, project_dir: Path, root: Optional[Path]) -> Optional[Path]
 
 
 def unchanged(recorded: dict, project_dir: Path, root: Optional[Path]) -> bool:
-    """Every file in `recorded` (a stop() result) is still there, as it was."""
+    """Every file in `recorded` (a stop() result) is as it was: still there unchanged, or still not there."""
     for key, was in recorded.items():
         p = path_of(key, project_dir, root)
         if p is None or digest(p) != was:

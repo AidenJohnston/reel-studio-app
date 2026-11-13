@@ -56,13 +56,15 @@ def fresh_draft(project_dir: Path, proj: dict, root: Optional[Path] = None) -> O
     return video
 
 
-def _same_video(vdir: Path, proj: dict, project_dir: Path, root: Optional[Path]) -> bool:
-    """vdir is a saved version of this very video: the same edit, and every file it was made from unchanged."""
+def _same_video(vdir: Path, proj: dict, made_from: dict, project_dir: Path, root: Optional[Path]) -> bool:
+    """vdir is a saved version of this very video: the same edit, drawn from exactly the same files as the
+    draft that shows the edit now (`made_from`, its recorded inputs: what it read, and what it looked for
+    and did not find)."""
     try:
         if projmod.edit_signature(projmod.read_json(vdir / "project.json")) != projmod.edit_signature(proj):
             return False
         if (vdir / INPUTS).exists():
-            return reads.unchanged(projmod.read_json(vdir / INPUTS), project_dir, root)
+            return projmod.read_json(vdir / INPUTS) == made_from
         # saved by an earlier build, as a full render: it recorded only the takes, song and pictures
         return (vdir / "assets.json").exists() and \
             projmod.read_json(vdir / "assets.json") == render.asset_fingerprint(project_dir, proj, root)
@@ -81,9 +83,10 @@ def save(project_dir: Path, root: Optional[Path] = None) -> dict:
     if draft is None:
         draft = Path(render.run(project_dir, draft=True, root=root)["file"])
     shown = projmod.read_json(draft.with_name("project.json"))     # exactly what the draft shows
+    made = render.render_manifest(draft)
     cur = int(proj.get("version") or 0)
     vdir = project_dir / "versions" / f"v{cur}"
-    if cur and _same_video(vdir, shown, project_dir, root):
+    if cur and _same_video(vdir, shown, made["inputs"], project_dir, root):
         moments.mark(project_dir)
         exported = _exported(vdir)
         return {"version": cur, "file": str(vdir / ("export.mp4" if exported else "draft.mp4")),
@@ -95,7 +98,6 @@ def save(project_dir: Path, root: Optional[Path] = None) -> dict:
         if stale.exists():
             shutil.rmtree(stale)
     part.mkdir(parents=True)
-    made = render.render_manifest(draft)
     projmod.write_json(part / "project.json", dict(shown, version=n))
     projmod.write_json(part / INPUTS, made["inputs"])          # what the draft was really made from
     if made.get("cover") and Path(made["cover"]).exists():     # only when that draft made it
@@ -129,18 +131,20 @@ def _exported(vdir: Path) -> bool:
         return False
 
 
-def _rebuild_work(project_dir: Path, vdir: Path) -> Path:
-    """A work folder of the rebuild's own: the project's work files the render may read (everything but
-    what the engine writes, reads.GENERATED), so the rebuild reads exactly those and writes its reports
-    and scratch here, never over the current edit's. Big media is hard-linked (the engine never writes
-    into it); the rest is copied, so nothing written here can reach the project."""
+def _rebuild_work(project_dir: Path, vdir: Path, made_from: dict) -> Path:
+    """A work folder of the rebuild's own, holding exactly the work files the version was made from
+    (`made_from`, its inputs.json): a file made since (a face track, an animation) is not there to be
+    found. The rebuild writes its reports and scratch here, never over the current edit's. Big media is
+    hard-linked (the engine never writes into it); the rest is copied, so nothing written here can reach
+    the project."""
     view = vdir / ".rebuild"
     shutil.rmtree(view, ignore_errors=True)
     src = Path(project_dir) / "work"
-    for f in sorted(src.rglob("*")) if src.is_dir() else []:
-        rel = f.relative_to(src).as_posix()
-        if not f.is_file() or reads.generated(f"work/{rel}"):
+    for key, was in sorted(made_from.items()):
+        if was is None or not key.startswith("project/work/"):
             continue
+        rel = key[len("project/work/"):]
+        f = src / rel
         dst = view / rel
         dst.parent.mkdir(parents=True, exist_ok=True)
         if f.stat().st_size > reads.HASH_UP_TO:
@@ -149,6 +153,12 @@ def _rebuild_work(project_dir: Path, vdir: Path) -> Path:
             shutil.copy2(f, dst)
     view.mkdir(parents=True, exist_ok=True)
     return view
+
+
+def _inputs_changed(version: int) -> EngineError:
+    return EngineError("VERSION_INPUTS_CHANGED", f"the files v{version} was made from have changed",
+                       f"A picture, song, animation or take used in Version {version} has changed since it was "
+                       "saved, so I can't make that exact video any more. Export a newer version instead.")
 
 
 def export(project_dir: Path, root: Optional[Path] = None, version: Optional[int] = None) -> dict:
@@ -163,11 +173,10 @@ def export(project_dir: Path, root: Optional[Path] = None, version: Optional[int
         raise EngineError("NO_VERSION", f"no {vdir}", f"I couldn't find Version {version}. Pick another version and export again.")
     reused = _exported(vdir)
     if not reused:
-        if (vdir / INPUTS).exists() and not reads.unchanged(projmod.read_json(vdir / INPUTS), project_dir, root):
-            raise EngineError("VERSION_INPUTS_CHANGED", f"a file v{version} was made from has changed",
-                              f"A picture, song, animation or take used in Version {version} has changed since it was "
-                              "saved, so I can't make that exact video any more. Export a newer version instead.")
-        view = _rebuild_work(project_dir, vdir)
+        made_from = projmod.read_json(vdir / INPUTS) if (vdir / INPUTS).exists() else None
+        if made_from is not None and not reads.unchanged(made_from, project_dir, root):
+            raise _inputs_changed(version)
+        view = _rebuild_work(project_dir, vdir, made_from or {})
         try:
             render.run(project_dir, root=root, version=version, work=view)
         finally:

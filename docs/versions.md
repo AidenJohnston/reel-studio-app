@@ -41,16 +41,18 @@ Rules:
 4. **What a video is made from is recorded by the renderer, never listed by hand** (`reads.py`): while
    a full render or a draft runs, every file the engine opens for reading, every existing file it hands
    to FFmpeg and every path the project resolver resolves, under the project or the Reel Studio root, is
-   kept, except what the engine writes itself (`reads.GENERATED`) and project.json. Each one goes into
+   kept, except what the engine writes itself (`reads.GENERATED`) and project.json. So is every file it
+   looks for and does not find (an optional input such as a face track), as absent. Each one goes into
    the render's manifest (`inputs`) with a digest: content for files up to 16 MB, size and time for
-   larger ones (the takes). A draft in `preview/` is reused only while every file in its `inputs` is
+   larger ones (the takes), `null` for absent, so a file that appears later counts as a change. A draft in `preview/` is reused only while every file in its `inputs` is
    unchanged, the song included. `save-version` copies those `inputs` into `inputs.json`, keeps the
    current `vN` when it is this very video (the same edit signature, its `inputs.json` unchanged), and
    otherwise saves `v(N+1)`. A file replaced under the same name is a new version, never a changed old one.
 5. `export --version K` makes version K's `export.mp4` by rendering K's own snapshot into `vK/`
    (`render.run(version=K)`), whatever the project is now, so every version, newest or only ever a
    preview, exports its own video. The rebuild reads the project's work files through a work folder of
-   its own (`vK/.rebuild/`, removed after) and writes its reports and scratch there, so the current
+   its own (`vK/.rebuild/`, removed after) holding only the work files K was made from, and writes its
+   reports and scratch there, so the current
    edit's `work/captions.json` and `work/layers/` are never replaced. It renders once: a whole
    `export.mp4` (its `render.json` written after it) is handed back as it is. When a file in K's
    `inputs.json` has changed since K was saved, it refuses (`VERSION_INPUTS_CHANGED`) instead of making

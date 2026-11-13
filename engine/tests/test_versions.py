@@ -105,8 +105,10 @@ def test_a_saved_edit_is_a_complete_version_and_no_full_render(project, renders)
     # what the draft was rendered from, as the renderer recorded it
     recorded = projmod.read_json(v1 / "inputs.json")
     assert recorded == projmod.read_json(project / "versions" / "preview" / "render_draft.json")["inputs"]
-    take = projmod.load(project)["sources"][0]["path"]
-    assert set(recorded) == {f"project/{take}", "project/work/transcript.json"}
+    take, sid = projmod.load(project)["sources"][0]["path"], projmod.load(project)["sources"][0]["id"]
+    assert {k for k, v in recorded.items() if v} == {f"project/{take}", "project/work/transcript.json"}
+    # looked for and not there: the face track and the app's animations
+    assert {f"project/work/face-{sid}.json", "project/work/face.json", "project/work/animations"} <= set(recorded)
     # the screen shows this version now: the next edit's moments are measured from it
     base = projmod.read_json(project / "work" / "moments" / "base.json")
     assert projmod.edit_signature(base["project"]) == projmod.edit_signature(projmod.load(project))
@@ -182,6 +184,31 @@ def test_an_animation_sidecar_edited_in_place_is_a_new_version_and_its_old_one_i
     assert e.value.code == "VERSION_INPUTS_CHANGED"
 
 
+def test_a_face_track_made_after_a_save_is_seen_by_save_version_and_by_export(project, renders):
+    versions.save(project)                    # no face track yet: the render looked for one
+    v1 = project / "versions" / "v1"
+    recorded = projmod.read_json(v1 / "inputs.json")
+    sid = projmod.load(project)["sources"][0]["id"]
+    assert recorded[f"project/work/face-{sid}.json"] is None
+    before = files_of(v1)
+    (project / "work" / f"face-{sid}.json").write_text(json.dumps({"sources": {}}), encoding="utf-8")
+    renders.clear()
+    r = versions.save(project)                # the same edit, now framed by the face track
+    assert r["version"] == 2 and renders == [(True, None)] and files_of(v1) == before
+    assert projmod.read_json(project / "versions" / "v2" / "inputs.json")[f"project/work/face-{sid}.json"]
+    with pytest.raises(EngineError) as e:     # v1 was made without it
+        versions.export(project, version=1)
+    assert e.value.code == "VERSION_INPUTS_CHANGED"
+
+
+def test_files_added_for_later_edits_do_not_block_an_earlier_export(project, renders):
+    versions.save(project)
+    assert projmod.read_json(project / "versions" / "v1" / "inputs.json")["project/work/animations"] is None
+    make_animation(project / "work" / "animations" / "card-9.mov")    # a later note's animation, unused by v1
+    r = versions.export(project, version=1)
+    assert r["reused"] is False and renders[-1] == (False, 1)
+
+
 def test_the_recorder_keeps_what_is_read_and_nothing_written_or_generated(tmp_path):
     proj, root = tmp_path / "p", tmp_path / "root"
     for f in ("work/assets/a.anim.json", "work/layers/layers.json", "media/take.mp4"):
@@ -201,13 +228,19 @@ def test_the_recorder_keeps_what_is_read_and_nothing_written_or_generated(tmp_pa
     (view / "assets" / "b.json").read_text(encoding="utf-8")                   # read through a stand-in folder
     subprocess.run([compose_util.ffmpeg_bin(), "-v", "quiet", "-i", str(proj / "media" / "take.mp4"),
                     "-i", str(root / "Library" / "pic.png"), "-f", "null", "-"], capture_output=True)
+    (proj / "work" / "face.json").exists()                                     # looked for, not there
+    (proj / "work" / "render" / "x.json").exists()                             # the engine's own scratch
     got = reads.stop()
     assert set(got) == {"project/work/assets/a.anim.json", "project/media/take.mp4", "root/Library/pic.png",
-                        "project/work/assets/b.json"}
+                        "project/work/assets/b.json", "project/work/face.json"}
+    assert got["project/work/face.json"] is None
     assert got["project/work/assets/a.anim.json"] == sha(proj / "work" / "assets" / "a.anim.json")
     (proj / "work" / "assets" / "b.json").write_text("y", encoding="utf-8")   # the real file the alias stands for
     del got["project/work/assets/b.json"]
     assert reads.unchanged(got, proj, root)
+    (proj / "work" / "face.json").write_text("{}", encoding="utf-8")         # not there then, there now
+    assert not reads.unchanged(got, proj, root)
+    (proj / "work" / "face.json").unlink()
     (proj / "work" / "assets" / "a.anim.json").write_text("changed", encoding="utf-8")
     assert not reads.unchanged(got, proj, root)
 
