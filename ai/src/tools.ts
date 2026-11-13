@@ -943,8 +943,10 @@ const tools: ToolDef[] = [
         heard = song ? await analyzeMusic(ctx, song.abs, p.format.fps) : null;
         if (onBeat?.length && !heard?.beats) throw new ToolInputError('no steady beat was found in this song, so there is nothing to land on: tell the user and leave onBeat null');
       }
-      // landing on beats moves the picture; drops and the echo are only heard
-      await mutate(ctx, onBeat ? 'beat' : 'music', (q) => {
+      // landing on beats moves the picture, and so does a grid restored under edits already on the beat;
+      // drops and the echo are only heard
+      const movesBeats = !!onBeat || (!!heard?.beats && !!p.music.onBeat?.length);
+      await mutate(ctx, movesBeats ? 'beat' : 'music', (q) => {
         if (heard?.beats) q.music.beats = heard.beats;
         if (onBeat) { if (onBeat.length) q.music.onBeat = onBeat; else delete q.music.onBeat; }
         if (drops) { if (drops.length) q.music.drops = drops.map(({ from, to }) => ({ from, to })); else delete q.music.drops; }

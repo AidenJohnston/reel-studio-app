@@ -222,6 +222,15 @@ describe('tool implementations', () => {
     expect(await pick('a.mp3', 3)).toBe(true);              // another start point moves the grid
     expect(await pick('b.mp3', null)).toBe(true);           // another song's beats
     expect(await pick(null, null)).toBe(true);              // no song, nothing on the beat
+
+    // a song whose beats couldn't be heard, under edits still set on the beat: a drop that restores the
+    // grid moves the picture too
+    host.songInfo = { ...host.songInfo, beatGrid: undefined };
+    await pick('a.mp3', null);
+    host.songInfo = { ...host.songInfo, beatGrid: { fps: 30, frames: [15, 30] } };
+    ctx.state.dirty = new Set();
+    await executeTool(ctx, 'set_sound_moments', { onBeat: null, drops: [{ from: 'w3', to: 'w5' }], reverbThrow: null });
+    expect(visibleChangeSinceRender(ctx)).toBe(true);
   });
 
   it('offers exactly the sounds the engine ships', () => {
