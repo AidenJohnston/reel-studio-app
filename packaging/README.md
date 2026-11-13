@@ -16,7 +16,7 @@ Proven on Windows x64 and macOS arm64 by `spike/`.
 | `check-win-unpacked.ps1` | Fails if `release\win-unpacked\resources` holds a `.venv` (the README's engine dev venv). `build-win.ps1` runs it after packaging. |
 | `sign-win-resources.ps1` | Signs every `.exe`/`.dll`/`.pyd`/`.node` in `win-unpacked` that has no signature yet with Azure Artifact Signing, in one `Invoke-TrustedSigning` call; leaves validly signed files alone. |
 | `check-win-signatures.ps1` | Fails unless every PE file in `win-unpacked` and the installer verify (`Get-AuthenticodeSignature`) and the installer's CN matches `RS_AZURE_PUBLISHER`. Works on an installed copy too. |
-| `test-win-install.ps1` | Silent-installs a built installer into a folder with spaces, runs `--self-test`, prints every check, uninstalls. |
+| `test-win-install.ps1` | Silent-installs a built installer into a folder with spaces, runs `--self-test`, prints every check, uninstalls, and fails if the uninstall left a copy of that installer in `%LOCALAPPDATA%\*-updater\installer.exe` (the installer's own copy, removed by `installer.nsh`; other apps' copies there don't count) or a file it put in that folder's `pending` beforehand, where downloaded updates wait. |
 | `sign-mac.sh` | Developer ID sign (inside-out) + notarize + staple + dmg. Run it in a GUI session. Guide: `docs/signing-mac.md`. |
 | `entitlements.main.plist` / `entitlements.inherit.plist` | Hardened-runtime entitlements: `allow-jit` only, for the Electron main process and its helper apps. Python, ffmpeg and every dylib are signed with none. |
 | `spike/` | Minimal Electron app with `--self-test` that proves the bundled Python/ffmpeg/model/transcribe chain works from an INSTALLED copy. |

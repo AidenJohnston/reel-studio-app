@@ -31,20 +31,55 @@ Remove-Item $out -ErrorAction SilentlyContinue
 $sw.Restart()
 $argList = @("--self-test", "--out", "`"$out`"")
 if ($UserDataDir) { $argList += "--user-data-dir=`"$UserDataDir`"" }
-$r = Start-Process -FilePath $exe -ArgumentList $argList -Wait -PassThru
+$r = Start-Process -FilePath $exe -ArgumentList $argList -PassThru
+# A build without --self-test opens its normal window and never exits; stop it so the uninstall check still runs.
+if (-not $r.WaitForExit(300000)) {
+  # Stop-Process leaves the bundled python.exe running and holding files open; end the whole tree.
+  & taskkill /PID $r.Id /T /F | Out-Null
+  $r.WaitForExit(30000) | Out-Null
+  "self-test did not exit within 300 s; stopped it"
+}
 "self-test exit code $($r.ExitCode) after $([int]$sw.Elapsed.TotalSeconds)s"
-if (-not (Test-Path $out)) { throw "No result file written" }
-$j = Get-Content $out -Raw -Encoding UTF8 | ConvertFrom-Json
-"isPackaged=$($j.isPackaged) electron=$($j.electron) platform=$($j.platform)/$($j.arch)"
-"python: $($j.locations.python)"
-foreach ($c in $j.result.checks) {
-  $d = ($c.detail | ConvertTo-Json -Compress -Depth 6)
-  if ($d.Length -gt 220) { $d = $d.Substring(0, 220) + "..." }
-  "{0,-24} {1,-5} {2,6}s  {3}" -f $c.name, $(if ($c.ok) { "PASS" } else { "FAIL" }), $c.seconds, $d
+$j = $null
+if (Test-Path $out) { $j = Get-Content $out -Raw -Encoding UTF8 | ConvertFrom-Json } else { "No self-test result file written" }
+if ($j) {
+  "isPackaged=$($j.isPackaged) electron=$($j.electron) platform=$($j.platform)/$($j.arch)"
+  "python: $($j.locations.python)"
+  foreach ($c in $j.result.checks) {
+    $d = ($c.detail | ConvertTo-Json -Compress -Depth 6)
+    if ($d.Length -gt 220) { $d = $d.Substring(0, 220) + "..." }
+    "{0,-24} {1,-5} {2,6}s  {3}" -f $c.name, $(if ($c.ok) { "PASS" } else { "FAIL" }), $c.seconds, $d
+  }
 }
 if (-not $KeepInstalled) {
+  # The installer drops a byte copy of itself in %LOCALAPPDATA%\<name>-updater\installer.exe (electron-builder's
+  # copyFile "$EXEPATH"), and electron-updater keeps downloaded updates in that folder's pending\. Other
+  # electron-builder apps keep their own *-updater folders, and an older build may have left one, so only the folder
+  # holding a copy of THIS installer counts.
+  $self = Get-Item $Installer
+  $selfHash = (Get-FileHash $Installer -Algorithm SHA256).Hash
+  function Get-OwnInstallerCopies {
+    @(Get-ChildItem $env:LOCALAPPDATA -Directory -Filter "*-updater" -ErrorAction SilentlyContinue |
+      ForEach-Object { Join-Path $_.FullName "installer.exe" } |
+      Where-Object { (Test-Path $_) -and (Get-Item $_).Length -eq $self.Length -and (Get-FileHash $_ -Algorithm SHA256).Hash -eq $selfHash })
+  }
+  # A download waiting to install, as an update leaves one: the uninstall must remove it too.
+  $pending = @(Get-OwnInstallerCopies | ForEach-Object { Join-Path (Split-Path $_) "pending" })
+  foreach ($dir in $pending) {
+    New-Item -ItemType Directory -Force -Path $dir | Out-Null
+    Set-Content -Path (Join-Path $dir "uninstall-check.exe") -Value "stands in for a downloaded update"
+  }
+  if (-not $pending.Count) { "no copy of this installer in %LOCALAPPDATA%\*-updater after install; the pending check did not run" }
+
   $un = Join-Path $InstallDir "Uninstall $([IO.Path]::GetFileNameWithoutExtension($ExeName)).exe"
   if (Test-Path $un) { Start-Process $un -ArgumentList @("/S") -Wait; "uninstalled" }
+  # The NSIS uninstaller re-launches itself from %TEMP%, so -Wait can return before it has finished.
+  for ($i = 0; $i -lt 120 -and (Test-Path $exe); $i++) { Start-Sleep -Milliseconds 500 }
+  Start-Sleep 2
+  $leftover = @(Get-OwnInstallerCopies) + @($pending | Where-Object { Test-Path $_ })
+  foreach ($f in $leftover) { "UNINSTALL LEFT {0}" -f $f }
+  if ($leftover.Count) { "UNINSTALL CHECK FAILED"; exit 1 }
+  "uninstall left no updater installer copy or pending download"
 }
-if (-not $j.ok) { "SELF-TEST FAILED"; exit 1 }
+if (-not $j -or -not $j.ok) { "SELF-TEST FAILED"; exit 1 }
 "SELF-TEST PASSED"
