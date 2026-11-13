@@ -254,6 +254,15 @@ def test_short_clips_hold_their_last_frame_for_two_seconds(tmp_path, media):
     assert float(held) >= broll.MIN_HOLD - 0.05
 
 
+def test_an_export_never_reuses_a_drafts_short_clip_card(tmp_path, media):
+    ctx = _ctx(tmp_path, media)
+    short = fx.synth_clip(tmp_path / "short.mp4", dur=1.0)
+    item = _item(ctx, 1, 2.0, 2.4, "card-above-head", short)
+    draft = broll.build_layers(_set(ctx, item))[0]
+    final = broll.build_layers(fx.make_ctx(ctx.project_dir, draft=False))[0]
+    assert draft.path != final.path                                     # full quality in the final
+
+
 def test_item_pictures_get_the_blur_boxes_too(tmp_path, media):
     ctx = _ctx(tmp_path, media)
     item = _item(ctx, 1, 2.0, 4.0, "phone-row", items=[str(media["screenshot"]), str(media["portrait"])],

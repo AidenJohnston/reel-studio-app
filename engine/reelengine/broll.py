@@ -659,8 +659,9 @@ def _video_card(ctx, src: Path, cin: float, dur: float, chrome, screen_xy, mask,
     """Masked video inside a static chrome PNG -> alpha .mov (qtrle) the size of the chrome."""
     _, _, fps = fmt_of(ctx)
     d = layers_dir(ctx)
-    # the clip's window is part of the name: a b-roll re-anchored to a longer span must not reuse the old cut
-    stem = f"{stem}-{_key(round(cin, 3), round(dur, 3), *_rate_key(fps))}"
+    # the clip's window is part of the name: a b-roll re-anchored to a longer span must not reuse the old cut;
+    # so is the clip itself: a short clip's held copy (_held) is encoded per draft or export
+    stem = f"{stem}-{_key(round(cin, 3), round(dur, 3), *_rate_key(fps), _asset_sig(src))}"
     out = d / f"{stem}.mov"
     if out.exists():
         return out
