@@ -79,6 +79,7 @@
             "preset": { "type": "string" },
             "font": { "type": "string" },
             "size": { "type": "number", "minimum": 10, "maximum": 300 },
+            "sizePicked": { "type": "boolean", "description": "the person picked size in Edit it myself, so a new look keeps it (absent = the look's own size)" },
             "maxWords": { "type": "integer", "minimum": 1, "maximum": 12 },
             "case": { "enum": ["upper", "lower", "as-is", "title"] },
             "color": { "$ref": "#/$defs/color" },
@@ -86,7 +87,9 @@
             "outlineColor": { "$ref": "#/$defs/color" },
             "shadow": { "type": "number", "minimum": 0, "maximum": 40 },
             "position": { "type": "number", "minimum": 0.05, "maximum": 0.95 },
-            "box": { "type": "boolean", "description": "draw the words on a solid box in outlineColor" }
+            "box": { "type": "boolean", "description": "draw the words on a solid box in outlineColor" },
+            "highlight": { "type": "string", "pattern": "^#[0-9A-Fa-f]{6}$", "description": "colour of the word being spoken (absent = no word highlight)" },
+            "pop": { "type": "boolean", "description": "each line grows into place as it appears" }
           }
         },
         "corrections": {
@@ -108,8 +111,14 @@
           "items": { "$ref": "#/$defs/wordRange" }
         },
         "split": { "type": "array", "description": "words that start a new caption line", "items": { "$ref": "#/$defs/wordId" } },
-        "join": { "type": "array", "description": "the caption line starting at `to` goes onto the line ending at `from`", "items": { "$ref": "#/$defs/wordRange" } }
+        "join": { "type": "array", "description": "the caption line starting at `to` goes onto the line ending at `from`", "items": { "$ref": "#/$defs/wordRange" } },
+        "followScript": { "type": "boolean", "description": "captions show the script's words (`script`) where the speech follows it, at the audio's times; corrections still win. Absent = on when there is a script; false = captions show the transcript" }
       }
+    },
+    "script": {
+      "type": ["string", "object"],
+      "description": "the locked script the take was read from (text, or {text}); without it, script.txt or script.md in the project folder. Primes the vocabulary pass after transcription, and captions follow it (captions.followScript)",
+      "properties": { "text": { "type": "string" } }
     },
     "music": {
       "type": ["object", "null"],

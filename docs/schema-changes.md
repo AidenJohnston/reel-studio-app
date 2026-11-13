@@ -50,3 +50,33 @@ All additive (optional fields only), per docs/architecture.md section 3. Schema:
   grouped as before. Anchored on word ids, so a recut keeps them.
 - `work/captions.json` cues gain `tokens` (each word as drawn, before upper-casing, with the transcript word ids
   it came from; a word taken off the captions is `""`) and `run` (lines with different runs can't be joined).
+
+## 2026-10-22 (caption presets)
+
+- `captions.style.highlight` (`#RRGGBB`, no alpha, absent = none): the word being spoken is drawn in this colour, one
+  word at a time. Each word is lit from its start until the next word starts. A line whose text lost a token
+  (a word that was only punctuation) is drawn without the highlight.
+- `captions.style.pop` (boolean, absent = false): each line grows from 80% to full size over its first 120 ms,
+  carrying on across the word events of a highlighted line.
+- `captions.style.preset` names the look the line started from in "Edit it myself" (`clean`, `bold-pop`,
+  `karaoke`, `boxed`, `minimal`). The engine draws only the style fields; the name is for the picker. The AI's
+  `set_caption_style` removes it when it changes the look itself (pop, the highlight on or off, case, words per
+  line), so the picker then matches the look by its fields.
+- `captions.style.sizePicked` (boolean, absent = false): the person picked `size` in the Size row of "Edit it
+  myself". Picking a look then keeps that size; without it the look's own size applies. `set_caption_style` removes
+  it when it changes the size. The engine ignores it.
+
+## 2026-11-12 (captions follow the script)
+
+- `script` (text, or `{text}`): the locked script the take was read from. Without it, `script.txt` or `script.md` in
+  the project folder is the script. Documented now; the vocabulary pass after transcription already read it.
+- `captions.followScript` (boolean, absent = on when there is a script): captions show the script's words (names,
+  spellings, numbers and punctuation as written) wherever the speech follows the script, at the times the audio
+  says them. Where the speaker went off-script (an ad-lib, a skipped line) captions show the transcript.
+  Corrections (`captions.corrections`) still win over both. `false` turns it off for the project.
+- `work/script-align.json` (written by the engine): the mapping. `groups` (`{ids, words}`: transcript word ids drawn
+  as these script words, also where both read the same, so a number the script spells out stays spelled out),
+  `spans` (`[first id, last id]`: the stretches of speech that follow the script), the `script` it was made from,
+  and `key` (a hash of the mapping `version`, the script and the transcript words). The file is rebuilt when the
+  key no longer matches and removed when the project no longer has a script; the AI shows it only while the key
+  matches the current script. Anchors stay on transcript word ids: only the text drawn for them changes.
