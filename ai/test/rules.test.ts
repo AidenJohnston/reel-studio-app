@@ -270,6 +270,8 @@ describe("Reel Studio's default taste", () => {
     const r = await ai(model).applyNote(dir, 'make the captions huge', () => undefined);
     expect(task(model, 2)).toContain(`"${SAME_SIZE}": 1 caption was shrunk to fit`);
     expect(task(model, 2)).toContain('A "Reel Studio default" also gives way to the user\'s My style rules');
+    // the fix's summary replaces the first one, so it is handed what that one said
+    expect(task(model, 2)).toContain('Your earlier summary was: "Huge captions."');
     expect((await loadProject(dir)).captions.style.size).toBe(140);
     expect(r.summary).toBe('You asked for huge captions, so I kept them.');
   });

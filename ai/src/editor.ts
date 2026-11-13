@@ -303,7 +303,8 @@ function rulesFixer(deps: EditorDeps, provider: ModelProvider, ctx: ToolContext,
       'Change the project so each rule holds, then call finish. There are no more previews: the final video is measured again.',
       'If the note asked for exactly the opposite of a rule, change nothing and call finish.',
       "A \"Reel Studio default\" also gives way to the user's My style rules: if one of those asks otherwise, leave it.",
-      "Your summary_for_user replaces your earlier one: say what the video now does, and where it differs from the note because of a rule.",
+      "Your summary_for_user replaces your earlier one, so it covers the whole edit as it now stands, not only this fix: say what the video now does, and where it differs from the note because of a rule.",
+      ...(finished ? [`Your earlier summary was: ${JSON.stringify(finished)}`] : []),
     ].join('\n');
     try {
       await runAgent({ provider, system: await systemPrompt(deps, ctx), task, ctx, onEvent, signal, maxSteps: 8, maxMisses: 3, tokenBudget: deps.tokenBudget, preload: ['get_project'] });
