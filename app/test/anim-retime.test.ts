@@ -79,4 +79,14 @@ describe('withAnimationRetiming', () => {
     expect(calls).toEqual(['anim-jobs --project /p'])
     await expect(untilStopped(Promise.resolve(7), new AbortController().signal)).resolves.toBe(7)
   })
+
+  it('a render abandoned by Stop that fails later is still handled (no unhandled rejection)', async () => {
+    const stopped = new AbortController()
+    stopped.abort()
+    let fail!: (e: unknown) => void
+    const abandoned = new Promise<string>((_resolve, reject) => { fail = reject })
+    await expect(untilStopped(abandoned, stopped.signal)).rejects.toMatchObject({ code: 'CANCELLED' })
+    fail({ code: 'CANCELLED', userMessage: 'Stopped.' })                // the renderer quits afterwards
+    await new Promise((r) => setTimeout(r, 10))                        // Vitest fails the run on an unhandled one
+  })
 })
