@@ -6,7 +6,7 @@ SHA-256 values here are the ones the script verifies. If you change one, change 
 
 The installed app carries this file and the full license texts under `resources/licenses/`
 (`THIRD_PARTY.md`, `texts/gpl-3.0.txt`, `texts/lgpl-3.0.txt`, `texts/lgpl-2.1.txt`, `texts/yunet-MIT.txt`,
-`texts/npm-licenses.txt`). `fetch_runtime.py` refuses to build a bundle if any of the texts is missing or altered.
+`texts/t3code-MIT.txt`, `texts/npm-licenses.txt`). `fetch_runtime.py` refuses to build a bundle if any of the texts is missing or altered.
 
 ## Bundled programs (downloaded at build time, shipped inside the app)
 
@@ -176,6 +176,40 @@ JavaScript, where a minifier may drop the source comment, so the notice is repea
 >   contract, tort or otherwise, arising from, out of or in connection with the Software or the use or other
 >   dealings in the Software.
 
+### Code ported from T3 Code (MIT)
+
+First run's "Your Mac" checklist and the helper window that sits on System Settings are adapted from T3 Code
+(https://github.com/pingdotgg/t3code , MIT). The files that carry its code, each naming its source at the top:
+
+- `app/src/main/mac-permission-helper.ts` (from `apps/desktop/src/permissions/MacPermissionHelper.ts`)
+- `app/src/main/mac-permission.ts` (from `MacPermission.ts`, and the helper page and placement in
+  `MacPermissionHelper.ts` and `MacSettingsWindow.ts`)
+- `app/src/main/mac-settings-window.ts` (from `MacSettingsWindow.ts`)
+- `app/src/renderer/src/components/permissions.tsx` (from `PermissionChecklist.tsx` and `usePermissionStatus.ts`)
+- `app/src/shared/permission-poll.ts` (the polling in `usePermissionStatus.ts`)
+
+`app/src/renderer/src/screens/FirstRun.tsx` follows the layout of T3 Code's `WelcomeWizard` without its code. The
+ported code is bundled into the app's JavaScript, where a minifier may drop the source comments, so the notice is
+here in full and in `texts/t3code-MIT.txt`:
+
+> MIT License
+>
+> Copyright (c) 2026 T3 Tools Inc.
+>
+> Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated
+> documentation files (the "Software"), to deal in the Software without restriction, including without limitation
+> the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and
+> to permit persons to whom the Software is furnished to do so, subject to the following conditions:
+>
+> The above copyright notice and this permission notice shall be included in all copies or substantial portions of
+> the Software.
+>
+> THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO
+> THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+> AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF
+> CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
+> IN THE SOFTWARE.
+
 ### Electron and Chromium (MIT, BSD-3-Clause and others)
 
 The app shell is Electron 44 (https://www.electronjs.org , MIT). The installed app contains
@@ -192,7 +226,16 @@ https://github.com/opencv/opencv_zoo/tree/main/models/face_detection_yunet . The
 ### Speech model (downloaded on first run, not bundled)
 
 Whisper in the CTranslate2 conversion from Hugging Face (`Systran/faster-whisper-*`; the app offers `small.en` by
-default). License: MIT (OpenAI Whisper weights). https://huggingface.co/Systran/faster-whisper-small.en
+default). License: MIT (OpenAI Whisper weights). https://huggingface.co/Systran/faster-whisper-small.en .
+`small.en` is pinned to revision `d1d751a5f8271d482d14ca55d9e2deeebbae577f`, every file with its SHA-256
+(`engine/reelengine/models/speech-models.json`). If the same files are already in the computer's Hugging Face
+cache, setup copies them instead of downloading.
+
+### Speech check recording (bundled, public domain)
+
+`engine/reelengine/models/speech-check.wav`: 11 seconds of John F. Kennedy's inaugural address (1961), a work of
+the US federal government and in the public domain. The same recording as faster-whisper's `tests/data/jfk.flac`,
+converted to 16 kHz mono WAV. The app transcribes it in the background to time the speech model on the computer.
 
 ### Fonts (bundled, SIL OFL 1.1 or Apache-2.0)
 

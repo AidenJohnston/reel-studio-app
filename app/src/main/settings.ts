@@ -5,6 +5,7 @@ import { settingsFile } from './paths'
 import { writeJson } from './store'
 import { UPDATE_DEFAULTS, type UpdateState } from './update-check'
 import { UPDATE_KEY_DEFAULTS, type UpdateKeyState } from './update-key'
+import type { SpeechCheckResult } from './models'
 
 export interface Settings extends UpdateState, UpdateKeyState {
   firstRunDone: boolean
@@ -13,9 +14,21 @@ export interface Settings extends UpdateState, UpdateKeyState {
   aiAutoPicked: boolean
   /** ai-carryover.ts already ran (it kept, or left alone, what an old local-Claude-Code install was using) */
   aiCarriedOver: boolean
+  /** null = never chosen (main/permissions.ts notificationsWanted) */
+  notifications: boolean | null
+  speechCheck: SpeechCheckResult | null
 }
 
-const DEFAULTS: Settings = { firstRunDone: false, root: null, aiAutoPicked: false, aiCarriedOver: false, ...UPDATE_DEFAULTS, ...UPDATE_KEY_DEFAULTS }
+const DEFAULTS: Settings = {
+  firstRunDone: false,
+  root: null,
+  aiAutoPicked: false,
+  aiCarriedOver: false,
+  notifications: null,
+  speechCheck: null,
+  ...UPDATE_DEFAULTS,
+  ...UPDATE_KEY_DEFAULTS
+}
 
 export async function loadSettings(): Promise<Settings> {
   try {

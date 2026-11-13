@@ -57,6 +57,11 @@ def cmd_download_model(args):
     return transcribe.download_model(args.name or transcribe.default_model())
 
 
+def cmd_speech_check(args):
+    from . import transcribe
+    return transcribe.speech_check(args.name)
+
+
 def cmd_analyze(args):
     from . import analyze
     if getattr(args, "faces_only", False):
@@ -319,6 +324,8 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--prompt")
     sp.add_argument("--device", choices=["auto", "cuda", "cpu"])
     sp = add("download-model", cmd_download_model, "download the speech model")
+    sp.add_argument("--name")
+    sp = add("speech-check", cmd_speech_check, "time the speech model at a few thread counts on a short sample")
     sp.add_argument("--name")
     sp = add("analyze", cmd_analyze, "pauses, retakes, default cut")
     sp.add_argument("--faces-only", action="store_true", help="only the face track (no transcript needed)")
