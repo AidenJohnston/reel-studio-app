@@ -65,6 +65,13 @@ def test_stdout_is_json_lines_only_in_a_real_process(tmp_path):
     assert json.loads(proc.stdout.splitlines()[-1])["code"] == "NOT_FOUND"
 
 
+def test_a_project_json_saved_with_a_byte_order_mark_loads(tmp_path):
+    """Some Windows editors write one; a note's final render reads the live project.json (render.py)."""
+    p = project.new_project("Bread")
+    (tmp_path / "project.json").write_text("\ufeff" + json.dumps(p), encoding="utf-8")
+    assert project.load(tmp_path)["slug"] == "bread"
+
+
 def test_new_project_is_valid():
     p = project.new_project("Why so many apps?")
     assert project.validate(p) == []

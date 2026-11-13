@@ -13,7 +13,7 @@ export interface LineToken extends CaptionToken {
   shown: string
 }
 
-/** work/captions.json's cues (engine captions.build_for_timeline): each word as drawn, the transcript words it came from, its speech run. */
+/** A render's captions.json cues, beside its video (engine captions.build_for_timeline): each word as drawn, the transcript words it came from, its speech run. */
 export function readCaptionLines(json: unknown): CaptionToken[][] {
   const cues = (json as { cues?: unknown } | null)?.cues
   if (!Array.isArray(cues)) return []

@@ -123,6 +123,72 @@ process.stdout.write(JSON.stringify({type:'result',is_error:false,result:reply})
     expect(r2.toolCalls[0]?.args).toEqual({ summary_for_user: 'full' });
     p.dispose();
   });
+
+  const alive = (pid: number) => { try { process.kill(pid, 0); return true; } catch { return false; } };
+  const ANSWER = `process.stdin.on('data',()=>process.stdout.write(JSON.stringify({type:'result',is_error:false,result:'{"tool_calls":[{"name":"finish","arguments":{"summary_for_user":"ok"}}]}'})+'\\n'));`;
+  const oneTurn = (p: ClaudeCliProvider) => p.complete({ system: 'SYS', tools: toolSchemas(['finish']), messages: [{ role: 'user', content: [{ type: 'text', text: 'TASK' }] }] });
+
+  // Windows has no SIGTERM to ignore: kill() ends the process there
+  it.skipIf(process.platform === 'win32')('ending a run stops a session process that ignores its closed input and SIGTERM', async () => {
+    const dir = tmpDir();
+    const pidFile = path.join(dir, 'pid');
+    const script = path.join(dir, 'stubborn-claude.js');
+    fs.writeFileSync(script, `require('fs').writeFileSync(${JSON.stringify(pidFile)},String(process.pid));process.on('SIGTERM',()=>{});setInterval(()=>{},1000);${ANSWER}`);
+    const p = new ClaudeCliProvider({ bin: process.execPath, binArgs: [script], session: true });
+    await oneTurn(p);
+    await p.dispose();
+    expect(alive(Number(fs.readFileSync(pidFile, 'utf8')))).toBe(false);
+  }, 30000);
+
+  // Windows has no SIGTERM to ignore: kill() ends the process there
+  it.skipIf(process.platform === 'win32')('a run that failed to stop one session still waits for the next session to stop before it reports', async () => {
+    const dir = tmpDir();
+    const seen = path.join(dir, 'seen');
+    const pids = path.join(dir, 'pids');
+    const script = path.join(dir, 'two-claudes.js');
+    // the first process leaves a child holding its output (cli_stuck 9 s after it ends); the second ignores
+    // its closed input and SIGTERM, so only SIGKILL, 6 s after it ends, stops it
+    fs.writeFileSync(script, `const fs=require('fs');const first=!fs.existsSync(${JSON.stringify(seen)});fs.writeFileSync(${JSON.stringify(seen)},'');
+if(first){const c=require('child_process').spawn(process.execPath,['-e','setTimeout(()=>{},60000)'],{stdio:['ignore','inherit','inherit']});fs.appendFileSync(${JSON.stringify(pids)},c.pid+' ')}
+else{process.on('SIGTERM',()=>{});fs.appendFileSync(${JSON.stringify(pids)},process.pid+' ')}
+setInterval(()=>{},1000);${ANSWER}`);
+    const p = new ClaudeCliProvider({ bin: process.execPath, binArgs: [script], session: true });
+    try {
+      await oneTurn(p);
+      // another conversation: the first session ends and the second starts
+      await p.complete({ system: 'SYS', tools: toolSchemas(['finish']), messages: [{ role: 'user', content: [{ type: 'text', text: 'OTHER TASK' }] }] });
+      // the second session ends more than 3 s later, so the first one's failure comes before it has stopped
+      await new Promise((r) => setTimeout(r, 4500));
+      await expect(p.dispose()).rejects.toMatchObject({ code: 'cli_stuck' });
+      expect(alive(Number(fs.readFileSync(pids, 'utf8').trim().split(' ')[1]))).toBe(false);
+    } finally {
+      for (const pid of fs.readFileSync(pids, 'utf8').trim().split(' ').map(Number)) try { process.kill(pid, 'SIGKILL'); } catch { /* gone */ }
+    }
+  }, 30000);
+
+  // On Windows the session's exit closed our end of its output even while the child kept its copy (seen on
+  // the windows-latest runner, 6 November), so this hang can't be built this way there.
+  (process.platform === 'win32' ? it.skip : it).each([
+    ['is killed', false],
+    ['exits before the run ends', true],
+  ])('a session whose output a child keeps open after the process %s fails the run instead of holding Stop forever', async (_, exitsFirst) => {
+    const dir = tmpDir();
+    const pids = path.join(dir, 'pids');
+    const script = path.join(dir, 'leaky-claude.js');
+    // a child it started shares its output and outlives it
+    fs.writeFileSync(script, `const c=require('child_process').spawn(process.execPath,['-e','setTimeout(()=>{},60000)'],{stdio:['ignore','inherit','inherit']});
+require('fs').writeFileSync(${JSON.stringify(pids)},process.pid+' '+c.pid);${exitsFirst ? '' : 'setInterval(()=>{},1000);'}
+process.stdin.on('data',()=>{process.stdout.write(JSON.stringify({type:'result',is_error:false,result:'{"tool_calls":[{"name":"finish","arguments":{"summary_for_user":"ok"}}]}'})+'\\n');${exitsFirst ? 'setTimeout(()=>process.exit(0),50);' : ''}});`);
+    const p = new ClaudeCliProvider({ bin: process.execPath, binArgs: [script], session: true });
+    try {
+      await oneTurn(p);
+      const parent = Number(fs.readFileSync(pids, 'utf8').split(' ')[0]);
+      if (exitsFirst) for (let i = 0; i < 100 && alive(parent); i++) await new Promise((r) => setTimeout(r, 50));
+      await expect(p.dispose()).rejects.toMatchObject({ code: 'cli_stuck' });
+    } finally {
+      try { process.kill(Number(fs.readFileSync(pids, 'utf8').split(' ')[1])); } catch { /* gone */ }
+    }
+  }, 30000);
 });
 
 describe('CLI reply parsing', () => {
