@@ -8,6 +8,7 @@ import numpy as np
 import pytest
 
 from harness import checks, media
+from reelengine import render
 
 
 @pytest.mark.parametrize("audio", ["missing", "empty"])
@@ -31,17 +32,19 @@ def test_preview_with_missing_or_empty_candidate_audio_is_a_failed_check(monkeyp
     assert result["frames"] == 1
 
 
-@pytest.mark.parametrize("millisecond_seek", [True, False])
-def test_still_comparison_uses_the_engines_seek_precision(monkeypatch, millisecond_seek):
-    fps = 29.97
-    frames = [np.full((2, 2, 3), n, dtype=np.uint8) for n in (0, 100, 200)]
-    monkeypatch.setattr(media, "read_image", lambda path: frames[2 if millisecond_seek else 1])
-    monkeypatch.setattr(media, "video_pts", lambda *args: [0.0, 2 / fps, 3 / fps])
+@pytest.mark.parametrize("fps,frame,t", [(29.97, 2, 2 / 29.97), (24000 / 1001, 83, 3.462), (30.0, 5, 5 / 30 + 0.01)])
+def test_still_comparison_uses_the_frame_the_engine_draws(monkeypatch, fps, frame, t):
+    """frames.py and render.stills draw the frame nearest t (render.frame_at), also when t is printed to
+    the millisecond and lands after that frame's start (frame 83 at 23.976 fps is asked for at 3.462 s)."""
+    pts = [i / fps for i in range(frame + 3)]
+    frames = [np.full((2, 2, 3), (7 * i) % 256, dtype=np.uint8) for i in range(len(pts))]
+    assert render.frame_at(t, fps, len(pts)) == frame
+    monkeypatch.setattr(media, "read_image", lambda path: frames[frame])
+    monkeypatch.setattr(media, "video_pts", lambda *args: pts)
     monkeypatch.setattr(media, "iter_frames", lambda *args: iter(frames))
     monkeypatch.setattr(media, "video_size", lambda *args: (2, 2))
-    # 2/fps is 0.066733...; frames.py seeks to 0.067, after that frame's start.
-    result = checks.check_still("ffmpeg", "ffprobe", Path("ref.mp4"), Path("still.png"), 2 / fps,
-                                [], {"otherPsnrMinDb": 30.0}, (2, 2), millisecond_seek=millisecond_seek)
+    result = checks.check_still("ffmpeg", "ffprobe", Path("ref.mp4"), Path("still.png"), t,
+                                [], {"otherPsnrMinDb": 30.0}, (2, 2))
     assert result["status"] == "unset"
     assert result["metrics"]["otherPsnr"]["value"] == "inf"
 

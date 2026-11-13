@@ -1,6 +1,7 @@
 """Required moments outputs, using reference manifests without rendering media."""
 import copy
 import json
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -61,3 +62,43 @@ def test_missing_moments_videos_fail_only_when_required(monkeypatch, tmp_path, c
         assert note[name]["status"] == status
         if status == "fail":
             assert f"no {name}" in note[name]["failures"][0]
+
+
+def test_a_note_is_timed_until_its_version_is_saved_and_a_sound_only_draft_is_checked(monkeypatch, tmp_path):
+    """The app runs `save-version` after `moments`. A note that changes only the sound draws nothing in
+    `moments`; its draft (with the new sound) is the one save-version renders, so it is timed and kept."""
+    from harness.engines import Call
+    folder = tmp_path / "take"
+    (folder / "project").mkdir(parents=True)
+    (folder / "states").mkdir()
+    (folder / "states" / "00.json").write_text("{}", encoding="utf-8")
+    (folder / "session.json").write_text(json.dumps({"steps": [{"note": "quieter music", "state": "states/00.json"}]}),
+                                         encoding="utf-8")
+    saved = tmp_path / "v1-draft.mp4"
+    saved.write_bytes(b"the saved draft")
+    ref = tmp_path / "ref"
+    ref.mkdir()
+    (ref / "done.json").write_text(json.dumps({"result": {"duration": 6.0}}), encoding="utf-8")
+    calls = []
+
+    class Cand:
+        def run(self, command, args):
+            calls.append(command)
+            if command == "save-version":
+                return Call(4.0, {"version": 1, "file": str(saved), "draft": True}, "")
+            return Call(9.0, {"file": str(saved), "duration": 6.0}, "")
+
+        def stream(self, command, args):
+            calls.append(command)
+            return Call(1.5, {"intervals": [], "stills": [], "window": None, "draft": None}, "", [])
+
+    monkeypatch.setattr(replay, "copy_project", lambda src, dst: dst.mkdir(parents=True, exist_ok=True))
+    monkeypatch.setattr(replay, "write_state", lambda proj, state: None)
+    complete = []
+    monkeypatch.setattr(replay, "_complete_video", lambda ffprobe, path, duration, fps: complete.append((Path(path), duration)))
+    run = replay.replay_moments(replay.Take("t", folder), Cand(), [{"dir": ref, "fps": 30.0}], tmp_path / "scratch", None, "ffprobe")
+    assert calls == ["moments", "moments", "save-version", "render"]
+    assert run["seconds"]["draft"] == [5.5]                  # moments, then the save that rendered the draft
+    assert run["seconds"]["first"] == [None] and run["seconds"]["window"] == [None]
+    assert run["files"][0]["draft"]["sha256"] == replay.sha256_file(saved)
+    assert (saved, 6.0) in complete

@@ -233,7 +233,7 @@ def render_markdown(r: dict) -> str:
              "Checks are against the reference final of the same state; unset = no threshold configured.", ""]
     if moments:
         lines += ["Moments flow: seconds from the start of each note's `moments` command until its first still and "
-                  "its window were read, and until it ended with the draft; - = nothing on screen changed.", "",
+                  "its window were read, and until the version was saved (`moments`, then `save-version`); - = nothing on screen changed.", "",
                   "| Take | Note | First still s | Window s | Draft s | Draft | Still | Window | Coverage |",
                   "|---|---|---|---|---|---|---|---|---|"]
     else:

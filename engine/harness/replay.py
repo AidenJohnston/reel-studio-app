@@ -6,9 +6,10 @@ render_draft runs), `frames --times` on that draft (look_at_frames), and `render
 around the changed moment; after the last note, `render` (the final export). Each command is timed
 from spawn to exit; the output is checked to be complete after the clock stops.
 
-The `moments` flow replays the same notes the way the app shows them with changed moments first: one
-`moments` command per note (stills of what changed, the window around them, the draft), timed from
-spawn to each still and window as its line is read, and to exit.
+The `moments` flow replays the same notes the way the app shows them with changed moments first: per
+note one `moments` command (stills of what changed, the window around them, the draft), timed from
+spawn to each still and window as its line is read, then `save-version` (the note is done when the
+version is saved; a note that changes only the sound has its draft rendered there).
 """
 from __future__ import annotations
 
@@ -25,7 +26,7 @@ from .engines import Engine, Refusal, sha256_file
 
 STEPS = ("draft", "still", "window")
 # moments flow: first still on screen, the window, and the whole command (which ends with the draft)
-MOMENT_STEPS = ("first", "window", "draft")
+MOMENT_STEPS = ("first", "window", "draft")   # draft: until the version is saved (`moments`, then `save-version`)
 
 
 def _link_or_copy(src: Path, dst: Path) -> None:
@@ -258,8 +259,9 @@ def replay(take: Take, cand: Engine, refs: list, scratch: Path, keep_dir, ffprob
 
 def replay_moments(take: Take, cand: Engine, refs: list, scratch: Path, keep_dir, ffprobe: str) -> dict:
     """One cold, timed replay of the take's session with changed moments first: the base is the take's
-    own project (`moments --mark`, untimed), then per note one `moments` run. A note that changes nothing
-    on screen draws nothing; its seconds are the command's own (`first` and `window` are None)."""
+    own project (`moments --mark`, untimed), then per note one `moments` run and the `save-version` the
+    app runs after it. A note that changes nothing on screen draws nothing in `moments` (`first` and
+    `window` are None); its draft is the one `save-version` renders, and is checked like any other."""
     proj = scratch / f"run-{take.id}"
     copy_project(take.project, proj)
     cand.run("moments", ["--project", proj, "--mark"])
@@ -281,10 +283,13 @@ def replay_moments(take: Take, cand: Engine, refs: list, scratch: Path, keep_dir
             kept["window"] = Path(w["file"])
         if r["draft"]:
             _complete_video(ffprobe, r["draft"]["file"], r["draft"]["duration"], ref["fps"])
-            kept["draft"] = Path(r["draft"]["file"])
+        saved = cand.run("save-version", ["--project", proj])
+        draft = Path(saved.result["file"])          # the version's draft: the moments one, or one made here
+        _complete_video(ffprobe, draft, _duration(ref), ref["fps"])
+        kept["draft"] = draft
         seconds["first"].append(stills[0] if stills else None)
         seconds["window"].append(windows[0] if windows else None)
-        seconds["draft"].append(round(call.seconds, 3))
+        seconds["draft"].append(round(call.seconds + saved.seconds, 3))
         # the engine prints a still's time to the millisecond; the check needs its exact frame
         plans.append({"intervals": r["intervals"], "stills": [round(f["t"] * ref["fps"]) / ref["fps"] for f in r["stills"]],
                       "window": [r["window"]["from"], r["window"]["to"]] if r["window"] else None})
@@ -385,8 +390,7 @@ def check_take(take: Take, refs: list, runs: list, ffmpeg: str, ffprobe: str, th
             elif name is None or any(name not in run["files"][k] for run in runs):
                 stills.append(_missing(f"no still for {t}s in every run"))
             else:
-                stills.append(_merge([checks.check_still(ffmpeg, ffprobe, export, f, t, caps, pv, still_want,
-                                                        millisecond_seek=not moments)
+                stills.append(_merge([checks.check_still(ffmpeg, ffprobe, export, f, t, caps, pv, still_want)
                                       for f in distinct(lambda r, name=name: r["files"][k][name])]))
         if not agree:
             stills.append(_missing("runs chose different moments for this note"))
@@ -474,8 +478,8 @@ def session_wait(run: dict) -> float:
 
 def session_wait_moments(run: dict) -> float:
     """The goal number with changed moments first. Per note: the time until the changed moment is on
-    screen (the first still's line) plus the time until the full draft is ready (the command's exit);
-    a note that changes nothing on screen costs only its command. Then the final export."""
+    screen (the first still's line) plus the time until its version is saved (`moments`, then
+    `save-version`). Then the final export."""
     sec = run["seconds"]
     return sum((f or 0.0) + d for f, d in zip(sec["first"], sec["draft"])) + run["final"]
 
