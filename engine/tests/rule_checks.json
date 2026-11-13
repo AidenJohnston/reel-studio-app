@@ -1,0 +1,30 @@
+{
+ "about": "Checkable My style rule forms. The engine (tests/test_lint.py) and the AI package (ai/test/rules.test.ts) must accept every `valid` form and refuse every `invalid` one, so a rule one side saves is one the other can check.",
+ "valid": [
+  {"kind": "captions.maxWords", "value": 2},
+  {"kind": "captions.maxSize", "value": 90},
+  {"kind": "captions.minSize", "value": 100.5},
+  {"kind": "music.underVoiceDb", "value": 22},
+  {"kind": "broll.keepOut", "zone": "eyes"},
+  {"kind": "broll.keepOut", "zone": "face"}
+ ],
+ "invalid": [
+  {"kind": "captions.color", "value": "#ffffff"},
+  {"kind": "captions.safeZone"},
+  {"kind": "captions.maxWords", "value": 2, "zone": "eyes"},
+  {"kind": "captions.maxWords", "value": 2, "v": 1},
+  {"kind": "captions.maxWords"},
+  {"kind": "captions.maxWords", "value": 2.5},
+  {"kind": "captions.maxWords", "value": true},
+  {"kind": "captions.maxWords", "value": 5},
+  {"kind": "captions.maxSize", "value": 70},
+  {"kind": "music.underVoiceDb", "value": "20"},
+  {"kind": "broll.keepOut", "zone": "hands"},
+  {"kind": "broll.keepOut"},
+  {"kind": "toString"},
+  {"kind": ["captions.maxWords"], "value": 2},
+  {"value": 2},
+  "captions.maxWords",
+  null
+ ]
+}

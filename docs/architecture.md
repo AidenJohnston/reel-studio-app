@@ -62,7 +62,16 @@ The root `package.json` is an npm workspace (`app`, `ai`).
 Projects live in `<Documents>/Reel Studio/Projects/<slug>/`. The shared **Library** lives in
 `<Documents>/Reel Studio/Library/` with subfolders `Raw takes/`, `B-roll/`, `Music/`, `Images/`, `Exports/`
 (plain folder names on purpose, so anyone can open them in Finder or Explorer). User style lives in
-`<Documents>/Reel Studio/My style.json`. A file there that can't be parsed is kept as `My style.damaged.json`
+`<Documents>/Reel Studio/My style.json`. Its rules are sentences the AI reads; a rule with `paused: true` stays
+listed in My style but the AI doesn't read it, and the app doesn't apply it. A rule may also carry a typed `payload`
+the app applies itself when a new video is made (only `{"kind":"caption-case","case":"lower"}` so far), plus `source`
+(project, title, version) and `consent` (the question the person said Yes to, and in `also` any later question about
+the same rule they said Yes to). A rule may instead carry a `check`
+the engine measures on every render, such as `{"kind":"captions.maxWords","value":2}` (`ai/src/rules.ts`,
+`engine/reelengine/lint.py`); its words are the app's, and a note can't finish while one fails. `forgotten` lists the questions of
+removed rules, so answering one again cannot bring a rule back. All of these are optional. An older version ignores `paused`, reads a
+typed rule as a plain sentence, cannot answer a typed question, and may drop `forgotten` if it
+rewrites the file. A file there that can't be parsed is kept as `My style.damaged.json`
 (`My style.damaged 2.json` and so on if that name is taken) and a new one starts, with the copy's name in
 `damaged`; My style says so while the copy is there.
 
@@ -205,7 +214,7 @@ small TypeScript project API and then ask the main process to re-render. The set
 startAt, level)`, `set_music_automation`, `add_broll(anchor, treatment, asset, params)`, `update_broll`,
 `remove_broll`, `set_mirror(on, source)` (flip a mirrored take; the editor calls it when text in the room reads
 backwards in the frames it looks at, or when a note says the video is mirrored), `search_images(query)` / `fetch_image(url)`, `capture_website(url)` (a screenshot of a public web page in a locked-down offscreen window, for an app or site the speaker names), `make_animation(template, params)`, `set_zoom`,
-`set_cover(atSourceTime, text)`, `write_post(caption, hashtags[5], keywords)`, `add_style_rule(rule)`,
+`set_cover(atSourceTime, text)`, `write_post(caption, hashtags[5], keywords)`, `add_style_rule(rule, check)`,
 `render_draft`, `look_at_frames(times)` (returns images for vision models), `finish(summary_for_user)`.
 
 Agent tasks:
@@ -215,6 +224,11 @@ Agent tasks:
    a cover and the post kit; render a draft, look at frames, fix obvious problems, render, summarize in one to
    three plain sentences.
 2. **Apply a note**: change only what the note asks; if the note is a lasting preference, `add_style_rule`.
+   Every render in a first edit or a note measures the checked My style rules (`render --rules`). The editor
+   sees a failing rule in `render_draft`, and `finish` refuses once while the newest render fails one and
+   nothing changed. A final render that fails a rule stops before its encode and the editor gets one short fix
+   run; then the video is made and the reply names any rule still failing. Rules already failing in the version
+   the note started from are named, not chased.
 3. **Idea to script**: a hook, a spoken script and on-screen text in the user's voice.
 
 Prompts are plain markdown in `ai/prompts/`.

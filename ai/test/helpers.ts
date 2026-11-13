@@ -84,6 +84,16 @@ export class FakeHost implements EngineHost {
   engineAssets = false;
   songInfo: any = { duration: 120, bpm: 92, energy: 'calm', tags: ['calm', 'warm'], suggestedStartAt: 7.5, arrivals: [{ at: 30, riseDb: 6 }], curve: [[0, -20]] };
   renderExtra: any = {};
+  /** every rules file a render was given (`--rules`) */
+  rulesFiles: any[] = [];
+  /** the place a checked rule fails on this project, or null: the stand-in for lint.py's checkers */
+  lintRule: (rule: { id: string; text: string; check: any }, p: any) => Record<string, unknown> | null = () => null;
+  /** lint.py `measure` for this project */
+  measured: (p: any) => Record<string, unknown> = (p) => ({
+    'captions.maxWords': p.captions.enabled ? p.captions.style.maxWords : null, 'captions.maxSize': p.captions.enabled ? p.captions.style.size : null,
+    'captions.minSize': p.captions.enabled ? p.captions.style.size : null, 'music.underVoiceDb': p.music?.track ? 19.3 : null,
+    'broll.keepOut.face': 0, 'broll.keepOut.eyes': 0,
+  });
   constructor(private readonly root: string, private readonly lines = SAMPLE_LINES) {}
   reelStudioRoot(): string { return this.root; }
   async renderAnimation(template: string, params: Record<string, unknown>, outPath: string): Promise<string> {
@@ -114,6 +124,18 @@ export class FakeHost implements EngineHost {
         // docs/versions.md: drafts overwrite versions/preview/ and never bump project.version
         const draft = args.includes('--draft');
         const v = (p.version ?? 0) + 1;
+        let lint: any;
+        if (args.includes('--rules')) {
+          const file = JSON.parse(await fsp.readFile(args[args.indexOf('--rules') + 1], 'utf8'));
+          this.rulesFiles.push({ ...file, draft });
+          const failures = file.rules.flatMap((r: any) => {
+            const place = this.lintRule(r, p);
+            return place ? [{ id: r.id, kind: r.check.kind, count: 1, places: [{ t0: 1, t1: 2, ...place }] }] : [];
+          });
+          lint = { ok: !failures.length, checked: file.rules.length, failures, measured: this.measured(p) };
+          // render.py: a final render stops before its encode on a rule it was asked to stop on
+          if (!draft && failures.some((f: any) => file.stopOn.includes(f.id))) return { version: v, preview: false, draft, encoded: false, lint };
+        }
         if (!draft) {
           p.version = v;
           await fsp.writeFile(pj, JSON.stringify(p, null, 2));
@@ -121,7 +143,7 @@ export class FakeHost implements EngineHost {
         const vd = path.join(dir, 'versions', draft ? 'preview' : `v${v}`);
         await fsp.mkdir(vd, { recursive: true });
         await fsp.writeFile(path.join(vd, draft ? 'draft.mp4' : 'export.mp4'), 'fake');
-        return { version: v, preview: draft, draft, duration: 12.3, verify: { ok: true }, ...this.renderExtra };
+        return { version: v, preview: draft, draft, encoded: true, duration: 12.3, verify: { ok: true }, ...(lint ? { lint } : {}), ...this.renderExtra };
       }
       case 'frames': {
         const times = args[args.indexOf('--times') + 1].split(',').map(Number);
