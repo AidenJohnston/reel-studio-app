@@ -61,13 +61,17 @@ test('editing timeline: trim a cut, move, resize, frame and delete a picture, mo
   // ---- the first cut's end, dragged back over its last word: that word is cut, and nothing else ----
   const before = project()
   const wordPx = (await parts.first().boundingBox())!.width / 16
-  await dragBy(page, parts.first().getByTestId('track-trim-end'), -wordPx * 1.2, {
-    at: 0.5,
-    before: async () => {
-      await expect(page.getByTestId('track-tip')).toHaveText(/^Cut “\w+”$/)
-      await shot(page, 'track-01-trimming')
-    }
-  })
+  // as a person does: back a little at a time until the tip names one word
+  const edge = (await parts.first().getByTestId('track-trim-end').boundingBox())!
+  const [ex, ey] = [edge.x + edge.width / 2, edge.y + edge.height / 2]
+  await page.mouse.move(ex, ey)
+  await page.mouse.down()
+  const tip = page.getByTestId('track-tip')
+  const tipText = async () => ((await tip.count()) ? ((await tip.textContent()) ?? '') : '')
+  for (let dx = 4; dx < wordPx * 3 && !/^Cut “/.test(await tipText()); dx += 2) await page.mouse.move(ex - dx, ey)
+  await expect(tip).toHaveText('Cut “starts”')
+  await shot(page, 'track-01-trimming')
+  await page.mouse.up()
   await made()
   const trimmed = project()
   expect(trimmed.cut.keep[0]).toEqual({ ...before.cut.keep[0], to: 'f14' })
