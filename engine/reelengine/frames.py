@@ -9,9 +9,10 @@ from .proto import EngineError, progress
 
 
 def run(project_dir: Path, times: list, file: Optional[Path] = None, width: int = 540) -> dict:
+    from . import project as projmod
     from .render import latest_render
     project_dir = Path(project_dir)
-    src = Path(file) if file else latest_render(project_dir)
+    src = Path(file) if file else latest_render(project_dir, projmod.load(project_dir, check=False))
     if src is None or not src.exists():
         raise EngineError("NO_RENDER", "no rendered video to take frames from",
                           "There's no video to look at yet. Make a preview first.")
@@ -19,7 +20,7 @@ def run(project_dir: Path, times: list, file: Optional[Path] = None, width: int 
         raise EngineError("BAD_ARGS", "no times given", "Reel Studio didn't say which moments to show.")
     from .probe import probe
     dur = probe(src, quick=True)["duration"]
-    out_dir = src.parent / "frames"
+    out_dir = project_dir / "work" / "frames"      # never inside a saved version
     out_dir.mkdir(parents=True, exist_ok=True)
     out = []
     for n, t in enumerate(times):

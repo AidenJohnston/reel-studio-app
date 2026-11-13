@@ -97,7 +97,7 @@ export interface ProjectDetail extends ProjectSummary {
   versions: VersionInfo[]
   words: Word[]
   keptIds: string[]
-  /** The caption lines of the last full render, word by word (engine work/captions.json). */
+  /** The caption lines of the saved version (or the preview before one), word by word: its captions.json. */
   captionLines: CaptionToken[][]
   checklist: ChecklistItem[]
   chat: ChatMessage[]

@@ -1,10 +1,17 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { createEngineRunner, LineSplitter, parseEngineLine, type EngineError } from '../src/main/engine'
-import { isAlive } from '../src/main/proctree'
+import { isAlive, killTree } from '../src/main/proctree'
 import { APP_DIR, FAKE_ENGINE, makeClip, PYTHON, setupPaths } from './helpers'
 import { engineEnv, initPaths } from '../src/main/paths'
+
+// Off: the real killTree. On: a kill that fails, as for an engine blocked in the kernel, which survives SIGKILL.
+const refuseKill = vi.hoisted(() => ({ on: false }))
+vi.mock(import('../src/main/proctree'), async (real) => {
+  const m = await real()
+  return { ...m, killTree: (pid: number) => (refuseKill.on ? Promise.resolve(false) : m.killTree(pid)) }
+})
 
 it('applies engine cache precedence', () => {
   const userDataDir = join(APP_DIR, 'isolated user data')
@@ -60,11 +67,12 @@ describe('parseEngineLine', () => {
   })
 })
 
-function runner(engineDir = FAKE_ENGINE, extra: NodeJS.ProcessEnv = {}, onSpawn?: (pid: number) => void) {
+function runner(engineDir = FAKE_ENGINE, extra: NodeJS.ProcessEnv = {}, onSpawn?: (pid: number) => void, onExit?: (pid: number) => void) {
   return createEngineRunner({
     python: () => PYTHON,
     env: () => ({ ...engineEnv(), PYTHONPATH: engineDir, ...extra }),
-    onSpawn
+    onSpawn,
+    onExit
   })
 }
 
@@ -169,25 +177,51 @@ describe('engine runner (against the stand-in engine)', () => {
     })
   })
 
-  it('cancel kills the engine and everything it started', async () => {
+  it('cancel settles only after the engine and everything it started have exited', async () => {
     setupPaths()
     let pid = 0
     let grandchild = 0
-    const run = runner(join(APP_DIR, 'test', 'fixtures', 'sleeper'), {}, (p) => (pid = p))
+    let exited = false
+    const run = runner(join(APP_DIR, 'test', 'fixtures', 'sleeper'), {}, (p) => (pid = p), () => (exited = true))
     const ac = new AbortController()
-    const t0 = Date.now()
     const p = run('sleep', [], (pr) => {
       grandchild = Number(pr.message)
       ac.abort()
     }, ac.signal)
     await expect(p).rejects.toMatchObject({ code: 'CANCELLED' })
-    expect(Date.now() - t0).toBeLessThan(15000)
+    expect(exited).toBe(true)
     expect(pid).toBeGreaterThan(0)
     expect(grandchild).toBeGreaterThan(0)
-    // taskkill /T /F (or the process group kill) takes a moment.
-    for (let i = 0; i < 40 && (isAlive(pid) || isAlive(grandchild)); i++) await new Promise((r) => setTimeout(r, 100))
     expect(isAlive(pid)).toBe(false)
     expect(isAlive(grandchild)).toBe(false)
+  }, 30000)
+
+  // Windows has no process groups: a child orphaned by a crashed engine cannot be found there
+  it.skipIf(process.platform === 'win32')('an engine that dies early settles only after what it started has been stopped', async () => {
+    setupPaths()
+    let grandchild = 0
+    const run = runner(join(APP_DIR, 'test', 'fixtures', 'sleeper'))
+    await expect(run('crash', [], (pr) => (grandchild = Number(pr.message)))).rejects.toMatchObject({ code: 'ENGINE_CRASHED' })
+    expect(grandchild).toBeGreaterThan(0)
+    expect(isAlive(grandchild)).toBe(false)
+  }, 30000)
+
+  it('Stop of an engine that would not die reports it at once and leaves it registered', async () => {
+    setupPaths()
+    let pid = 0
+    let exited = false
+    const run = runner(join(APP_DIR, 'test', 'fixtures', 'sleeper'), {}, (p) => (pid = p), () => (exited = true))
+    const ac = new AbortController()
+    refuseKill.on = true
+    try {
+      // the engine never closes, so a Stop that waits for it never ends
+      await expect(run('sleep', [], () => ac.abort(), ac.signal)).rejects.toMatchObject({ code: 'ENGINE_STUCK' })
+      expect(exited).toBe(false)
+      expect(isAlive(pid)).toBe(true)
+    } finally {
+      refuseKill.on = false
+      if (pid) await killTree(pid)
+    }
   }, 30000)
 
   it('an already-aborted signal never starts the engine', async () => {

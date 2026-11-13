@@ -7,7 +7,8 @@ never a pile of preview-only folders an AI run left behind.
 
 ```
 <project>/versions/
-  v1/            a VERSION: export.mp4 + cover.png + verify.json + render.json + project.json (+ notes.md)
+  v1/            a VERSION: export.mp4 + cover.png + verify.json + render.json + project.json (+ notes.md),
+                 and the reports that describe this video: captions.json, layers.json, mix.json
   v2/
   preview/       the ONE scratch folder for previews, overwritten every time:
                  draft.mp4, window_<a>-<b>.mp4 (only the latest window), cover.png, verify.json,
@@ -21,11 +22,15 @@ Rules:
    replacing what was there (a new window deletes the previous `window_*.mp4`). It never creates a
    `vN` folder and never changes `project.json`'s `version`.
 3. `project.json` `version` = the last FINAL version number.
-4. A final render re-uses `vN` when the edit is unchanged since `vN` was rendered (re-rendering the
-   same edit overwrites it); otherwise it makes `v(N+1)`.
-5. `cover` (cover only) writes into `vN` when that edit already has its `export.mp4`, else into
-   `preview/`.
-6. `frames` reads the newest full render, preview or final (never a window slice).
+4. **A saved version is never rewritten.** A final render of an edit unchanged since `vN` was rendered
+   (the same edit, and the same files it reads, the transcript included) returns `vN` as it is
+   (`reused: true`, nothing encoded); otherwise it makes `v(N+1)`, also when `vN` has lost its
+   `export.mp4` or `render.json`. A `vN` folder above `project.json`'s `version` is an attempt that was
+   never saved: the app does not list it (`listVersions`), and the next final render of that number
+   deletes it first.
+5. `cover` (cover only) writes into `preview/`.
+6. `frames` reads the file given with `--file`, else the video the project shows: `v{version}`, or the
+   preview while there is no version. Its stills go to `work/frames/`.
 
 ## Render result (engine `done.result`)
 
@@ -39,9 +44,12 @@ Rules:
 
 ## What the app shows
 
-- **Version chips** = folders matching `^v\d+$` that contain `export.mp4`, sorted by number.
-  Folders without `export.mp4` (from older builds, or an AI run whose final render failed) are
-  not shown.
+- **Version chips** = folders `vN` with N up to `project.json`'s `version` that contain
+  `export.mp4`, sorted by number. Folders without `export.mp4` (from older builds, or an AI run
+  whose final render failed) and folders above `version` are not shown.
+- **The Subtitles list** shows the lines in `captions.json` of `v{version}`, or of `versions/preview/`
+  while there is no version; a version made before reports moved beside their render has them in
+  `work/captions.json`.
 - **While an AI run is working**, the player may show `versions/preview/draft.mp4` (the `render`
   event with `draft: true`).
 - **`AgentResult.version`** is the version to select after a run. In the rare case its folder has
@@ -55,3 +63,41 @@ Rules:
   edit, 2 per note).
 - After the agent calls `finish`, the loop runs one final `render`: that is the only step that adds a
   version.
+
+## One writer per project
+
+The running app is the only writer of its projects. Electron's single-instance lock is held by the OS
+until the app process dies, and inside the app the job lane runs one job or manual edit per project.
+Everything a job runs, the AI edit and each engine command, gets the job's token (`--owner`) and never
+decides ownership itself. `<project>/work/.owner.lock` only tells tools run by hand that the app has
+the project open: the engine CLI and the AI dev CLI refuse while it exists ("Reel Studio may be using
+this project. Close it, or delete <path> if it isn't running.") and never take a project over. The
+app removes leftover lock files when it starts (`app/src/main/owner.ts`).
+
+Every AI edit, the app's and the dev CLI's alike, also holds `<project>/work/.ai-edit.lock` for its
+whole run, so two edits in different processes never run on one project at once (`ai/src/index.ts`
+`withEditLock`). A lock whose process has died, or that is 3 hours old, is taken over.
+
+## Engine processes
+
+An engine call settles only after the engine and everything it started have exited. On macOS and
+Linux the engine runs as its own process group and the host stops what is left of the group after
+any exit; if something survives SIGKILL the call fails with `ENGINE_STUCK` and the app keeps that
+project closed until it restarts. On Windows the engine puts itself in a Job Object that ends its
+children when it exits (`engine/reelengine/contain.py`). If Windows refuses the Job Object, the engine
+logs it and runs anyway; Stop still ends its whole tree, but an engine crash can then leave its ffmpeg
+running.
+
+A closed project refuses everything that would write to it: jobs, manual edits, attachments, notes
+and deleting the video. Each refusal asks the creator to restart Reel Studio first
+(`app/src/main/jobs.ts`).
+
+The app records each engine's pid, project and start time in `engines.json` (in its settings folder)
+until the engine's whole group is gone, and at startup stops engines a crashed run left behind: only a
+live process that runs the engine and started when the recorded one did. Anything else that may be
+left (a start time that doesn't match, a group whose engine died but whose ffmpeg runs on) is not
+signalled; it stays listed and keeps its project closed, and the next start after it ends opens it. A project whose
+engine would not stop stays closed. When `engines.json` cannot be read, the app instead looks at the
+running processes: a project stays closed only while an engine or ffmpeg names its folder in its
+arguments, and every other project opens. It keeps looking at each start until it finds none
+(`app/src/main/orphans.ts`).

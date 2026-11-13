@@ -121,8 +121,20 @@ export const PARALLEL_SAFE = new Set(['get_project', 'get_transcript', 'list_lib
 async function mapLimit<T, R>(items: T[], limit: number, fn: (x: T, i: number) => Promise<R>): Promise<R[]> {
   const out: R[] = new Array(items.length);
   let next = 0;
-  const worker = async () => { while (next < items.length) { const i = next++; out[i] = await fn(items[i], i); } };
-  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+  // once a call has failed no new one starts: the batch is lost anyway
+  let failed = false;
+  const worker = async () => {
+    while (!failed && next < items.length) {
+      const i = next++;
+      try { out[i] = await fn(items[i], i); } catch (e) { failed = true; throw e; }
+    }
+  };
+  // every started call ends before this returns or throws: a Stop must not leave a download writing
+  const ran = await Promise.allSettled(Array.from({ length: Math.min(limit, items.length) }, worker));
+  const errors = ran.flatMap((r) => (r.status === 'rejected' ? [r.reason] : []));
+  // a call whose engine would not stop outranks a Stop or a failure beside it: the editor must not roll
+  // back files that engine may still be writing (editor.ts engineStuck)
+  if (errors.length) throw errors.find((e) => e?.code === 'ENGINE_STUCK') ?? errors[0];
   return out;
 }
 
@@ -148,7 +160,17 @@ async function runCalls(o: RunAgentOptions, calls: ToolCall[]): Promise<ToolResu
 }
 
 export async function runAgent(o: RunAgentOptions): Promise<RunAgentResult> {
-  try { return await agentLoop(o); } finally { o.provider.dispose?.(); }
+  let result: RunAgentResult;
+  try {
+    result = await agentLoop(o);
+  } catch (e) {
+    // the run's own error decides what the editor does next (an engine that would not stop keeps the
+    // project as it is): a model process that would not stop either is only reported beside it
+    await (async () => o.provider.dispose?.())().catch((d) => o.onEvent({ type: 'status', message: d?.userMessage ?? String(d) }));
+    throw e;
+  }
+  await o.provider.dispose?.();
+  return result;
 }
 
 async function agentLoop(o: RunAgentOptions): Promise<RunAgentResult> {
