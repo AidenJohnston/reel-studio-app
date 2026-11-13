@@ -41,6 +41,7 @@ import type { AgentResult } from './ai-types'
 import { loadAI } from './ai'
 import type { AI, EngineHost } from './ai-types'
 import { closeAnimationRenderer, renderAnimation, TEST_TEMPLATE } from './animation'
+import { withAnimationRetiming } from './anim-retime'
 import { captureWebsite } from './capture'
 import { createModelManager } from './models'
 import { loadSettings, saveSettings } from './settings'
@@ -112,14 +113,19 @@ function showOpenDialog(options: Electron.OpenDialogOptions): Promise<Electron.O
 
 // ---- engine, AI, jobs ----------------------------------------------------------------------------
 let pidRegistry: ReturnType<typeof createPidRegistry> | null = null
-const runEngine: RunEngine = createEngineRunner({
-  python: pythonExe,
-  env: engineEnv,
-  cwd: engineDir,
-  log,
-  onSpawn: (pid) => pidRegistry?.add(pid),
-  onExit: (pid) => pidRegistry?.remove(pid)
-})
+// every render first re-times the animations the cut moved (anim-retime.ts)
+const runEngine: RunEngine = withAnimationRetiming(
+  createEngineRunner({
+    python: pythonExe,
+    env: engineEnv,
+    cwd: engineDir,
+    log,
+    onSpawn: (pid) => pidRegistry?.add(pid),
+    onExit: (pid) => pidRegistry?.remove(pid)
+  }),
+  renderAnimation,
+  log
+)
 
 const host: EngineHost = {
   runEngine,

@@ -118,6 +118,25 @@ describe('tool implementations', () => {
     expect(p.broll[0]).toMatchObject({ treatment: 'side-card', params: { tilt: 0 } });
   });
 
+  it('b-roll: the everyday cards (words alone, several pictures, boxes, a card that joins)', async () => {
+    const { ctx, root, dir } = await ctxFor();
+    for (const f of ['a.png', 'b.png']) await fsp.writeFile(path.join(root, 'Library', 'Images', f), tinyPng());
+    const add = (treatment: string, params: Record<string, unknown>, asset: string | null = null) =>
+      executeTool(ctx, 'add_broll', { anchor: { from: 'w29', to: 'w30' }, treatment, asset, search: null, animation: null, params });
+    expect((await add('title-card', { text: 'I quit my job', hook: true })).isError).toBe(false);
+    expect((await add('panel-card', {})).isError).toBe(false);                       // words alone
+    const row = await add('logo-row', { items: ['a.png', 'b.png'] });
+    expect(row.isError, row.content).toBe(false);
+    expect((await add('logo-row', { items: ['missing.png'] })).content).toMatch(/not found: missing.png/);
+    expect((await add('phone-row', {})).isError).toBe(true);                         // needs its pictures
+    expect((await add('circle-callout', { circle: [0.1, 0.2, 0.3, 0.1], blurBoxes: [[0, 0, 0.5, 0.1]], join: true }, 'a.png')).isError).toBe(false);
+    expect((await add('receipt', { circle: [0.1, 0.2, 1.3, 0.1] }, 'a.png')).isError).toBe(true);   // a box is fractions
+    const p = await loadProject(dir);
+    expect(p.broll.map((b) => b.treatment)).toEqual(['title-card', 'panel-card', 'logo-row', 'circle-callout']);
+    expect(p.broll[2].params.items).toEqual(['Library/Images/a.png', 'Library/Images/b.png']);      // project paths
+    expect(p.broll[3].params).toEqual({ circle: [0.1, 0.2, 0.3, 0.1], blurBoxes: [[0, 0, 0.5, 0.1]], join: true });
+  });
+
   it('add_broll with a picture and no params places it', async () => {
     const { ctx, root, dir } = await ctxFor();
     await fsp.writeFile(path.join(root, 'Library', 'Images', 'flour.png'), tinyPng());
@@ -214,7 +233,9 @@ describe('tool implementations', () => {
     const f = await executeTool(ctx, 'look_at_frames', { times: [1.0], words: ['w29'] });
     expect(f.images).toHaveLength(2);
     expect(f.images![0].mime).toBe('image/png');
-    expect((await executeTool(ctx, 'set_zoom', { zooms: [{ anchor: { from: 'w53', to: 'w56' }, scale: 1.12 }] })).isError).toBe(false);
+    const zooms = [{ anchor: { from: 'w33', to: 'w36' }, scale: 1.1, style: null }, { anchor: { from: 'w53', to: 'w56' }, scale: 1.12, style: 'snap' }];
+    expect((await executeTool(ctx, 'set_zoom', { zooms })).isError).toBe(false);
+    expect(ctx.project!.zooms).toEqual([{ anchor: { from: 'w33', to: 'w36' }, scale: 1.1 }, { anchor: { from: 'w53', to: 'w56' }, scale: 1.12, style: 'snap' }]);
     expect((await executeTool(ctx, 'set_cover', { atSourceTime: 6.2, source: null, text: 'Bread' })).isError).toBe(false);
     expect((await executeTool(ctx, 'set_cover', { atSourceTime: 6.2, source: 's9', text: null })).isError).toBe(true);
     expect((await executeTool(ctx, 'set_caption_style', { enabled: null, preset: null, size: 70, maxWords: 2, case: null, color: null, position: 0.72 })).isError).toBe(false);

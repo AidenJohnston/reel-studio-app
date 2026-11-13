@@ -5,6 +5,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync, existsSync } from 'no
 import os from 'node:os';
 import path from 'node:path';
 import { after, before, describe, it } from 'node:test';
+import { fileURLToPath } from 'node:url';
 import { listTemplates, loadMeta, prepareParams, inlineFiles, startTemplateServer, renderAnimation, createPlaywrightAdapter, findFfmpeg } from '../render.mjs';
 
 function rgba(png) {
@@ -34,6 +35,16 @@ describe('templates', () => {
       for (const k of ['layout', 'theme', 'accentColor', 'tilt', 'duration', 'drift', 'region']) assert.ok(x.params.properties[k], `${x.id} has ${k}`);
       assert.ok(!/[\u2013\u2014]/.test(JSON.stringify(loadMeta(x.id))), `${x.id} meta has no em/en dash`);
     }
+  });
+
+  it('every frame is a pure function of frame time: no clock, timer, unseeded randomness or CSS animation', () => {
+    // the engine re-renders an animation whenever a re-cut moves its beats, so the same params must
+    // give the same frames on any machine, in any order (one paused timeline, driven by __seek(t))
+    const banned = /Math\.random|Date\.now|new Date\b|performance\.now|requestAnimationFrame|setTimeout|setInterval|@keyframes|\.animate\(/;
+    const root = fileURLToPath(new URL('..', import.meta.url));
+    const read = (f) => readFileSync(path.join(root, f), 'utf8').replace(/^\s*(\/\*|\*|\/\/).*$/gm, '');   // not in comments
+    const sources = ['_lib/runtime.js', ...listTemplates().map(({ id }) => `${id}/index.html`)].map((f) => [f, read(f)]);
+    for (const [name, src] of sources) assert.ok(!banned.test(src), `${name} uses ${src.match(banned)?.[0]}`);
   });
 
   it('examples and variants validate', () => {

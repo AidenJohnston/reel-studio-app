@@ -4,7 +4,7 @@ import * as fs from 'node:fs';
 import * as fsp from 'node:fs/promises';
 import * as path from 'node:path';
 import {
-  Analysis, Broll, LIBRARY_FOLDERS, LibraryKind, MusicLevel, Project, Transcript, TREATMENTS, Word, WordAnchor,
+  Analysis, Broll, ITEM_TREATMENTS, LIBRARY_FOLDERS, LibraryKind, MusicLevel, Project, TEXT_TREATMENTS, Transcript, TREATMENTS, Word, WordAnchor,
   anchorText, anchorWords, approxDuration, approxOutputTimes, keptWords, loadAnalysis, loadProject, loadTranscript,
   nextBrollId, normalizeKeep, saveProject, validateProject, wordIndex, anchorProblem,
 } from './project';
@@ -591,11 +591,13 @@ const ANIM_PARAMS = animationParamsSchema();
 interface AnimContext { t0: number; region?: { x: number; y: number; w: number; h: number }; layout?: 'top' | 'full'; words: TimedWord[]; exact: boolean }
 
 /** Where the clip will start, the free space above the face and each anchor word's time from the
- *  clip start: from the engine (exact, `anim-context`), else approximated from the cut here. */
-async function animContext(ctx: ToolContext, anchor: WordAnchor, duration: number): Promise<AnimContext | null> {
+ *  clip start: from the engine (exact, `anim-context`), else approximated from the cut here. The
+ *  engine re-times the animation with the same question when the cut moves (engine anim_timing), so
+ *  `duration` is passed only when the editor set one. */
+async function animContext(ctx: ToolContext, anchor: WordAnchor, duration: unknown): Promise<AnimContext | null> {
   try {
     const r = await ctx.host.runEngine('anim-context', ['--project', ctx.projectDir, '--from', anchor.from, '--to', anchor.to,
-      '--duration', String(duration)], undefined, ctx.signal);
+      ...(typeof duration === 'number' ? ['--duration', String(duration)] : [])], undefined, ctx.signal);
     if (r && Array.isArray(r.words)) return { t0: r.t0, region: r.region, layout: r.layout, words: r.words, exact: true };
   } catch {
     // an older engine without anim-context: approximate timings, no region
@@ -632,7 +634,7 @@ async function makeAnimation(ctx: ToolContext, template: string, raw: Record<str
   if (opts.topOnly) params.layout = 'top';
   let timing = 'template default timing';
   if (anchor) {
-    const ac = await animContext(ctx, anchor, Number(params.duration ?? spec.defaultDuration ?? 3.5));
+    const ac = await animContext(ctx, anchor, params.duration);
     if (ac) {
       if (params.layout === undefined && ac.layout === 'full' && !opts.topOnly) params.layout = 'full';   // no readable room above the face
       if (ac.region && params.layout !== 'full') params.region = ac.region;
@@ -708,14 +710,39 @@ async function animationOf(ctx: ToolContext, asset: string | null | undefined): 
 
 // ---------------------------------------------------------------- tool definitions
 
+const BOX = S.arr(S.num(undefined, { minimum: 0, maximum: 1 }), undefined, { minItems: 4, maxItems: 4 });
+
 const PARAMS = S.obj({
   side: S.opt(S.enum(['left', 'right', 'auto'], 'side-card / phone-card: which side of the face (auto = the roomier side)')),
   tilt: S.opt(S.num('degrees, e.g. -2.5 (cards and text-pop); 0 for the square hook title')),
   scale: S.opt(S.num('1.0 = default size')),
-  text: S.opt(S.str('words shown by text-pop: the 3-7 word hook title, or the 1-4 key words of the line; from what is said')),
+  text: S.opt(S.str('words shown by text-pop, title-card or a text panel-card: the 3-7 word hook title, or the 1-4 key words of the line; from what is said. receipt: its source. logo-row: a lone logo\'s name')),
   iconic: S.opt(S.bool('true when the picture is a logo or icon (it reads at a smaller size); null = guess')),
   style: S.opt(S.enum(['pop', 'label'], 'text-pop look: label = dark words on a white box, as written (the hook title, a step label "2: Editing"); pop = big outlined capitals (one key word or number). Default pop')),
+  items: S.opt(S.arr(S.str(), 'logo-row, phone-row, post-wall, icon-wall: picture (or phone clip) paths, in the order said')),
+  hook: S.opt(S.bool('title-card: true = the opening hook, square (null = square only in the first second)')),
+  join: S.opt(S.bool('true = stack on the card just before instead of replacing it; they leave together')),
+  circle: S.opt({ ...BOX, description: 'circle-callout: the spot to circle' }),
+  circleAt: S.opt(S.str('circle-callout: word id the loop is drawn on (null = the second word)')),
+  cropBox: S.opt({ ...BOX, description: 'any picture: show only this part' }),
+  blurBoxes: S.opt(S.arr(BOX, 'any picture: parts to blur (names, faces, numbers)')),
 });
+
+// the cards ai/prompts/system.md doesn't describe yet; boxes on a picture are [x, y, w, h] fractions of it
+const TREATMENT_HELP = 'Boxes are [x, y, w, h] fractions of the picture. title-card: the hook or a title, words filling a white label. '
+  + 'panel-card: a screenshot framed on a white panel, or sentences on one. logo-row: real logos in a row. phone-row: 2-4 phones side by side (may cover the face). '
+  + 'circle-callout: a screenshot, then a red loop around params.circle. wide-clip: borrowed footage in its own framing over a blur of itself. '
+  + 'receipt: a screenshot as proof, labelled with its source (params.text).';
+
+/** params.items as project refs (each must exist), or the problem. */
+function resolveItems(ctx: ToolContext, params: Record<string, any> | null | undefined): string[] | undefined {
+  if (!Array.isArray(params?.items)) return undefined;
+  return params!.items.map((it: string) => {
+    const r = resolveAsset(ctx, it);
+    if (!r) throw new ToolInputError(`params.items: not found: ${it} (use paths from list_library or fetch_image)`);
+    return r.ref;
+  });
+}
 
 const tools: ToolDef[] = [
   {
@@ -889,10 +916,10 @@ const tools: ToolDef[] = [
   },
   {
     name: 'add_broll',
-    description: 'Put a visual on screen over a word range. Give exactly one of asset (a file path from list_library / fetch_image / make_animation), search (an image search, best result is fetched for you), or animation. text-pop needs only params.text.',
+    description: 'Put a visual on screen over a word range. Give exactly one of asset (a file path from list_library / fetch_image / make_animation), search (an image search, best result is fetched for you), or animation. text-pop needs only params.text; title-card and a text panel-card need only words; logo-row and phone-row take params.items. A card that comes sooner than 2 s after the one on screen waits, unless params.join stacks it on that one.',
     parameters: S.obj({
       anchor: ANCHOR,
-      treatment: S.enum(TREATMENTS),
+      treatment: S.enum(TREATMENTS, TREATMENT_HELP),
       asset: S.opt(S.str('Library/... or work/assets/... path')),
       search: S.opt(S.str('image search query, used only when asset is null. The first usable result is placed unseen, so use this only for plain photographable things (a place, an object, a food); for names, brands and shows call search_images and read the titles first')),
       animation: S.opt(S.obj({
@@ -921,14 +948,15 @@ const tools: ToolDef[] = [
           try { asset = r.path ? r.path : await fetchImage(ctx, r.url, args.search); break; } catch (e: any) { lastErr = e.message; }
         }
         if (!asset) throw new ToolInputError(`no usable image found for "${args.search}"${lastErr ? ` (${lastErr})` : ''}; try another search, text-pop, or make_animation`);
-      } else if (args.treatment !== 'text-pop') {
-        throw new ToolInputError('give asset, search, or animation (only text-pop works with text alone)');
+      } else if (!TEXT_TREATMENTS.includes(args.treatment) && !(ITEM_TREATMENTS.includes(args.treatment) && args.params?.items?.length)) {
+        throw new ToolInputError(`give asset, search, or animation (only ${TEXT_TREATMENTS.join(', ')} work with words alone; ${ITEM_TREATMENTS.join(', ')} take params.items)`);
       }
       if (args.treatment === 'text-pop' && !asset && !args.params?.text) throw new ToolInputError('text-pop needs params.text');
+      const items = resolveItems(ctx, args.params);
       let id = '';
       await mutate(ctx, 'broll', (p) => {
         id = nextBrollId(p);
-        const b: Broll = { id, anchor: { from: args.anchor.from, to: args.anchor.to }, leadIn: 0.13, treatment: args.treatment, asset, params: stripNulls(args.params ?? {}) };
+        const b: Broll = { id, anchor: { from: args.anchor.from, to: args.anchor.to }, leadIn: 0.13, treatment: args.treatment, asset, params: stripNulls({ ...(args.params ?? {}), ...(items ? { items } : {}) }) };
         p.broll.push(b);
       });
       const says = quote(t, args.anchor);
@@ -982,6 +1010,7 @@ const tools: ToolDef[] = [
           : `Re-timed the animation on "${says}"`;
         return { content: { ok: true, asset: made.asset, layout: made.layout, readable: made.readable, placement: ANIMATION_PLACEMENT }, summary };
       }
+      const items = resolveItems(ctx, args.params);
       let says = '';
       await mutate(ctx, 'broll', (p) => {
         const b = p.broll.find((x) => x.id === args.id);
@@ -989,7 +1018,7 @@ const tools: ToolDef[] = [
         if (args.anchor) b.anchor = { from: args.anchor.from, to: args.anchor.to };
         if (args.treatment) b.treatment = args.treatment;
         if (asset) b.asset = asset;
-        if (args.params) b.params = { ...b.params, ...stripNulls(args.params) };
+        if (args.params) b.params = { ...b.params, ...stripNulls({ ...args.params, ...(items ? { items } : {}) }) };
         says = quote(t, b.anchor);
       });
       return { content: { ok: true }, summary: `Adjusted the visual on "${says}"` };
@@ -1075,12 +1104,12 @@ const tools: ToolDef[] = [
   },
   {
     name: 'set_zoom',
-    description: 'Replace all zoom-ins. Each zoom spans one whole line, from its first word to its last; scale ~1.08-1.15. Use on punchlines and key lines, and on face-only stretches with no b-roll (about 3-6 per minute, never two back to back). Empty list = no zooms.',
-    parameters: S.obj({ zooms: S.arr(S.obj({ anchor: ANCHOR, scale: S.num('1.0-1.5', { minimum: 1, maximum: 1.6 }) })) }),
+    description: 'Replace all zoom-ins. Each zoom spans one whole line, from its first word to its last; scale ~1.08-1.15. Use on punchlines and key lines, and on face-only stretches with no b-roll (about 3-6 per minute, never two back to back). Save style "snap" (a quick eased push-in with motion blur) for the one or two biggest punchlines; the rest stay hard cuts. Empty list = no zooms.',
+    parameters: S.obj({ zooms: S.arr(S.obj({ anchor: ANCHOR, scale: S.num('1.0-1.5', { minimum: 1, maximum: 1.6 }), style: S.opt(S.enum(['snap'], 'null = hard cut in and out')) })) }),
     async run(ctx, args) {
       const { t } = await load(ctx);
       args.zooms.forEach((z: any, i: number) => checkAnchor(t, z.anchor, `zooms[${i}]`));
-      await mutate(ctx, 'zooms', (p) => { p.zooms = args.zooms.filter((z: any) => z.scale > 1.001).map((z: any) => ({ anchor: z.anchor, scale: z.scale })); });
+      await mutate(ctx, 'zooms', (p) => { p.zooms = args.zooms.filter((z: any) => z.scale > 1.001).map((z: any) => ({ anchor: z.anchor, scale: z.scale, ...(z.style ? { style: z.style } : {}) })); });
       return { content: { ok: true, count: ctx.project!.zooms.length }, summary: args.zooms.length ? 'Added a few zoom-ins on the big moments' : 'Took out the zooms' };
     },
   },
