@@ -328,7 +328,7 @@ function startFirstEdit(slug: string, initArgs: { title: string; files: string[]
         delete s.importing
       })
     }
-    proxies.start(slug, dir)
+    proxies.start(slug, dir, owner)
     const provider = await ai.active().catch(() => null)
     // A render event with firstLook = the quick no-AI draft is ready while the AI keeps editing; the
     // Working screen plays it (shared/live.ts) and says what it is. Once listening is done (the first
@@ -631,7 +631,7 @@ function registerIpc(): void {
       slug,
       'note',
       async (emit, signal, { id, owner }) => {
-        proxies.start(slug, dir) // a project from before preview copies existed gets them now
+        proxies.start(slug, dir, owner) // a project from before preview copies existed gets them now
         // the note is saved under the job's id; the app asks before anything goes into My style
         const opts = { attachments: files.map((f) => f.asset), id, saveStyleRules: false, ...(owner ? { owner } : {}) }
         const r: AgentResult = await ai.applyNote(dir, note, (e) => emit(e), signal, opts)

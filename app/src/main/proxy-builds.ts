@@ -22,6 +22,10 @@ const STOP_WAIT_MS = 15_000
  * is finished, previews read the original. One build per project at a time; a failure is logged and
  * otherwise ignored (the engine already falls back).
  *
+ * It is started from inside a job, which has already written work/.owner.lock (owner.ts), so the
+ * command carries that job's token (`--owner`) or the engine refuses it with PROJECT_OPEN (owner.py).
+ * The engine checks the token only as the command starts, so a build that outlives its job goes on.
+ *
  * Each build gets its own runner, so `stop` can wait for that engine process to exit: a cancelled
  * runEngine call rejects as soon as the kill is sent, and Windows refuses to delete a project whose
  * files FFmpeg still has open.
@@ -29,7 +33,7 @@ const STOP_WAIT_MS = 15_000
 export function createProxyBuilds(makeRunner: (hooks: ExitHooks) => RunEngine, log: (line: string) => void) {
   const running = new Map<string, Build>()
 
-  function start(slug: string, projectDir: string): void {
+  function start(slug: string, projectDir: string, owner: string | null): void {
     if (running.has(slug)) return
     const abort = new AbortController()
     let spawned = false
@@ -39,7 +43,7 @@ export function createProxyBuilds(makeRunner: (hooks: ExitHooks) => RunEngine, l
     const build: Build = {
       abort,
       exited,
-      done: run('proxy', ['--project', projectDir], undefined, abort.signal)
+      done: run('proxy', ['--project', projectDir, ...(owner ? ['--owner', owner] : [])], undefined, abort.signal)
         .then((r) => log(`[proxy] ${slug}: ${JSON.stringify((r as { sources?: unknown })?.sources ?? r)}`))
         .catch((e) => {
           if (!abort.signal.aborted) log(`[proxy] ${slug} failed: ${(e as { message?: string })?.message ?? String(e)}`)

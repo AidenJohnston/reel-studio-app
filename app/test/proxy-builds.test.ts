@@ -48,29 +48,38 @@ describe('preview copy builds', () => {
     const { makeRunner, calls } = controlledEngine()
     const logs: string[] = []
     const builds = createProxyBuilds(makeRunner, (l) => logs.push(l))
-    builds.start('a', '/p/a')
-    builds.start('a', '/p/a')
-    builds.start('b', '/p/b')
+    builds.start('a', '/p/a', null)
+    builds.start('a', '/p/a', null)
+    builds.start('b', '/p/b', null)
     expect(calls.map((c) => c.args[1])).toEqual(['/p/a', '/p/b'])
 
     calls[0].fail({ message: 'boom' })
     await new Promise((r) => setTimeout(r, 0))
     expect(logs.some((l) => l.includes('a failed: boom'))).toBe(true)
-    builds.start('a', '/p/a')
+    builds.start('a', '/p/a', null)
     expect(calls.map((c) => c.args[1])).toEqual(['/p/a', '/p/b', '/p/a'])
   })
 
   it('stop returns only after the cancelled engine has exited, so the project can be deleted', async () => {
     const { makeRunner, calls } = controlledEngine()
     const builds = createProxyBuilds(makeRunner, () => undefined)
-    builds.start('a', '/p/a')
+    builds.start('a', '/p/a', null)
     const first = builds.stop('a')
     await new Promise((r) => setTimeout(r, 10)) // the cancelled call has settled; the engine exits at 50 ms
-    builds.start('a', '/p/a') // still shutting down: no second engine
+    builds.start('a', '/p/a', null) // still shutting down: no second engine
     await builds.stop('a') // a second remove waits for the same exit
     expect(calls[0].exited).toBe(true)
     await first
     expect(calls).toHaveLength(1)
     await builds.stop('never-started')
+  })
+
+  it("passes the job's owner token, since the job has already written .owner.lock", () => {
+    const { makeRunner, calls } = controlledEngine()
+    const builds = createProxyBuilds(makeRunner, () => undefined)
+    builds.start('a', '/p/a', 'job-token')
+    builds.start('b', '/p/b', null)
+    expect(calls[0].args).toEqual(['--project', '/p/a', '--owner', 'job-token'])
+    expect(calls[1].args).toEqual(['--project', '/p/b'])
   })
 })
