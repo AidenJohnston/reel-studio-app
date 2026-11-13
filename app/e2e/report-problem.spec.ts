@@ -84,6 +84,7 @@ test('Report a problem: review, send, and the way out when sending fails', async
     await expect(page.getByTestId('report-error')).toContainText('support@getreelstudio.com')
     await expect(page.getByTestId('report-email-instead')).toBeVisible()
     await expect(page.getByTestId('report-retry')).toBeVisible()
+    await expect(page.getByTestId('report-retry')).toBeFocused() // the way forward, not the gone Send button
     await shot(page, 'report-problem-failed')
     await page.getByTestId('report-copy').click()
     await expect.poll(() => app.evaluate(({ clipboard }) => clipboard.readText())).toContain('Second report')

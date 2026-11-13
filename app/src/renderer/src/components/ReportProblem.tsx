@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { SupportDraft, SupportPreview } from '../../../shared/api'
 import { SUPPORT_EMAIL } from '../../../shared/config'
 import { errorCode, reel, userMessage } from '../api'
@@ -71,6 +71,13 @@ export function ReportProblem({ context, screenshotAvailable, hasKey, onClose }:
     setFieldError(failed ?? null)
     setStep({ name: 'write' })
   }
+
+  // The failed screen is the review dialog redrawn, so Modal's autofocus (on open only) doesn't run, and the Send
+  // button that had focus is gone. Put focus on the way forward: Edit after a refusal, else Try again.
+  const leadRef = useRef<HTMLButtonElement>(null)
+  useEffect(() => {
+    if (step.name === 'failed') leadRef.current?.focus()
+  }, [step])
 
   const invalid = (f: string) => (fieldError?.field === f ? true : undefined)
 
@@ -253,13 +260,13 @@ export function ReportProblem({ context, screenshotAvailable, hasKey, onClose }:
             <button
               className={`btn ${NEEDS_EDIT.has(step.code ?? '') ? 'primary' : 'ghost'}`}
               onClick={() => edit(NEEDS_EDIT.has(step.code ?? '') ? { message: step.message, field: step.field } : undefined)}
-              data-autofocus={NEEDS_EDIT.has(step.code ?? '') || undefined}
+              ref={NEEDS_EDIT.has(step.code ?? '') ? leadRef : undefined}
               data-testid="report-edit"
             >
               Edit the report
             </button>
             {!NEEDS_EDIT.has(step.code ?? '') && (
-              <button className="btn primary" onClick={() => void send(p)} data-testid="report-retry">
+              <button className="btn primary" onClick={() => void send(p)} ref={leadRef} data-testid="report-retry">
                 Try again
               </button>
             )}
