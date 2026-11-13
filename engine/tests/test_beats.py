@@ -80,6 +80,22 @@ def test_a_cut_that_cannot_reach_a_beat_stays_put():
             [(s.src_start, s.src_end, s.out_start) for s in plain.segments]
 
 
+def test_a_cut_that_takes_out_a_pause_inside_a_range_lands_on_a_beat_too():
+    # one kept range with a 2 s pause in it: the cut that removes the pause is a jump cut like any other
+    w = words_two_takes()
+    keep = [{"from": "w0", "to": "w4"}]
+    plain = cut.build_timeline(w, keep, SRC)
+    assert len(plain.segments) == 2
+    t = plain.segments[1].out_start
+    beat = round((t + 0.1) * FPS) / FPS
+    tl = cut.build_timeline(w, keep, SRC, beats=[beat])
+    first, second = tl.segments
+    assert second.out_start == pytest.approx(beat, abs=1e-6)
+    # it kept more of the pause's silence, and none of the sound the next piece plays
+    assert w[2]["e"] < first.src_end <= second.src_start
+    assert (second.src_start, second.src_end) == (plain.segments[1].src_start, plain.segments[1].src_end)
+
+
 def ctx_for(proj, words):
     tl = cut.build_timeline(words, KEEP, SRC)
     return SimpleNamespace(project=proj, fmt=proj["format"], duration=tl.duration, words=words,

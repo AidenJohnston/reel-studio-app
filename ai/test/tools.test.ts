@@ -4,6 +4,7 @@ import * as path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { TOOLS, TOOL_NAMES, executeTool, newToolState, loadProject, StyleStore, ToolContext, AgentEvent } from '../src';
 import { saveProject } from '../src/project';
+import { visibleChangeSinceRender } from '../src/tools';
 import { isStrict, validate } from '../src/schema';
 import { FakeHost, makeProject, tinyPng } from './helpers';
 
@@ -189,6 +190,38 @@ describe('tool implementations', () => {
     host.songInfo = { ...host.songInfo, beatGrid: grid };
     expect((await executeTool(ctx, 'set_sound_moments', { ...none, onBeat: ['broll'] })).isError).toBe(false);
     expect((await loadProject(dir)).music).toMatchObject({ beats: grid, onBeat: ['broll'], startAt: 2 });
+  });
+
+  it('sound moments: a drop on a song chosen before beats were stored listens for them, and keeps without them', async () => {
+    const { ctx, root, dir, host } = await ctxFor();
+    await fsp.writeFile(path.join(root, 'Library', 'Music', 'calm.mp3'), 'x');
+    await executeTool(ctx, 'choose_music', { track: 'calm.mp3', startAt: 1, level: null });   // an older engine: no grid
+    expect((await loadProject(dir)).music.beats).toBeUndefined();
+    host.engineAssets = true;
+    const none = { onBeat: null, drops: null, reverbThrow: null };
+    expect((await executeTool(ctx, 'set_sound_moments', { ...none, drops: [{ from: 'w3', to: 'w5' }] })).isError).toBe(false);
+    expect((await loadProject(dir)).music).toMatchObject({ drops: [{ from: 'w3', to: 'w5' }] });   // no beat: back after the line
+    host.songInfo = { ...host.songInfo, beatGrid: { fps: 30, frames: [15, 30] } };
+    expect((await executeTool(ctx, 'set_sound_moments', { ...none, drops: [{ from: 'w4', to: 'w6' }] })).isError).toBe(false);
+    expect((await loadProject(dir)).music.beats).toEqual({ fps: 30, frames: [15, 30] });
+  });
+
+  it('a song change is a visible change when edits land on its beats, and only heard when none do', async () => {
+    const { ctx, root, host } = await ctxFor();
+    for (const f of ['a.mp3', 'b.mp3']) await fsp.writeFile(path.join(root, 'Library', 'Music', f), 'x');
+    host.engineAssets = true;
+    host.songInfo = { ...host.songInfo, beatGrid: { fps: 30, frames: [15, 30] } };
+    const pick = async (track: string | null, startAt: number | null) => {
+      ctx.state.dirty = new Set();
+      await executeTool(ctx, 'choose_music', { track, startAt, level: null });
+      return visibleChangeSinceRender(ctx);
+    };
+    expect(await pick('a.mp3', null)).toBe(false);
+    await executeTool(ctx, 'set_sound_moments', { onBeat: ['cuts'], drops: null, reverbThrow: null });
+    expect(await pick('a.mp3', null)).toBe(false);          // the same song, the same start: nothing moves
+    expect(await pick('a.mp3', 3)).toBe(true);              // another start point moves the grid
+    expect(await pick('b.mp3', null)).toBe(true);           // another song's beats
+    expect(await pick(null, null)).toBe(true);              // no song, nothing on the beat
   });
 
   it('offers exactly the sounds the engine ships', () => {

@@ -878,7 +878,10 @@ const tools: ToolDef[] = [
       const song = heard?.song ?? null;
       const startAt = args.startAt !== null && args.startAt !== undefined ? args.startAt
         : (song && typeof song.suggestedStartAt === 'number' ? song.suggestedStartAt : (ref !== prev.track ? 0 : undefined));
-      await mutate(ctx, 'music', (p) => {
+      // with edits on the beat, another song, no song or another start point moves the picture too
+      const movesBeats = !!prev.onBeat?.length && (ref !== prev.track || (ref !== null) !== prev.enabled
+        || (startAt !== undefined && startAt !== prev.startAt));
+      await mutate(ctx, movesBeats ? 'beat' : 'music', (p) => {
         p.music.track = ref;
         p.music.enabled = ref !== null;
         if (startAt !== undefined) p.music.startAt = startAt;
@@ -933,10 +936,12 @@ const tools: ToolDef[] = [
         };
       }
       let heard: Awaited<ReturnType<typeof analyzeMusic>> = null;
-      if (onBeat?.length && !p.music.beats) {        // a song chosen before beats were stored: listen to it once now
+      // a song chosen before beats were stored: listen to it once now (a drop comes back on the next beat
+      // too, and without one, a moment after its line)
+      if ((onBeat?.length || drops?.length) && !p.music.beats) {
         const song = resolveAsset(ctx, p.music.track!);
         heard = song ? await analyzeMusic(ctx, song.abs, p.format.fps) : null;
-        if (!heard?.beats) throw new ToolInputError('no steady beat was found in this song, so there is nothing to land on: tell the user and leave onBeat null');
+        if (onBeat?.length && !heard?.beats) throw new ToolInputError('no steady beat was found in this song, so there is nothing to land on: tell the user and leave onBeat null');
       }
       // landing on beats moves the picture; drops and the echo are only heard
       await mutate(ctx, onBeat ? 'beat' : 'music', (q) => {
