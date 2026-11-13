@@ -1090,7 +1090,7 @@ const tools: ToolDef[] = [
   },
   {
     name: 'set_mirror',
-    description: 'Flip the video left to right when the take is MIRRORED (a front-camera selfie): text in the room (posters, shirts, signs, screens, book covers) reads backwards in the frames. Judge only text that was really in the room, never the captions or the pictures you added, and never the face. on false undoes it. Omit source to flip every take. A take with userSaidAsFilmed: the user already said it is the right way round, so flip it only when their note asks for it.',
+    description: 'Flip the video left to right when the take is MIRRORED (a front-camera selfie): text in the room (posters, shirts, signs, screens, book covers) reads backwards in the frames. Judge only text that was really in the room, never the captions or the pictures you added, and never the face. on false undoes it. Omit source to flip every take.',
     parameters: S.obj({
       on: S.bool('true = flip (the take is mirrored), false = show it as shot'),
       source: S.opt(S.str('source id, e.g. "s1"; null = every take')),
