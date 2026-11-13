@@ -66,7 +66,8 @@ test('Report a problem: review, send, and the way out when sending fails', async
     expect(f.get('email')).toBeNull()
     expect(String(f.get('appVersion'))).toMatch(/^\d+\.\d+\.\d+/)
     expect(String(f.get('os'))).toMatch(/^(Windows|macOS|linux) /)
-    expect(String(f.get('diagnostics'))).toMatch(/^Reel Studio diagnostics\n/)
+    // multipart/form-data sends text newlines as CRLF (the HTML form encoding); the Worker turns them back into LF
+    expect(String(f.get('diagnostics'))).toMatch(/^Reel Studio diagnostics\r?\n/)
     const screenshot = f.get('screenshot') as File
     expect(['image/png', 'image/jpeg']).toContain(screenshot.type)
     expect(screenshot.size).toBeGreaterThan(1000)
