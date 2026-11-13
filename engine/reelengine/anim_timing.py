@@ -142,6 +142,77 @@ def beats(template: str, params: dict, words: list[dict]) -> dict:
     return {}
 
 
+# --- readable on a phone (mirrors ai/src/readable.ts) -----------------------------------------
+# Every template shrinks its type until its content fits the region, so a smaller region above the
+# face can leave the main text too small to read; the editor then goes full screen instead.
+
+MIN_HERO_PX = 64               # main text floor, px at 1080 wide...
+MIN_SCALE = 0.55               # ...and never below this share of the size the template was designed at
+FULL_REGION = {"x": 60, "y": 260, "w": 960, "h": 1240}
+
+
+def _chars(v) -> int:
+    if isinstance(v, str):
+        return len(v.strip())
+    if isinstance(v, (int, float)) and not isinstance(v, bool):
+        return len(str(int(v)) if float(v).is_integer() else repr(v))      # JS String(v)
+    return 0
+
+
+def _pieces(template: str, p: dict) -> Optional[tuple]:
+    """(hero px, max scale above the face, max scale full screen, [(chars, px, nowrap, mono)])."""
+    if template == "stat-count-up":
+        return 230, 1.35, 2.2, [(max(1, _chars(p.get("value"))), 230, True, False), (_chars(p.get("text")), 66, False, False)]
+    if template == "price-tag":
+        return 196, 1.35, 2.2, [(max(1, _chars(p.get("value"))), 196, True, False), (_chars(p.get("oldValue")), 92, True, False),
+                                (_chars(p.get("text")) + _chars(p.get("name")), 54, False, False)]
+    if template == "big-quote":
+        return 96, 1.35, 2.2, [(max(1, _chars(p.get("text"))), 96, False, False), (_chars(p.get("author")), 44, False, False)]
+    if template == "list-reveal":
+        items = [str(x) for x in p.get("items") or []] if isinstance(p.get("items"), list) else []
+        return 72, 1.35, 2.2, [(_chars(p.get("text")), 72, False, False), *((max(1, len(x)), 72, True, False) for x in items)]
+    if template == "logo-pop":
+        return 72, 1.35, 2.2, [(max(1, _chars(p.get("text"))), 72, False, False)]
+    if template == "typing-terminal":
+        return 64, 1.35, 1.3, [(max(1, _chars(p.get("text"))), 64, False, True), (_chars(p.get("response")), 54, False, True)]
+    return None
+
+
+def min_hero_px(template: str) -> int:
+    s = _pieces(template, {})
+    return max(MIN_HERO_PX, math.floor(MIN_SCALE * s[0] + 0.5)) if s else MIN_HERO_PX
+
+
+def hero_px(template: str, params: dict, region: dict, layout: str = "top") -> Optional[int]:
+    """Estimated main text height (px at 1080 wide) in `region`, or None for an unknown template."""
+    s = _pieces(template, params)
+    if s is None:
+        return None
+    hero, max_top, max_full, pieces = s
+    max_w, max_h = region["w"] * 0.97, region["h"] * 0.97
+
+    def fits(k: float) -> bool:
+        h = 0.0
+        for chars, size, nowrap, mono in pieces:
+            if not chars:
+                continue
+            w = chars * (0.6 if mono else 0.56) * size * k
+            if nowrap and w > max_w:
+                return False
+            h += size * k * 1.12 * (1 if nowrap else max(1, math.ceil(w / max_w)))
+        return h <= max_h
+    k = max_full if layout == "full" else max_top
+    while k > 0.05 and not fits(k):
+        k *= 0.95
+    return math.floor(hero * k + 0.5)
+
+
+def readable_above_face(template: str, params: dict, region: dict) -> bool:
+    """Does the main text still read in the region above the face (unknown templates: yes)?"""
+    px = hero_px(template, params, region, "top")
+    return px is None or px >= min_hero_px(template)
+
+
 # --- re-timing ---------------------------------------------------------------------------------
 
 def spec_of(sidecar: dict) -> tuple[str, dict]:
@@ -163,8 +234,11 @@ def resolve(ctx, item: dict, sidecar: dict) -> dict:
     duration = params.get("duration")
     ac = anim_context(ctx, a, b, float(duration) if duration else None, lead)
     out = {**params, **beats(template, params, ac["words"])}
-    # the editor's "full" stays full; otherwise full only when no readable room is left above the face
+    # the editor's choice stays; otherwise full screen when the room above the face is too small for
+    # anything, or for this text to read (as make_animation decides)
     layout = params.get("layout") or ac["layout"]
+    if not params.get("layout") and layout == "top" and not readable_above_face(template, out, ac["region"]):
+        layout = "full"
     if layout == "full":
         out["layout"] = "full"
     else:
@@ -220,6 +294,16 @@ def plan(ctx, item: dict, sidecar: dict) -> Optional[dict]:
     out = retimed_path(ctx, template, params)
     return {"template": template, "params": params, "out": out,
             "ready": out.exists() and out.with_suffix(".anim.json").exists()}
+
+
+def rendered_clips(project_dir: Path) -> dict:
+    """{work/animations/<file>: [size, mtime_ns]} of the re-timed clips on disk: part of a version's
+    fingerprint, so a clip rendered after a version was saved (a re-time that failed then) starts a
+    new version instead of changing the saved one."""
+    d = Path(project_dir) / "work" / "animations"
+    if not d.is_dir():
+        return {}
+    return {f"work/animations/{f.name}": [f.stat().st_size, f.stat().st_mtime_ns] for f in sorted(d.glob("*.mov"))}
 
 
 def jobs(ctx) -> list[dict]:

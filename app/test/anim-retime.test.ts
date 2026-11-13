@@ -53,4 +53,18 @@ describe('withAnimationRetiming', () => {
     expect(await withAnimationRetiming(noList.run, async (_t, _p, out) => out)('render', ['--project', '/p'])).toEqual({ version: 3 })
     expect(noList.calls).toEqual(['anim-jobs --project /p', 'render --project /p'])
   })
+
+  it('Stop during an animation ends the job: the signal reaches the renderer and nothing renders after it', async () => {
+    const { run, calls } = fakeEngine([job, { ...job, id: 'b5' }])
+    const stop = new AbortController()
+    const seen: (AbortSignal | undefined)[] = []
+    const wrapped = withAnimationRetiming(run, async (_t, _p, _out, signal) => {
+      seen.push(signal)
+      stop.abort()
+      throw { code: 'CANCELLED', userMessage: 'Stopped.' }
+    })
+    await expect(wrapped('render', ['--project', '/p'], undefined, stop.signal)).rejects.toMatchObject({ code: 'CANCELLED' })
+    expect(seen).toEqual([stop.signal])
+    expect(calls).toEqual(['anim-jobs --project /p'])
+  })
 })

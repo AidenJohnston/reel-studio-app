@@ -34,7 +34,7 @@ from typing import Optional
 
 import reelengine
 
-from . import captions as capmod, cut as cutmod, project as projmod, proxy as proxymod, render_identity, rule_checks, safepath, tools
+from . import anim_timing, captions as capmod, cut as cutmod, project as projmod, proxy as proxymod, render_identity, rule_checks, safepath, tools
 from .cut_style import visual_change_meter
 from .proto import EngineError, log, progress
 from .render_ctx import Layer, RenderCtx, Segment, ZoomSpan
@@ -95,6 +95,7 @@ def asset_fingerprint(project_dir: Path, proj: dict, root: Optional[Path] = None
             out[r] = [st.st_size, st.st_mtime_ns]
         except (EngineError, OSError):
             out[r] = None
+    out.update(anim_timing.rendered_clips(project_dir))   # an animation may play a clip re-timed to the cut
     return {"engineVersion": reelengine.__version__, "assets": out}
 
 
