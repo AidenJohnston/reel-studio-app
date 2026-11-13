@@ -550,7 +550,15 @@ def build_video_cmd(ctx: RenderCtx, segments: list, src_meta: dict, src_paths: d
         cur = f"o{li}"
         k += 1
     if ass_name:
-        chains.append(f"[{cur}]subtitles=filename={ass_name}:fontsdir=fonts[capd]")
+        # The caption track is timed on the full video's clock. Each segment is trimmed to the nearest
+        # frame, so a window's frame k is the full render's frame round(t_shift * fps) + k: the track is
+        # read at that frame's timestamp (the stream is on the 1/fps base the `fps` filter set), which
+        # gives libass the same millisecond the full render gives it, then the frame gets its own back.
+        to_full = from_full = ""
+        if t_shift > 0:
+            k0 = round(t_shift * fps)
+            to_full, from_full = f"setpts=PTS+{k0},", f",setpts=PTS-{k0}"
+        chains.append(f"[{cur}]{to_full}subtitles=filename={ass_name}:fontsdir=fonts{from_full}[capd]")
         cur = "capd"
     chains.append(f"[{cur}]format=yuv420p[vout]")
     with open(graph_file, "w", encoding="utf-8", newline="\n") as fh:
@@ -808,17 +816,14 @@ def run(project_dir: Path, draft: bool = False, window: Optional[str] = None,
     cap = proj.get("captions") or {}
     if cap.get("enabled", True):
         progress(STAGE, 16, "Writing your captions", force=True)
-        words_out = tl.words_out
-        shift = 0.0
-        if win:
-            a, b = win
-            shift = a
-            words_out = [dict(w, s=w["s"] - a, e=w["e"] - a) for w in tl.words_out if w["e"] > a and w["s"] < b]
         # split views of a close-up face: captions move to the seam instead of crossing the face
-        spans = [(r["t0"] - shift, r["t1"] - shift, float(r["captionHintY"])) for r in broll_report
+        spans = [(r["t0"], r["t1"], float(r["captionHintY"])) for r in broll_report
                  if r.get("captionHintY") is not None and r.get("t0") is not None and r.get("t1") is not None]
+        # A window burns this same full-length track, read on the full video's clock (build_video_cmd).
+        # Grouping only the window's words made lines the full video never shows ("HERE IS THE" where
+        # the video shows "SO HERE IS"), so a window starting or ending mid-line drew the wrong words.
         ass, cap_report, cwarn, (family, font_path), stats = capmod.build_for_timeline(
-            tl, proj, W, H, words_out=words_out, position_spans=spans)
+            tl, proj, W, H, position_spans=spans)
         warnings += cwarn
         ass_name = "captions.ass"
         with open(rwork / ass_name, "w", encoding="utf-8", newline="\n") as fh:
@@ -828,7 +833,9 @@ def run(project_dir: Path, draft: bool = False, window: Optional[str] = None,
             shutil.rmtree(fonts, ignore_errors=True)
         fonts.mkdir(parents=True, exist_ok=True)
         shutil.copy2(font_path, fonts / Path(font_path).name)
-        if not win:
+        if win:
+            cap_report = [r for r in cap_report if r["e"] > win[0] and r["s"] < win[1]]
+        else:
             projmod.write_json(project_dir / "work" / "captions.json", {"cues": cap_report})
 
     # 4. the picture
