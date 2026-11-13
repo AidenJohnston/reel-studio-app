@@ -1,5 +1,5 @@
 import { app, BrowserWindow, clipboard, dialog, ipcMain, net, safeStorage, shell, type IpcMainInvokeEvent } from 'electron'
-import { existsSync, promises as fs, appendFileSync, mkdirSync, realpathSync } from 'node:fs'
+import { existsSync, promises as fs, appendFileSync, mkdirSync, realpathSync, writeFileSync } from 'node:fs'
 import { basename, dirname, join } from 'node:path'
 import {
   binDir,
@@ -57,7 +57,11 @@ import { mergeSourcesPatch } from '../shared/mirror'
 import { displayPath } from '../shared/display-path'
 import { registerPhoneIpc, stopPhoneShare } from './phone-ipc'
 import { checkNoteAttachments, forChat, pickClipboardType, registerAttachmentIpc } from './attachments'
-import { createUpdateService } from './update-check'
+import { autoUpdater } from 'electron-updater'
+import { LATEST_URL, type FetchLike } from './update-check'
+import { createUpdater, menuCheckForUpdates } from './updater'
+import { UPDATE_FEED_URL, electronUpdaterBackend, macBundleCheck, windowsInstaller } from './updater-electron'
+import { disabledReason, updateMode } from './update-machine'
 import { PROTOCOL, createUpdateKeyService } from './update-key'
 import { setupPosting } from './posting-ipc'
 import { createJobFeedback, createMainWindow, feedbackLog, installMenu, startDragOut, titleBarOverlay, windowStateFile, type AppCommand } from './window'
@@ -168,21 +172,10 @@ const jobs = createJobManager(
       ((await readProject(slug)).sources ?? []).reduce((a: number, s: { duration?: number }) => a + (Number(s?.duration) || 0), 0)
   },
   // render events carry a playable URL (a stable copy for drafts: main/live-video.ts)
-  ((live) => (slug: string, e) => live(projectDir(slug), e))(createLiveVideos())
+  ((live) => (slug: string, e) => live(projectDir(slug), e))(createLiveVideos()),
+  () => updates.assertCanStartWork()
 )
 const models = createModelManager(runEngine, (s) => broadcast('model:progress', s))
-// "Update available" notice (main/update-check.ts): one anonymous GET a day, never in test runs.
-const updates = createUpdateService({
-  active: !TEST,
-  version: app.getVersion(),
-  load: loadSettings,
-  save: saveSettings,
-  fetch: (url, init) => fetch(url, init), // Node's fetch: no Electron session, so no cookies
-  now: () => Date.now(),
-  log,
-  openExternal: (url) => shell.openExternal(url),
-  send: (n) => broadcast('update:change', n)
-})
 // The buyer's download key for automatic updates (main/update-key.ts). It arrives as a reelstudio://updates?key=…
 // link (open-url on macOS, the command line on Windows) or pasted in Settings. Links that come before the app
 // is ready wait for it.
@@ -196,7 +189,10 @@ const updateKey = createUpdateKeyService({
   load: loadSettings,
   save: saveSettings,
   log,
-  send: (s) => broadcast('updateKey:change', s),
+  send: (s) => {
+    broadcast('updateKey:change', s)
+    updates.keyChanged(s.on)
+  },
   // Any web page can open a reelstudio:// link, so a key from one is saved only after a yes.
   confirmLink: async ({ replacing }) => {
     showWindow()
@@ -211,6 +207,71 @@ const updateKey = createUpdateKeyService({
     return (await (win ? dialog.showMessageBox(win, opts) : dialog.showMessageBox(opts))).response === 0
   }
 })
+
+// ---- updates (main/updater.ts) -------------------------------------------------------------------
+// Test runs never touch the network, except the update e2e, which points a dev build at a local server
+// (REELSTUDIO_UPDATE_FEED, honoured only in an unpackaged test run: app/e2e/update.spec.ts).
+const TEST_FEED = TEST && !app.isPackaged ? process.env.REELSTUDIO_UPDATE_FEED : undefined
+let exportsWriting = 0
+const updateBusy = () => ({ exporting: exportsWriting > 0, working: jobs.runningCount() })
+
+/** electron-updater reads app-update.yml (packaging/electron-builder.yml `publish`) only to switch itself on;
+ * the backend sets the feed at runtime. The e2e writes the same file for a dev build. */
+function readUpdateConfig(): string | null {
+  if (TEST_FEED) {
+    const file = join(app.getPath('userData'), 'dev-app-update.yml')
+    const text = `provider: generic\nurl: ${TEST_FEED}/u/\nupdaterCacheDirName: reel-studio-e2e-updater-${basename(dirname(app.getPath('userData')))}\n`
+    mkdirSync(dirname(file), { recursive: true })
+    writeFileSync(file, text)
+    return file
+  }
+  const file = join(process.resourcesPath, 'app-update.yml')
+  return existsSync(file) ? file : null
+}
+
+const updateConfig = app.isPackaged || TEST_FEED ? readUpdateConfig() : null
+const updateEnv = {
+  platform: process.platform,
+  isPackaged: app.isPackaged || !!TEST_FEED,
+  test: TEST && !TEST_FEED,
+  hasFeed: updateConfig !== null,
+  inApplications: !!TEST_FEED || (app.isPackaged && process.platform === 'darwin' && app.isInApplicationsFolder())
+}
+const siteFetch: FetchLike = (url, init) => fetch(url, init) // Node's fetch: no Electron session, so no cookies
+const updateOff = disabledReason(updateEnv)
+const updateHow = updateMode(updateEnv)
+const updates = createUpdater({
+  version: app.getVersion(),
+  mode: updateHow,
+  disabledReason: updateOff,
+  backend: updateOff
+    ? null
+    : electronUpdaterBackend({
+        updater: autoUpdater,
+        version: app.getVersion(),
+        fetch: siteFetch,
+        latestUrl: TEST_FEED ? `${TEST_FEED}/latest.json` : LATEST_URL,
+        feedUrl: TEST_FEED ? `${TEST_FEED}/u/` : UPDATE_FEED_URL,
+        keys: updateKey,
+        log,
+        devFeedFile: TEST_FEED ? updateConfig ?? undefined : undefined,
+        onError: (e) => updates.installFailed(e),
+        install: process.platform === 'win32' ? windowsInstaller : macBundleCheck(app.getVersion())
+      }),
+  load: loadSettings,
+  save: saveSettings,
+  busy: updateBusy,
+  prepareToQuit: async () => {
+    await stopPhoneShare()
+    await jobs.cancelAll()
+    await killAllEngines()
+  },
+  openExternal: (url) => shell.openExternal(url),
+  send: (st) => broadcast('update:state', st),
+  log,
+  now: () => Date.now()
+})
+log(`[update] ${updateOff ?? `on (${updateHow})`}`)
 let ready = false
 const waitingKeyLinks: string[] = []
 function acceptKeyLink(url: string): void {
@@ -628,7 +689,15 @@ function registerIpc(): void {
     })
     return { jobId }
   })
-  handle('projects:export', (_e, slug: string, n: number) => exportVersion(slug, n))
+  handle('projects:export', async (_e, slug: string, n: number) => {
+    updates.assertCanStartWork()
+    exportsWriting++ // the updater will not restart the app while an export writes its file
+    try {
+      return await exportVersion(slug, n)
+    } finally {
+      exportsWriting--
+    }
+  })
   handle('projects:remove', async (_e, slug: string) => {
     const running = jobs.forSlug(slug)
     if (running) {
@@ -687,10 +756,15 @@ function registerIpc(): void {
     return ai.writeScript(String(idea), () => {})
   })
 
-  handle('update:status', () => updates.status())
-  handle('update:setEnabled', (_e, on: unknown) => updates.setEnabled(on))
-  handle('update:open', (_e, url: unknown) => updates.open(url))
+  handle('update:state', () => updates.state())
+  handle('update:check', () => updates.check('button'))
+  handle('update:download', () => updates.download())
+  handle('update:install', () => updates.install())
+  handle('update:openRelease', () => updates.openRelease())
+  handle('update:openAutoUpdatesPage', () => updates.openAutoUpdatesPage())
+  handle('update:busy', updateBusy)
   handle('update:dismiss', (_e, version: unknown) => updates.dismiss(version))
+  handle('update:setEnabled', (_e, on: unknown) => updates.setEnabled(on))
   handle('updateKey:status', () => updateKey.status())
   // Read here, not in the page: the page never needs the key, and main already has the clipboard.
   handle('updateKey:paste', async () => {
@@ -766,7 +840,16 @@ async function carryOverClaudeCode(settings: { aiAutoPicked: boolean; aiCarriedO
 // ---- window -------------------------------------------------------------------------------------
 function createWindow(): void {
   win = createMainWindow({ preload: join(__dirname, '../preload/index.js'), stateFile: windowStateFile(settingsDir()), test: TEST })
-  installMenu(sendCommand, DEV_PROVIDERS || !app.isPackaged)
+  installMenu(sendCommand, DEV_PROVIDERS || !app.isPackaged, () =>
+    // On Mac the menu outlives a closed window, so the window may be gone when this runs.
+    void menuCheckForUpdates(updates, {
+      focus: () => {
+        if (!win || win.isDestroyed()) createWindow()
+        win?.show()
+      },
+      show: (o) => (win && !win.isDestroyed() ? dialog.showMessageBox(win, o) : dialog.showMessageBox(o))
+    }).catch((e) => log(`[update] menu check failed: ${String(e instanceof Error ? e.message : e).slice(0, 300)}`))
+  )
   win.once('ready-to-show', () => win?.show())
   // Stop flashing the taskbar once the person is back.
   win.on('focus', () => win?.flashFrame(false))
@@ -836,7 +919,8 @@ app.whenReady().then(async () => {
   handleMediaProtocol(() => [reelStudioRoot(), projectsDir()])
   registerIpc()
   createWindow()
-  updates.start() // a few seconds after the window, so launch is never slower
+  await updates.init()
+  updates.start() // 15 s after the window, so launch is never slower
   // reelstudio:// links open this app (Windows writes it per user; macOS also reads Info.plist). Not in dev or tests,
   // which would point the scheme at a bare Electron.
   if (app.isPackaged && !TEST && !app.isDefaultProtocolClient(PROTOCOL) && !app.setAsDefaultProtocolClient(PROTOCOL)) log('[updates] could not register reelstudio:// links')

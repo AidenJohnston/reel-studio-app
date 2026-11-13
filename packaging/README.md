@@ -35,6 +35,15 @@ packaging/build-mac.sh            # or --spike
 packaging/sign-mac.sh             # run in a GUI session: sign + notarize + staple
 ```
 
+### Update files
+
+Installed copies update from `https://dl.getreelstudio.com/u/` (app `main/updater-electron.ts`). The server renders
+`latest.yml` and `latest-mac.yml` itself from its release manifest, so only these files are published with a release:
+
+* Windows: `Reel-Studio-Setup-<version>-x64.exe`. electron-updater runs the same installer people download. The
+  `latest.yml` and `.blockmap` electron-builder writes next to it are not used.
+* Mac: `Reel-Studio-<version>-arm64-mac.zip` from `sign-mac.sh` (`docs/signing-mac.md`), next to the dmg.
+
 First run downloads about 250 MB of Python wheels + ffmpeg into `packaging/cache` and `packaging/runtime`
 (both gitignored); later runs reuse them.
 

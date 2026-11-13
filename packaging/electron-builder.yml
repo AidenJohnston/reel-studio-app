@@ -96,6 +96,15 @@ extraResources:
   - from: ${env.RS_REPO_ROOT}/packaging/licenses/yunet-MIT.txt
     to: engine/reelengine/models/LICENSE-YuNet-MIT.txt
 
+# Written into the app as resources/app-update.yml, even with --publish never (nothing is uploaded by the build).
+# electron-updater reads it only to switch itself on: main/updater-electron.ts sets the same feed at runtime and
+# sends the buyer's download key with each request to it. The update server renders latest.yml / latest-mac.yml
+# itself from its release manifest, so electron-builder's own latest*.yml files are not uploaded. On Windows,
+# publisherName comes from RS_AZURE_PUBLISHER when the build is signed (make-config.js).
+publish:
+  provider: generic
+  url: https://dl.getreelstudio.com/u/
+
 # afterPack (packaging/after-pack.js: compiles .pyc for python/ and engine/ BEFORE signing, so the bundle is
 # never written to at runtime and engine start-up stays fast) is appended by make-config.js.
 
@@ -115,6 +124,7 @@ mac:
   # Unsigned here on purpose. packaging/sign-mac.sh signs every nested binary inside-out, notarizes and staples.
   identity: null
   extendInfo:
+    ElectronSquirrelPreventDowngrades: true
     NSHumanReadableCopyright: "Copyright (c) 2026 Curate Technologies LLC and contributors (AGPL-3.0-only)"
 
 dmg:
