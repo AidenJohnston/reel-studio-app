@@ -61,6 +61,7 @@ import { createUpdateService } from './update-check'
 import { PROTOCOL, createUpdateKeyService } from './update-key'
 import { setupPosting } from './posting-ipc'
 import { createJobFeedback, createMainWindow, feedbackLog, installMenu, startDragOut, titleBarOverlay, windowStateFile, type AppCommand } from './window'
+import { viewerFullScreen } from './viewer-fullscreen'
 
 const TEST = process.env.REELSTUDIO_TEST === '1'
 const DEV_PROVIDERS = process.env.REELSTUDIO_DEV === '1'
@@ -139,6 +140,7 @@ const TEST_VENDOR_ENV = testVendorEnv(process.env, process.platform)
 const cliBaseEnv = (): NodeJS.ProcessEnv => TEST_VENDOR_ENV ?? process.env
 const TEST_LOGIN_ENV = testVendorLoginEnv(process.env, process.platform)
 let win: BrowserWindow | null = null
+let setViewerFullScreen: ((on: boolean) => void) | null = null
 
 function broadcast(channel: string, payload: unknown): void {
   for (const w of BrowserWindow.getAllWindows()) if (!w.isDestroyed()) w.webContents.send(channel, payload)
@@ -404,6 +406,7 @@ function registerIpc(): void {
   handle('app:dimTitleBar', (_e, on: boolean) => {
     if (process.platform !== 'darwin' && win && !win.isDestroyed()) win.setTitleBarOverlay(titleBarOverlay(on === true))
   })
+  handle('app:fullScreen', (_e, on: boolean) => setViewerFullScreen?.(on === true))
   ipcMain.on('app:startDrag', (e, file: string) => {
     try {
       startDragOut(e.sender, file, [reelStudioRoot(), projectsDir()])
@@ -766,6 +769,7 @@ async function carryOverClaudeCode(settings: { aiAutoPicked: boolean; aiCarriedO
 // ---- window -------------------------------------------------------------------------------------
 function createWindow(): void {
   win = createMainWindow({ preload: join(__dirname, '../preload/index.js'), stateFile: windowStateFile(settingsDir()), test: TEST })
+  setViewerFullScreen = viewerFullScreen(win)
   installMenu(sendCommand, DEV_PROVIDERS || !app.isPackaged)
   win.once('ready-to-show', () => win?.show())
   // Stop flashing the taskbar once the person is back.
