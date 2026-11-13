@@ -1,5 +1,5 @@
-import { describe, expect, it } from 'vitest'
-import { diagnosticsReport, lastLines, logDuration, redactDiagnostics } from '../src/main/diagnostics'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { diagnosticsReport, lastLines, logDuration, redactDiagnostics, sharedDeadline } from '../src/main/diagnostics'
 
 describe('logDuration', () => {
   it('logs the request before starting and completion after returning the result', async () => {
@@ -34,6 +34,20 @@ describe('Copy diagnostics', () => {
       'C:\\Users\\Zoë Müller'
     )
     expect(win).toBe('[model] reused ~\\.cache\\hf and ~/AppData and D:\\Users\\<user>\\a')
+  })
+
+  it('takes out the whole account name: apostrophes, spaces, dots, hyphens and accents', () => {
+    const home = '/Users/zoe'
+    expect(redactDiagnostics("open /Users/O'Connor/Documents/clip.mp4", home)).toBe('open /Users/<user>/Documents/clip.mp4')
+    expect(redactDiagnostics("/Users/José.Núñez-O'Brien/Movies/a.mov", home)).toBe('/Users/<user>/Movies/a.mov')
+    expect(redactDiagnostics('C:\\Users\\Zoë-Ann Smith Jr.\\Videos\\take 1.mov', 'C:\\Users\\other')).toBe(
+      'C:\\Users\\<user>\\Videos\\take 1.mov'
+    )
+    expect(redactDiagnostics("/home/d'arcy/x", home)).toBe('/home/<user>/x')
+    // a name with nothing after it: the JSON string's closing quote stays
+    expect(redactDiagnostics(`{"path":"/Users/O'Connor"}`, home)).toBe('{"path":"/Users/<user>"}')
+    // the person's own home folder with an apostrophe becomes ~
+    expect(redactDiagnostics("/Users/O'Connor/Documents/clip.mp4", "/Users/O'Connor")).toBe('~/Documents/clip.mp4')
   })
 
   it('removes e-mail addresses, keys and tokens', () => {
@@ -85,5 +99,58 @@ describe('Copy diagnostics', () => {
     expect(text).toContain('Claude Code app: ready, version 2.1.3, plan pro')
     expect(text).toContain('Codex app: missing')
     expect(text.endsWith('line 1\nline 2\n')).toBe(true)
+  })
+})
+
+describe('sharedDeadline', () => {
+  afterEach(() => vi.useRealTimers())
+
+  it('gives each check its answer, an error, or a timeout at ONE shared deadline', async () => {
+    vi.useFakeTimers()
+    const d = sharedDeadline(5000)
+    const hangs = new Promise<string>(() => {}) // a CLI that never answers and ignores its stop signal
+    const slowButInTime = new Promise<string>((resolve) => setTimeout(() => resolve('late but ok'), 4000))
+    const all = Promise.all([
+      d.within(Promise.resolve('ready')),
+      d.within(Promise.reject(new Error('broken'))),
+      d.within(hangs),
+      d.within(slowButInTime),
+      d.within(hangs)
+    ])
+    await vi.advanceTimersByTimeAsync(5000)
+    const [ok, failed, timedOut, inTime, alsoTimedOut] = await all
+    d.done()
+    expect(ok).toEqual({ ok: true, value: 'ready' })
+    expect(failed).toEqual({ ok: false, reason: 'error' })
+    expect(timedOut).toEqual({ ok: false, reason: 'timeout' })
+    expect(inTime).toEqual({ ok: true, value: 'late but ok' })
+    // two hung checks still finish at 5 s in total, not 10
+    expect(alsoTimedOut).toEqual({ ok: false, reason: 'timeout' })
+    expect(vi.getTimerCount()).toBe(0)
+  })
+
+  it('names the checks that timed out in the report', () => {
+    const text = diagnosticsReport(
+      {
+        appVersion: '0.1.4',
+        packaged: true,
+        os: 'macOS 15.1.0',
+        arch: 'arm64',
+        cpu: 'Apple M2',
+        memoryGb: 16,
+        electron: '44.8.0',
+        engine: 'real',
+        aiEditor: 'Claude (your Claude Code app), connected',
+        claudeCode: { state: 'no answer within 5 s' },
+        codex: null,
+        listeningModel: 'ready',
+        timedOut: ['Claude Code app']
+      },
+      'line',
+      new Date('2026-11-12T10:00:00Z')
+    )
+    expect(text).toContain('Claude Code app: no answer within 5 s\n')
+    expect(text).toContain('Timed out: Claude Code app\n')
+    expect(text).toContain('Codex app: not checked\n')
   })
 })
