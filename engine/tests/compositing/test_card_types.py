@@ -224,3 +224,51 @@ def test_every_new_card_renders_into_the_video(tmp_path, media):
         assert "skipped" not in r, r
         diff = np.abs(frame((r["t0"] + r["t1"]) / 2) - bare).mean()
         assert diff > 3, f"{t} does not show in the render ({diff:.1f})"
+
+
+def test_a_joined_group_leaves_together_and_the_next_card_waits_for_all_of_it(tmp_path, media):
+    ctx = _ctx(tmp_path, media)
+    long_first = _item(ctx, 1, 2.0, 8.0, "card-above-head", media["logo-red"])
+    joined = _item(ctx, 2, 3.0, 4.0, "card-above-head", media["logo-blue"], join=True)
+    after = _item(ctx, 3, 5.0, 6.0, "text-pop", text="next")
+    plans = {p["id"]: p for p in broll.plan_windows(_set(ctx, long_first, joined, after))}
+    a, b, c = plans["b1"], plans["b2"], plans["b3"]
+    assert a["t1"] == b["t1"] == pytest.approx(c["t0"])                  # leave together, on the next card
+    assert c["t0"] >= b["t0"] + broll.MIN_HOLD - 1e-6                    # ...once the joined card has been read
+
+
+def _set(ctx, *items):
+    fx.set_project(ctx, broll=list(items))
+    return ctx
+
+
+def test_short_clips_hold_their_last_frame_for_two_seconds(tmp_path, media):
+    ctx = _ctx(tmp_path, media)
+    short = fx.synth_clip(tmp_path / "short.mp4", dur=1.0)
+    layers, recs = _build(ctx, _item(ctx, 1, 2.0, 2.4, "card-above-head", short))
+    _keeps_the_rules(ctx, layers, recs)
+    L = layers[0]
+    assert L.t1 - L.t0 == pytest.approx(broll.MIN_HOLD, abs=0.01)
+    held = subprocess.run([fx.FFPROBE, "-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", str(L.path)],
+                          capture_output=True, text=True).stdout
+    assert float(held) >= broll.MIN_HOLD - 0.05
+
+
+def test_item_pictures_get_the_blur_boxes_too(tmp_path, media):
+    ctx = _ctx(tmp_path, media)
+    item = _item(ctx, 1, 2.0, 4.0, "phone-row", items=[str(media["screenshot"]), str(media["portrait"])],
+                 blurBoxes=[[0.0, 0.0, 1.0, 0.3]])
+    paths = broll._items(ctx, broll.plan_windows(_set(ctx, item))[0], item["params"])
+    assert all(p.name.startswith("still-") for p in paths)             # blurred copies, never the originals
+
+
+def test_cards_that_cannot_read_say_so_instead_of_spilling(tmp_path, media):
+    ctx = _ctx(tmp_path, media)
+    essay = _item(ctx, 1, 2.0, 3.0, "panel-card", text="word " * 400)
+    logos = _item(ctx, 2, 9.0, 10.0, "logo-row", items=[str(media[k]) for k in
+                                                         ("logo-red", "logo-blue", "logo-green", "logo-gold", "logo-dark",
+                                                          "logo-purple", "logo-red", "logo-blue", "logo-green")])
+    layers, recs = _build(ctx, essay, logos)
+    assert "fewer words" in recs["b1"]["skipped"]
+    assert recs["b2"]["fallbackTreatment"] == "icon-wall"
+    assert broll._unit_box([1.0, 0.0, 0.5, 0.5]) is None and broll._unit_box([0.9, 0.9, 0.5, 0.5]) is not None
