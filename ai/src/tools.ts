@@ -395,11 +395,19 @@ async function shortFlashes(ctx: ToolContext, p: Project, t: Transcript | undefi
   let recs: any[] = [];
   try { recs = JSON.parse(await fsp.readFile(path.join(ctx.projectDir, 'work', 'layers', 'layers.json'), 'utf8'))?.items ?? []; } catch { return []; }
   return recs.filter((r) => typeof r?.t0 === 'number' && typeof r?.t1 === 'number' && !r.skipped && r.t1 - r.t0 < min)
-    .map((r) => {
+    .flatMap((r) => {
       const b = p.broll.find((x) => x.id === r.id);
-      return { id: String(r.id), seconds: Math.round((r.t1 - r.t0) * 10) / 10, says: b && t ? quote(t, b.anchor) : '' };
+      // a video clip is meant to be short (0.5 to 1.5 s): the clip-length check covers it, not "a picture needs 2 s"
+      if (b && isClip(r.treatment, b.asset)) return [];
+      return [{ id: String(r.id), seconds: Math.round((r.t1 - r.t0) * 10) / 10, says: b && t ? quote(t, b.anchor) : '' }];
     });
 }
+
+/** engine/reelengine/compose_util.py VIDEO_EXT */
+const VIDEO_EXT = new Set(['.mp4', '.mov', '.m4v', '.webm', '.mkv', '.avi']);
+/** Footage, as against a still, a card or an animation (lint.py `_is_clip`). */
+const isClip = (treatment: unknown, asset: string | null | undefined) =>
+  treatment !== 'animation' && !!asset && VIDEO_EXT.has(path.extname(asset).toLowerCase());
 
 /** The kept captions as a viewer reads them, one sentence a line, every word the speech model was
  * unsure of marked "(?)", plus the corrections already made: the input of the proofread pass. */
@@ -1303,7 +1311,7 @@ const tools: ToolDef[] = [
       const pops = popCards(p);
       if (pops.length > 2) notes.push(`${pops.length} big word cards (see wordCards): they read as filler and each one stays up about 2 s, past the end of a short line. Keep at most 2 (a number or a name the viewer must remember); replace the rest with a picture or an animation, or remove them.`);
       const flashes = await shortFlashes(ctx, p, ctx.transcript);
-      if (flashes.length) notes.push(`${flashes.length} visual${flashes.length > 1 ? 's are' : ' is'} on screen for under 1.2 s (see tooShort), too short to read. For each: extend its anchor to the end of its phrase (a picture needs about 2 s), or when the next visual starts right after it, keep the stronger one or move the next one later.`);
+      if (flashes.length) notes.push(`${flashes.length} picture or card${flashes.length > 1 ? 's are' : ' is'} on screen for under 1.2 s (see tooShort), too short to read. For each: extend its anchor to the end of its phrase (a picture needs about 2 s), or when the next visual starts right after it, keep the stronger one or move the next one later.`);
       const names = ctx.transcript ? unshownNames(p, ctx.transcript) : [];
       if (names.length) notes.push(`Named things the viewer hears but never sees (see namedNotShown). A brand, app, product, company or show: search_images "<name> logo" and place it on its words; a place or event: "<name> photo". Skip people the viewer would not know and anything that is not really a name.`);
       const moments = brollMoments(p);

@@ -173,6 +173,20 @@ describe('tool implementations', () => {
     expect(r.note).toMatch(/do not retry/);
   });
 
+  it('render_draft asks to lengthen a picture that flashes by, never a video clip meant to be short', async () => {
+    const { ctx, dir } = await ctxFor();
+    const p = await loadProject(dir);
+    p.broll.push({ id: 'still', anchor: { from: 'w29', to: 'w30' }, treatment: 'card-above-head', asset: 'work/assets/flour.png', params: {} } as any,
+      { id: 'clip', anchor: { from: 'w31', to: 'w32' }, treatment: 'full-frame', asset: 'Library/B-roll/pour.MP4', params: {} } as any);
+    await saveProject(dir, p);
+    await fsp.mkdir(path.join(dir, 'work', 'layers'), { recursive: true });
+    await fsp.writeFile(path.join(dir, 'work', 'layers', 'layers.json'), JSON.stringify({ items: [
+      { id: 'still', treatment: 'card-above-head', t0: 2.0, t1: 2.8 }, { id: 'clip', treatment: 'full-frame', t0: 5.0, t1: 5.8 }] }));
+    const r = JSON.parse((await executeTool(ctx, 'render_draft', {})).content);
+    expect(r.tooShort.map((f: { id: string }) => f.id)).toEqual(['still']);
+    expect(r.note).toMatch(/1 picture or card is on screen for under 1\.2 s/);
+  });
+
   it('render_draft turns an animation the cut moved onto the face into an actionable remake', async () => {
     const { ctx, host, dir } = await ctxFor();
     const p = await loadProject(dir);
