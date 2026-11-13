@@ -116,9 +116,10 @@ def test_the_same_cut_always_names_the_same_clip(tmp_path, video):
     item, _ = _made_on(ctx, fx.word_near(ctx, 2.0), fx.word_near(ctx, 4.5))
     fx.make_project(pdir, video, keep=((1.0, 3.0), (4.6, 11.0)))
     ctx = fx.make_ctx(pdir)
-    fx.set_project(ctx, broll=[item, {**item, "id": "b2"}])
+    # a second card on the same words that joins the first comes on with it: same spec + timing, one clip
+    fx.set_project(ctx, broll=[item, {**item, "id": "b2", "params": {"join": True}}])
     first = anim_timing.jobs(ctx)
-    assert len(first) == 1                                  # two items on one spec + timing: one clip
+    assert len(first) == 1
     assert anim_timing.jobs(fx.make_ctx(pdir)) == first      # deterministic: same project, same clip
 
 
@@ -164,3 +165,20 @@ def test_an_editor_choice_of_full_screen_is_kept(tmp_path, video):
     params = anim_timing.resolve(ctx, item, {"template": "list-reveal",
                                              "params": {"items": ["word5 x", "word9 y"], "layout": "full"}})
     assert params["layout"] == "full" and "region" not in params and len(params["at"]) == 2
+
+
+def test_an_animation_that_waits_for_the_card_before_it_lands_its_words_on_time(tmp_path, video):
+    pdir = tmp_path / "p"
+    fx.make_project(pdir, video, keep=((1.0, 11.0),))
+    ctx = fx.make_ctx(pdir)
+    a, b = fx.word_near(ctx, 3.0), fx.word_near(ctx, 5.0)
+    item, _ = _made_on(ctx, a, b)
+    img = fx.synth_images(tmp_path / "img")["screenshot"]
+    card = {"id": "b0", "anchor": {"from": fx.word_near(ctx, 2.4), "to": fx.word_near(ctx, 2.4)}, "leadIn": 0.13,
+            "treatment": "card-above-head", "asset": str(img), "params": {}}
+    fx.set_project(ctx, broll=[card, item])
+    start = {p["id"]: p for p in broll.plan_windows(ctx)}["b1"]["t0"]
+    assert start > broll.word_start(ctx, a) - 0.13 + 0.2                 # it waits for the card on screen
+    job = anim_timing.jobs(ctx)[0]
+    for wid, t in zip(broll.word_ids_between(ctx, a, b), job["params"]["wordTimes"]):
+        assert t == pytest.approx(max(0.0, broll.word_start(ctx, wid) - start), abs=0.002)   # on the spoken word

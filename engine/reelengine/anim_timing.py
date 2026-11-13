@@ -221,19 +221,26 @@ def spec_of(sidecar: dict) -> tuple[str, dict]:
     return str(sidecar.get("template") or ""), params
 
 
-def resolve(ctx, item: dict, sidecar: dict) -> dict:
+def resolve(ctx, item: dict, sidecar: dict, start: Optional[float] = None) -> dict:
     """The params the animation needs on the current cut: the editor's params, the beats re-timed
-    to its anchor words and the free region above the face over its new window."""
+    to its anchor words and the free region above the face over its new window. `start` (output s):
+    when the clip comes on, if not its first word minus its lead-in (a card before it held on)."""
     from .broll import LEAD, anim_context
+    from .compose_util import word_start
     template, params = spec_of(sidecar)
     anc = item.get("anchor") or {}
     a, b = anc.get("from"), anc.get("to") or anc.get("from")
     lead = float(item["leadIn"]) if item.get("leadIn") is not None else LEAD
+    s = word_start(ctx, a) if start is not None else None
+    if s is not None:
+        lead = s - start
     # the same window the editor asked anim-context about (ai/src/tools.ts makeAnimation): --duration
     # only when the editor set one
     duration = params.get("duration")
     ac = anim_context(ctx, a, b, float(duration) if duration else None, lead)
-    out = {**params, **beats(template, params, ac["words"])}
+    # a word already said when a late clip comes on lands at once
+    words = [{**w, "t": max(0.0, w["t"]), "e": max(0.0, w["e"])} for w in ac["words"]]
+    out = {**params, **beats(template, params, words)}
     # the editor's choice stays; otherwise full screen when the room above the face is too small for
     # anything, or for this text to read (as make_animation decides)
     layout = params.get("layout") or ac["layout"]
@@ -277,15 +284,15 @@ def retimed_path(ctx, template: str, params: dict) -> Path:
     return Path(ctx.work) / "animations" / f"{template}-{key(template, params)}.mov"
 
 
-def plan(ctx, item: dict, sidecar: dict) -> Optional[dict]:
-    """None when the item's clip (rendered with `sidecar`) still fits the cut; else {template,
-    params, out, ready}: the clip to play instead (`ready` once it has been rendered)."""
+def plan(ctx, item: dict, sidecar: dict, start: Optional[float] = None) -> Optional[dict]:
+    """None when the item's clip (rendered with `sidecar`) still fits the cut, coming on at `start`;
+    else {template, params, out, ready}: the clip to play instead (`ready` once it has been rendered)."""
     from .compose_util import EngineError
     template, _ = spec_of(sidecar)
     if not template:
         return None
     try:
-        params = resolve(ctx, item, sidecar)
+        params = resolve(ctx, item, sidecar, start)
     except EngineError:                  # anchor not in the cut: the item is skipped anyway
         return None
     want = {k: v for k, v in params.items() if not (k == "layout" and v == "top")}
@@ -309,16 +316,15 @@ def rendered_clips(project_dir: Path) -> dict:
 def jobs(ctx) -> list[dict]:
     """Every animation clip the current cut needs that is not rendered yet:
     [{id, template, params, out}] (out is an absolute path for the renderer)."""
-    from .broll import _anim_of
+    from .broll import _anim_of, plan_windows
     out, seen = [], set()
-    for i, it in enumerate((ctx.project or {}).get("broll") or []):
-        sc = _anim_of(ctx, it)
+    for w in plan_windows(ctx):                  # where each card actually comes on
+        sc = _anim_of(ctx, w["item"])
         if sc is None:
             continue
-        p = plan(ctx, it, sc)
+        p = plan(ctx, w["item"], sc, w["t0"])
         if p is None or p["ready"] or str(p["out"]) in seen:
             continue
         seen.add(str(p["out"]))
-        out.append({"id": it.get("id", f"b{i + 1}"), "template": p["template"], "params": p["params"],
-                    "out": str(p["out"])})
+        out.append({"id": w["id"], "template": p["template"], "params": p["params"], "out": str(p["out"])})
     return out

@@ -98,7 +98,9 @@ TITLE_PAD = 0.16               # title label padding, fraction of its type size
 PANEL_TEXT = 0.052             # words on a text panel: ~56 px at 1080 wide (shrinks to fit)
 PANEL_BORDER = 0.035           # white border around a framed screenshot, fraction of its width
 LOGO_GAP = 0.045               # between logos in a row, fraction of the frame width
-LOGO_MAX = 0.26                # a logo in a row is at most this tall (fraction of the frame width)
+LOGO_MAX = 0.26                # a logo in a row is at most this tall (fraction of the frame width)...
+LOGO_MIN = 0.09                # ...and at least this tall, else the logos go in a wall
+LOGOS_MAX = 6
 LOGO_LABEL = 0.55              # a lone logo's name label is this tall, relative to the logo
 PHONES_MAX = 4
 PHONE_RATIO = 19.5 / 9.0
@@ -222,19 +224,26 @@ def plan_windows(ctx) -> list[dict]:
                       "t0": t0, "t1": t1, "word_from": a, "word_to": b, "item": it, "min_hold": min_hold,
                       "joins": None})
     plans.sort(key=lambda p: (p["t0"], p["index"]))
-    for p, nxt in zip(plans, plans[1:]):
-        if (nxt["item"].get("params") or {}).get("join") and nxt["t0"] < p["t1"] + MIN_GAP:
-            nxt["joins"] = p["id"]            # stacks on p; both stay up until the last of them goes
+    groups: list[list[dict]] = []        # a card and the cards that join it: on screen together
+    for p in plans:
+        g = groups[-1] if groups else None
+        if g and (p["item"].get("params") or {}).get("join") and p["t0"] < max(m["t1"] for m in g) + MIN_GAP:
+            p["joins"] = g[-1]["id"]          # stacks on the card before it
+            p["t0"] = max(p["t0"], g[0]["t0"])
+            g.append(p)
             continue
-        if nxt["t0"] < p["t0"] + p["min_hold"]:
-            # hard-cut handoff, never before the card on screen has been read: the next one waits
-            nxt["t0"] = p["t0"] + p["min_hold"]
-            nxt["t1"] = max(nxt["t1"], nxt["t0"] + nxt["min_hold"])
-        if p["t1"] > nxt["t0"] or nxt["t0"] - p["t1"] < MIN_GAP:   # no flash of the bare face either
-            p["t1"] = nxt["t0"]
-    for p, nxt in reversed(list(zip(plans, plans[1:]))):
-        if nxt["joins"] == p["id"]:
-            p["t1"] = max(p["t1"], nxt["t1"])
+        ready = max(m["t0"] + m["min_hold"] for m in g) if g else 0.0
+        if p["t0"] < ready:
+            # hard-cut handoff, never before every card on screen has been read: the next one waits
+            p["t1"] = max(p["t1"], ready + p["min_hold"])
+            p["t0"] = ready
+        groups.append([p])
+    for g, nxt in zip(groups, groups[1:] + [None]):
+        end = max(m["t1"] for m in g)                 # a group leaves together...
+        if nxt is not None and (end > nxt[0]["t0"] or nxt[0]["t0"] - end < MIN_GAP):
+            end = nxt[0]["t0"]                        # ...on a hard cut to the next, never a flash of bare face
+        for m in g:
+            m["t1"] = end
     dur = float(getattr(ctx, "duration", 0.0) or 0.0)
     if dur:
         for p in plans:
@@ -593,15 +602,32 @@ def _enc(ctx) -> list:
     return ["-c:v", "libx264", "-preset", "medium", "-crf", "17", "-pix_fmt", "yuv420p"]
 
 
-def _clip_window(ctx, src: Path, params: dict, want: float) -> tuple[float, float]:
-    """(in-point, usable duration) for a video asset; never asks for more than the clip has, and
-    never starts within a second of a cut to another shot (_clean_start)."""
+def _clip_window(ctx, src: Path, params: dict, want: float) -> tuple[Path, float, float]:
+    """(clip, in-point, duration) for a video asset: never more than the clip has (a card leaves when
+    its footage ends), never starting within a second of a cut to another shot (_clean_start), and
+    never under a card's 2 s hold: a shorter clip holds its last frame up to it (_held)."""
     info = probe(src, ctx)
     cin = float(params.get("in", 0.0) or 0.0)
     if info["duration"] - cin <= 0.1:
         cin = 0.0
     cin = _clean_start(ctx, src, cin, info["duration"])
-    return cin, min(want, max(0.0, info["duration"] - cin))
+    have = max(0.0, info["duration"] - cin)
+    hold = min(want, MIN_HOLD)
+    if have >= hold - 1e-3:
+        return src, cin, min(want, have)
+    return _held(ctx, src, cin, have, hold), 0.0, hold
+
+
+def _held(ctx, src: Path, cin: float, have: float, dur: float) -> Path:
+    """`have` seconds of the clip from `cin`, its last frame held to `dur` seconds."""
+    out = layers_dir(ctx) / f"held-{_key(_asset_sig(src), round(cin, 3), round(dur, 3), _enc(ctx))}.mp4"
+    if not out.exists():
+        tmp = out.with_name(out.stem + ".part.mp4")
+        run([ffmpeg_bin(ctx), "-y", "-v", "error", "-nostdin", "-ss", f"{cin:.3f}", "-t", f"{have:.3f}", "-i", str(src),
+             "-vf", f"tpad=stop_mode=clone:stop_duration={dur - have + 0.1:.3f}", "-an", *_enc(ctx), "-t", f"{dur:.3f}",
+             str(tmp)], timeout=120, what="short clip hold")
+        tmp.replace(out)
+    return out
 
 
 def _video_card(ctx, src: Path, cin: float, dur: float, chrome, screen_xy, mask, stem: str) -> Path:
@@ -893,7 +919,7 @@ def _t_card(ctx, plan, params, kind, src, zones, face, frame, where="above-face"
     cw = min(fit_rotated(aspect, gz["w"], gz["h"], 0, pad) * min(1.0, scale), maxw * W)
     if not readable(cw, cw / aspect, W, H, bool(params.get("iconic")), params, scale) and fallback_ok:
         return _card_fallback(ctx, plan, params, kind, src, zones, face, frame, aspect, bool(params.get("iconic")))
-    cin, dur = _clip_window(ctx, src, params, plan["t1"] - plan["t0"])
+    src, cin, dur = _clip_window(ctx, src, params, plan["t1"] - plan["t0"])
     plan["t1"] = plan["t0"] + dur
     cw, ch = int(round(cw)) // 2 * 2, int(round(cw / aspect)) // 2 * 2
     from PIL import Image, ImageDraw
@@ -1110,7 +1136,7 @@ def _t_phone(ctx, plan, params, kind, src, zones, face, frame):
             png = _save_png(top, ctx, stem + "-top")
             path = _split_video(ctx, plan["t0"], plan["t1"], src, "image", 0.0, params, face, stem, top_png=png)
         else:
-            cin, dur = _clip_window(ctx, src, params, plan["t1"] - plan["t0"])
+            src, cin, dur = _clip_window(ctx, src, params, plan["t1"] - plan["t0"])
             plan["t1"] = plan["t0"] + dur
             card = _video_card(ctx, src, cin, dur, body, (ox, oy), mask, stem + "-ph")
             top_bg = _save_png(top, ctx, stem + "-bg")
@@ -1129,7 +1155,7 @@ def _t_phone(ctx, plan, params, kind, src, zones, face, frame):
         path = _save_png(canvas, ctx, stem)
         return [Layer(path, "image", plan["t0"], plan["t1"], x, y, canvas.width, canvas.height, 0.0)], \
             {"zone": z["zone"], "bbox": _opaque_bbox(canvas, x, y)}
-    cin, dur = _clip_window(ctx, src, params, plan["t1"] - plan["t0"])
+    src, cin, dur = _clip_window(ctx, src, params, plan["t1"] - plan["t0"])
     plan["t1"] = plan["t0"] + dur
     path = _video_card(ctx, src, cin, dur, body, (ox, oy), mask, stem)
     x, y = _place_in(z, body.width, body.height, z["x"] + z["w"] / 2, cy)
@@ -1174,7 +1200,7 @@ def _t_full(ctx, plan, params, kind, src, zones, face, frame):
             canvas.alpha_composite(c, ((W - c.width) // 2, (H - c.height) // 2))
         path = _save_png(canvas.convert("RGBA"), ctx, stem)
         return [Layer(path, "image", plan["t0"], plan["t1"], 0, 0, W, H, 0.0)], {"zone": "full", "bbox": (0, 0, W, H)}
-    cin, dur = _clip_window(ctx, src, params, plan["t1"] - plan["t0"])
+    src, cin, dur = _clip_window(ctx, src, params, plan["t1"] - plan["t0"])
     plan["t1"] = plan["t0"] + dur
     info = probe(src, ctx)
     if fit == "auto":
@@ -1203,7 +1229,7 @@ def _t_split(ctx, plan, params, kind, src, zones, face, frame):
         png = _save_png(top, ctx, stem + "-top")
         path = _split_video(ctx, plan["t0"], plan["t1"], src, "image", 0.0, params, face, stem, top_png=png)
     else:
-        cin, dur = _clip_window(ctx, src, params, plan["t1"] - plan["t0"])
+        src, cin, dur = _clip_window(ctx, src, params, plan["t1"] - plan["t0"])
         plan["t1"] = plan["t0"] + dur
         path = _split_video(ctx, plan["t0"], plan["t1"], src, "video", cin, params, face, stem)
     rec = {"zone": "split-top", "bbox": (0, 0, W, th), "split": th}
@@ -1264,7 +1290,8 @@ def _items(ctx, plan, params) -> list[Path]:
     if not paths:
         raise EngineError("WALL_EMPTY", f"{plan['id']}: wall has no images",
                           "This picture wall has no pictures in it yet.")
-    return paths
+    # the editor's blur and crop boxes apply to every picture in the card (the same spot on each screen)
+    return [_prepared_still(ctx, q, params) if kind_of(q) == "image" else q for q in paths]
 
 
 def _contained(ctx, q: Path) -> bool:
@@ -1537,6 +1564,9 @@ def _t_panel(ctx, plan, params, kind, src, zones, face, frame):
     while panel.height > zone["h"] - 2 * pad and size > int(0.03 * W):     # long words: smaller type
         size = int(size * 0.92)
         panel = _text_panel(text, width, size, W)
+    if panel.height > zone["h"] - 2 * pad:
+        raise EngineError("PANEL_TOO_LONG", f"{plan['id']}: {len(text.split())} words don't fit above the face",
+                          "This panel has too many words to read above your face. Use fewer words.")
     canvas = _rotate(_with_shadow(panel, pad), tilt)
     x, y = _place_in(shadow_zone(zone, W, H, pad), canvas.width, canvas.height, face[0] + face[2] / 2,
                      zone["y"] + zone["h"])
@@ -1559,6 +1589,10 @@ def _t_logo_row(ctx, plan, params, kind, src, zones, face, frame):
     label_a = probe_img.width / probe_img.height * LOGO_LABEL if probe_img else 0.0
     room = zone["w"] * 0.94 - gap * (len(logos) - 1 + (1 if name else 0))
     h = min(zone["h"] * 0.8, room / (sum(aspects) + label_a), LOGO_MAX * W)
+    if len(logos) > LOGOS_MAX or h < LOGO_MIN * W:
+        layers, rec = _t_icon_wall(ctx, plan, params, kind, src, zones, face, frame)
+        return layers, {**rec, "fallback": "too many logos to read in one row; shown as a wall",
+                        "fallbackTreatment": "icon-wall"}
     total = h * sum(aspects) + h * label_a + gap * (len(logos) - 1 + (1 if name else 0))
     x = zone["x"] + (zone["w"] - total) / 2
     y = int(round(zone["y"] + zone["h"] - h))                 # as low as the brows allow
@@ -1604,8 +1638,8 @@ def _t_phone_row(ctx, plan, params, kind, src, zones, face, frame):
         y0 = int(round(top + (bottom - top - body.height) / 2))
         stem = f"{plan['id']}-ph{k}-{_key(_asset_sig(p), sw, sh, params.get('focusY'))}"
         if kind_of(p) == "video":
-            cin, dur = _clip_window(ctx, p, {}, plan["t1"] - times[k])
-            path = _video_card(ctx, p, cin, dur, body, (ox, oy), mask, stem)
+            clip, cin, dur = _clip_window(ctx, p, {}, plan["t1"] - times[k])
+            path = _video_card(ctx, clip, cin, dur, body, (ox, oy), mask, stem)
             layers.append(Layer(path, "video", times[k], times[k] + dur, x0, y0, body.width, body.height, 0.0, k + 1))
         else:
             body.paste(_phone_screen(ctx, p, "image", sw, sh, params), (ox, oy), mask)
@@ -1620,7 +1654,8 @@ def _unit_box(v) -> Optional[tuple]:
     if not isinstance(v, (list, tuple)) or len(v) != 4 or not all(isinstance(c, (int, float)) for c in v):
         return None
     x, y, w, h = (min(max(float(c), 0.0), 1.0) for c in v)
-    return (x, y, min(w, 1 - x), min(h, 1 - y)) if w > 0.005 and h > 0.005 else None
+    w, h = min(w, 1 - x), min(h, 1 - y)                     # clipped to the picture first
+    return (x, y, w, h) if w > 0.005 and h > 0.005 else None
 
 
 def _prepared_still(ctx, src: Path, params: dict) -> Path:
@@ -1725,7 +1760,7 @@ def _t_wide(ctx, plan, params, kind, src, zones, face, frame):
         canvas.alpha_composite(img.resize((fw, fh), Image.LANCZOS), (fx, fy))
         path = _save_png(canvas, ctx, stem)
         return [Layer(path, "image", plan["t0"], plan["t1"], 0, 0, W, H, 0.0)], {"zone": "full", "bbox": (0, 0, W, H)}
-    cin, dur = _clip_window(ctx, src, params, plan["t1"] - plan["t0"])
+    src, cin, dur = _clip_window(ctx, src, params, plan["t1"] - plan["t0"])
     plan["t1"] = plan["t0"] + dur
     out = layers_dir(ctx) / f"{stem}-{_key(round(cin, 3), round(dur, 3), _enc(ctx))}.mp4"
     if not out.exists():
@@ -1867,7 +1902,7 @@ def build_layers(ctx) -> list:
                                   "This b-roll is set to show an animation, but its file isn't one. Make the animation again.")
             retime = None
             if tname == "animation":
-                src, retime = _current_animation(ctx, it, src)
+                src, retime = _current_animation(ctx, it, src, plan["t0"])
             if plan["joins"] and (it.get("params") or {}).get("scale") is None:
                 params["scale"] = JOIN_SCALE
             zones, face, frame = zones_for(ctx, plan["t0"], plan["t1"])
@@ -1920,12 +1955,12 @@ def build_layers(ctx) -> list:
     return sorted(out, key=lambda L: L.z)
 
 
-def _current_animation(ctx, item: dict, src: Path) -> tuple[Path, Optional[str]]:
+def _current_animation(ctx, item: dict, src: Path, start: float) -> tuple[Path, Optional[str]]:
     """The clip an animation item plays on this cut (see anim_timing): its own clip while its beats
     and region still fit, else the clip re-timed to the cut. -> (path, "retimed" | "pending" | None);
     "pending" = the re-timed clip is not rendered yet (the app renders it before the next render),
-    so the old one plays."""
-    p = anim_timing.plan(ctx, item, animation_sidecar(src) or {})
+    so the old one plays. `start`: when it comes on (later than its words when a card before it holds)."""
+    p = anim_timing.plan(ctx, item, animation_sidecar(src) or {}, start)
     if p is None:
         return src, None
     if p["ready"]:
