@@ -47,12 +47,23 @@ def find_git_bash() -> str | None:
     return str(bash) if bash.is_file() else None
 
 
+def remove_tree(path: Path) -> None:
+    """Delete a temp repo. git makes its object files read-only, which Windows refuses to delete as they are."""
+    def writable_then_retry(func, p, _exc):
+        os.chmod(p, 0o700)
+        func(p)
+    if sys.version_info >= (3, 12):
+        shutil.rmtree(path, onexc=writable_then_retry)
+    else:
+        shutil.rmtree(path, onerror=writable_then_retry)
+
+
 class Kit(unittest.TestCase):
     """A temp git repo holding copies of the shipped hooks and scripts, with planted patterns."""
 
     def setUp(self):
         self.root = Path(tempfile.mkdtemp(prefix="leakcheck-"))
-        self.addCleanup(shutil.rmtree, self.root, ignore_errors=True)
+        self.addCleanup(remove_tree, self.root)
         kit = self.root / "scripts" / "leak-check"
         kit.mkdir(parents=True)
         for name in ("check.py", "agent_hook.py", "with-python.sh"):
