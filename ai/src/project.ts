@@ -30,8 +30,9 @@ export interface Captions { enabled: boolean; style: CaptionStyle; corrections: 
 
 export type MusicLevel = 'under-voice' | 'quiet' | 'loud-intro';
 export interface MusicAutomation { fromWord: string; toWord: string; gainDb: number }
-/** The song's beats, stored when it is chosen: whole frames of SONG time at fps (engine beats.py). */
-export interface BeatGrid { fps: number; frames: number[] }
+/** The song's beats, stored when it is chosen: whole frames of SONG time at fps, the song's length, and the
+ * SHA-256 of the file they were measured on (engine beats.py ignores a grid measured on another file). */
+export interface BeatGrid { fps: number; frames: number[]; seconds: number; sha256: string }
 export const BEAT_KINDS = ['cuts', 'zooms', 'broll'] as const;
 export type BeatKind = (typeof BEAT_KINDS)[number];
 /** A line the music drops out for: gone just before `from`, back on the first beat after `to`. */

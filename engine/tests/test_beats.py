@@ -10,22 +10,53 @@ FPS = 30.0
 SRC = {"s1": {"duration": 12.0, "fps": FPS}}
 
 
-def proj_with(grid_frames, start_at=0.0, on_beat=("cuts", "zooms", "broll")):
+SONG_SECONDS = 30.0
+
+
+@pytest.fixture
+def song(tmp_path):
+    """A stand-in song file in the project's media/ (only its bytes are hashed here)."""
+    p = tmp_path / "media" / "song.mp3"
+    p.parent.mkdir()
+    p.write_bytes(b"a song")
+    return p
+
+
+def proj_with(song, grid_frames, start_at=0.0, on_beat=("cuts", "zooms", "broll")):
+    grid = {"fps": FPS, "frames": list(grid_frames), "seconds": SONG_SECONDS, "sha256": beats.file_sha256(song)}
     return {"format": {"width": 1080, "height": 1920, "fps": FPS},
-            "music": {"enabled": True, "track": "Library/Music/song.mp3", "startAt": start_at,
-                      "beats": {"fps": FPS, "frames": list(grid_frames)}, "onBeat": list(on_beat)}}
+            "music": {"enabled": True, "track": "media/song.mp3", "startAt": start_at, "beats": grid,
+                      "onBeat": list(on_beat)}}
 
 
-def test_grid_is_whole_frames_of_song_time_and_moves_with_the_start_point():
-    g = beats.quantise([0.497, 0.995, 1.496, 0.995, -0.01], FPS)
-    assert g == {"fps": FPS, "frames": [15, 30, 45]}
+def test_grid_is_whole_frames_of_song_time_and_moves_with_the_start_point(song):
+    g = beats.quantise([0.497, 0.995, 1.496, 0.995, -0.01], FPS, 29.996, "abc")
+    assert g == {"fps": FPS, "frames": [15, 30, 45], "seconds": 30.0, "sha256": "abc"}
     # the song starts 0.4 s in: its beat at 0.5 s plays 0.1 s into the video, on the output frame grid
-    assert beats.output_grid(proj_with(g["frames"], start_at=0.4)) == pytest.approx([0.1, 0.6, 1.1])
+    assert beats.output_grid(proj_with(song, g["frames"], start_at=0.4), song) == pytest.approx([0.1, 0.6, 1.1])
     # nothing to land on without a song, or when that kind isn't asked for
-    off = proj_with(g["frames"])
+    assert beats.output_grid(proj_with(song, g["frames"]), None) == []
+    assert beats.synced(proj_with(song, g["frames"], on_beat=("zooms",)), "cuts", song) == []
+    off = proj_with(song, g["frames"])
     off["music"]["enabled"] = False
-    assert beats.output_grid(off) == []
-    assert beats.synced(proj_with(g["frames"], on_beat=("zooms",)), "cuts") == []
+    assert beats.song_path(song.parent.parent, off) is None
+
+
+def test_a_grid_measured_on_another_song_is_never_used(song):
+    proj = proj_with(song, [15, 30, 45])
+    assert beats.output_grid(proj, song) != []
+    song.write_bytes(b"another song, put in by hand under the same name")
+    assert beats.output_grid(proj, song) == []
+    proj["music"]["beats"].pop("sha256")              # a grid that says nothing about its song
+    assert beats.output_grid(proj, song) == []
+
+
+def test_the_grid_and_the_mixer_start_the_song_at_the_same_place(song):
+    # a start that leaves less than END_MARGIN of the song plays the song from the top: the grid too
+    assert beats.effective_start(12.0, SONG_SECONDS) == 12.0
+    near_end = SONG_SECONDS - beats.END_MARGIN + 0.2
+    assert beats.effective_start(near_end, SONG_SECONDS) == 0.0
+    assert beats.output_grid(proj_with(song, [15, 30], start_at=near_end), song) == pytest.approx([0.5, 1.0])
 
 
 def test_snap_reaches_only_as_far_as_allowed():
@@ -96,23 +127,24 @@ def test_a_cut_that_takes_out_a_pause_inside_a_range_lands_on_a_beat_too():
     assert (second.src_start, second.src_end) == (plain.segments[1].src_start, plain.segments[1].src_end)
 
 
-def ctx_for(proj, words):
+def ctx_for(proj, words, song):
     tl = cut.build_timeline(words, KEEP, SRC)
-    return SimpleNamespace(project=proj, fmt=proj["format"], duration=tl.duration, words=words,
-                           word_out_time=tl.word_out_time, word_out_end=tl.word_out_end, is_kept=tl.is_kept,
-                           out_timeline=tl.segments, work="."), tl
+    pdir = song.parent.parent
+    return SimpleNamespace(project=proj, project_dir=pdir, root=pdir, fmt=proj["format"], duration=tl.duration,
+                           words=words, word_out_time=tl.word_out_time, word_out_end=tl.word_out_end,
+                           is_kept=tl.is_kept, out_timeline=tl.segments, work="."), tl
 
 
-def test_zoom_and_broll_entrances_land_on_the_beat():
+def test_zoom_and_broll_entrances_land_on_the_beat(song):
     w = words_two_takes()
-    _, tl = ctx_for(proj_with([]), w)
+    _, tl = ctx_for(proj_with(song, []), w, song)
     word = tl.word_out_time("w1")
     beat = round((word - 0.1) * FPS) / FPS        # a beat a few frames before the word
-    proj = proj_with([round(beat * FPS)])
+    proj = proj_with(song, [round(beat * FPS)])
     proj["zooms"] = [{"anchor": {"from": "w1", "to": "w2"}, "scale": 1.2, "focus": [0.5, 0.4]}]
     proj["broll"] = [{"id": "b1", "anchor": {"from": "w1", "to": "w2"}, "treatment": "text-pop",
                       "leadIn": 0.0, "params": {"text": "x"}}]
-    ctx, _ = ctx_for(proj, w)
+    ctx, _ = ctx_for(proj, w, song)
     assert zoom.build_zooms(ctx, with_broll=False)[0].t0 == pytest.approx(beat)
     assert broll.plan_windows(ctx)[0]["t0"] == pytest.approx(beat)
     # without onBeat they land on the word, as before

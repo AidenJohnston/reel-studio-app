@@ -733,7 +733,7 @@ def run(project_dir: Path, draft: bool = False, window: Optional[str] = None,
     root = tools.root_dir(str(root) if root else None)
     progress(STAGE, 1, "Getting your video ready", force=True)
     words = projmod.load_transcript(project_dir, proj)["words"]
-    tl = projmod.timeline(project_dir, proj, words)
+    tl = projmod.timeline(project_dir, proj, words, root=root)
     if tl.duration < 0.3 or not tl.segments:
         raise EngineError("EMPTY_CUT", "the cut is empty", "There's nothing left in the edit. Undo the last change.")
     win = parse_window(window, tl.duration)

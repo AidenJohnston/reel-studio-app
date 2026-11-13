@@ -342,13 +342,13 @@ def _ramp(n: int, up: bool) -> np.ndarray:
     return r if up else r[::-1]
 
 
-def drop_windows(ctx, mcfg: dict, dur: float) -> list[dict]:
+def drop_windows(ctx, mcfg: dict, dur: float, track: Optional[Path]) -> list[dict]:
     """music.drops -> [{"from", "to", "out", "back", "onBeat"}] on the output clock, frame-aligned: the music
     leaves DROP_LEAD before the line's first word and comes back on the first beat within
     DROP_BACK_WITHIN of its last word (else DROP_BACK_AFTER after it). A line the cut removed, or one
     that ends where it starts, has no window."""
     fps = fmt_of(ctx)[2]
-    grid = beatmod.output_grid(ctx.project)
+    grid = beatmod.output_grid(ctx.project, track)
     out = []
     for d in mcfg.get("drops") or []:
         t0, t1 = word_start(ctx, d.get("from")), word_end(ctx, d.get("to"))
@@ -395,28 +395,42 @@ def throw_impulse(sr: int = SR) -> np.ndarray:
     return (ir / np.sqrt((ir ** 2).sum() / 2)).astype(np.float32)
 
 
-def last_kept_word(ctx) -> Optional[str]:
-    """The id of the word the video ends on (the latest-ending kept word)."""
-    best = None
-    for wid in ctx_words(ctx):
-        if not ctx.is_kept(wid):
-            continue
-        e = word_end(ctx, wid)
-        if e is not None and (best is None or e > best[0]):
-            best = (e, wid)
-    return best[1] if best else None
+def final_word(ctx) -> Optional[tuple[str, float, float]]:
+    """(id, output start, output end) of the word the video ends on: the last word of the cut's last
+    segment, placed through that segment. A word id can play twice (a range kept twice) and a word's text
+    can repeat, so neither the id's first appearance nor its text says where the video ends."""
+    segs = list(getattr(ctx, "out_timeline", None) or [])
+    wid = segs[-1].last_word if segs else None
+    w = ctx_words(ctx).get(wid) if wid else None
+    if w is None:
+        return None
+    last = segs[-1]
+
+    def out_at(t: float) -> float:          # through the pieces of the last kept range, newest first
+        for seg in reversed(segs):
+            if seg.source == last.source and seg.src_start - 1e-6 <= t <= seg.src_end + 1e-6:
+                return seg.out_start + (t - seg.src_start)
+            if seg.first_word is not None:
+                return seg.out_start        # the range's first piece: snapping moved its start past t
+        return last.out_start
+    end = last.out_start + (min(float(w["e"]), last.src_end) - last.src_start)
+    return wid, min(out_at(float(w["s"])), end), end
 
 
 def reverb_throw(ctx, voice: np.ndarray, offset: float = 0.0) -> tuple[Optional[np.ndarray], Optional[dict]]:
-    """The wet tail of a reverb fed only the voice's final THROW_S (from the last word's end back, never
-    before that word starts), as a track the length of `voice`, levelled from the measured voice: its
-    loudest moment THROW_DB under that word's (or the speech loudness, if lower). The dry voice is untouched. A tail still ringing
-    when the video ends fades out over THROW_END_FADE. (None, None) when there is no last word."""
-    wid = last_kept_word(ctx)
-    if wid is None:
+    """The wet tail of a reverb fed only the voice's final THROW_S (from the final word's end back, never
+    before that word starts), as a track the length of `voice`. A pure function of that send: its samples
+    are placed on the output clock's sample grid, the impulse response is fixed, and the tail's loudest
+    moment sits THROW_DB under the word it echoes. Nothing else in the voice (an earlier edit, or how much
+    of the video a preview window holds) changes it. The dry voice is untouched. A tail still ringing when
+    the video ends fades out over THROW_END_FADE. (None, None) when there is no final word."""
+    fw = final_word(ctx)
+    if fw is None:
         return None, None
-    ws, we = word_start(ctx, wid) - offset, word_end(ctx, wid) - offset
-    a, b = int(max(0.0, ws, we - THROW_S) * SR), min(len(voice), int((we + 0.03) * SR))
+    wid, ws, we = fw
+    base = int(round(offset * SR))
+    a = max(0, int(round(max(ws, we - THROW_S) * SR)) - base)
+    b = min(len(voice), int(round((we + 0.03) * SR)) - base)
     if b - a < int(0.05 * SR):
         return None, None
     send = voice[a:b].copy()
@@ -427,19 +441,18 @@ def reverb_throw(ctx, voice: np.ndarray, offset: float = 0.0) -> tuple[Optional[
     m = len(send) + len(ir) - 1
     nfft = 1 << (m - 1).bit_length()
     wet = np.fft.irfft(np.fft.rfft(send, nfft, axis=0) * np.fft.rfft(ir, nfft, axis=0), nfft, axis=0)[:m]
+    # level from the word it echoes, measured on the whole tail before the video's end can cut it: a soft
+    # last word gets a soft tail, and a word lost in room noise cannot become a loud wash of that noise
+    word = float(lufs(block_power(np.pad(send, ((int(0.4 * SR), 0), (0, 0))), SR, 0.4, 0.05)).max())
+    peak = float(lufs(block_power(wet, SR, 0.4, 0.05)).max())
+    wet = (wet * 10 ** ((word + THROW_DB - peak) / 20)).astype(np.float32)
     out = np.zeros_like(voice)
     n = min(m, len(voice) - a)
     out[a:a + n] = wet[:n]
-    f = min(n, int(THROW_END_FADE * SR))
     if n < m:                                   # cut off by the end of the video
+        f = min(n, int(THROW_END_FADE * SR))
         out[a + n - f:a + n] *= _ramp(f, False)[:, None]
-    # level from the word it echoes (never over the voice's speech loudness): a soft last word gets a
-    # soft tail, and a word lost in the room noise cannot be turned into a loud wash of that noise
-    _, V = speech_mask(voice)
-    word = float(lufs(block_power(np.pad(send, ((int(0.4 * SR), 0), (0, 0))), SR, 0.4, 0.05)).max())
-    peak = float(lufs(block_power(out, SR, 0.4, 0.05)).max())
-    out *= np.float32(10 ** ((min(V, word) + THROW_DB - peak) / 20))
-    return out, {"word": wid, "from": round(a / SR + offset, 3), "to": round(b / SR + offset, 3),
+    return out, {"word": wid, "from": round((a + base) / SR, 3), "to": round((b + base) / SR, 3),
                  "underWordDb": THROW_DB}
 
 
@@ -492,10 +505,8 @@ def build_audio(ctx, voice_wav) -> Path:
     mix = voice.copy()
     if track is not None:
         report(ctx, "music", 25, "Adding music")
-        start = float(mcfg.get("startAt", 0.0) or 0.0) + offset
-        tinfo = probe(track, ctx)
-        if start >= tinfo["duration"] - 1.0:
-            start = 0.0
+        # the same start the beat grid is read from (beats.effective_start), then the window's offset
+        start = beatmod.effective_start(mcfg.get("startAt", 0.0) or 0.0, probe(track, ctx)["duration"]) + offset
         music = decode(track, ctx, start=start, dur=dur, af=MUSIC_EQ)
         short = music.shape[0] < voice.shape[0] - SR * 0.1
         if music.shape[0] < voice.shape[0]:
@@ -516,7 +527,7 @@ def build_audio(ctx, voice_wav) -> Path:
         fo = max(float(mcfg.get("fadeOut", 1.5) or 0.0), DECLICK)
         k = min(n, int(fo * SR))
         gain[n - k:] *= _ramp(k, False)
-        drops = drop_windows(ctx, mcfg, offset + dur)
+        drops = drop_windows(ctx, mcfg, offset + dur, track)
         if drops:
             gain *= drop_gate(n, drops, offset)
         bed = music * gain[:, None]

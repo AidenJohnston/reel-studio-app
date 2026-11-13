@@ -49,7 +49,7 @@ def clamp_centre(scale: float, cx: float, cy: float, W: int, H: int) -> tuple[fl
 def build_zooms(ctx, with_broll: bool = True) -> list:
     """project.zooms -> [ZoomSpan] on the output clock, sorted, non-overlapping."""
     W, H, fps = fmt_of(ctx)
-    grid = beats.synced(ctx.project, "zooms")
+    grid = beats.ctx_synced(ctx, "zooms")
     spans = []
     for i, z in enumerate((ctx.project or {}).get("zooms") or []):
         anc = z.get("anchor") or {}

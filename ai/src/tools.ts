@@ -1,10 +1,11 @@
 // The editor's actions (docs/architecture.md section 6). One provider-neutral tool layer: strict JSON-schema
 // definitions + implementations over the project API and the EngineHost.
+import * as crypto from 'node:crypto';
 import * as fs from 'node:fs';
 import * as fsp from 'node:fs/promises';
 import * as path from 'node:path';
 import {
-  Analysis, BEAT_KINDS, BeatGrid, BeatKind, Broll, LIBRARY_FOLDERS, LibraryKind, MusicDrop, MusicLevel, Project, Sfx,
+  Analysis, BEAT_KINDS, BeatGrid, BeatKind, Broll, LIBRARY_FOLDERS, LibraryKind, Music, MusicDrop, MusicLevel, Project, Sfx,
   Transcript, TREATMENTS, Word, WordAnchor,
   anchorText, anchorWords, approxDuration, approxOutputTimes, keptWords, loadAnalysis, loadProject, loadTranscript,
   nextBrollId, normalizeKeep, saveProject, validateProject, wordIndex, anchorProblem,
@@ -251,7 +252,7 @@ function projectView(ctx: ToolContext, p: Project, t: Transcript): unknown {
     sources: p.sources.map((s) => ({ id: s.id, duration: s.duration, mirror: s.mirror === true })),
     cut: cutSummary(t, p),
     captions: p.captions,
-    music: p.music,
+    music: musicView(p.music, times),
     broll: p.broll.map((b) => ({ ...b, says: quote(t, b.anchor), approxOutSec: times.get(b.anchor.from)?.s ?? null })),
     zooms: p.zooms.map((z) => ({ ...z, says: quote(t, z.anchor) })),
     cover: p.cover,
@@ -259,6 +260,36 @@ function projectView(ctx: ToolContext, p: Project, t: Transcript): unknown {
     notes: p.notes,
     lastRender: ctx.state.renders.at(-1)?.version ?? null,
   };
+}
+
+/** The music as the model sees it: the beat grid's frames (hundreds of numbers only the engine reads)
+ * become its tempo and beat count, and each drop says when the music comes back on a beat. */
+export function musicView(m: Music, times: Map<string, { s: number; e: number }>): unknown {
+  const { beats, ...rest } = m;
+  if (!beats) return rest;
+  const f = beats.frames;
+  const steps = f.slice(1).map((x, i) => x - f[i]).sort((a, b) => a - b);
+  const bpm = steps.length ? Math.round((60 * beats.fps) / steps[steps.length >> 1]) : null;
+  const heard = f.map((x) => x / beats.fps - (m.startAt || 0)).filter((t) => t >= 0);
+  const drops = m.drops?.map((d) => {
+    const end = times.get(d.to)?.e;
+    const back = end === undefined ? undefined : heard.find((t) => t >= end && t - end <= 1);
+    return { ...d, backOnBeatAtSec: back === undefined ? null : Math.round(back * 100) / 100 };
+  });
+  return { ...rest, beats: { bpm, count: f.length }, ...(drops ? { drops } : {}) };
+}
+
+async function fileSha256(file: string): Promise<string> {
+  const h = crypto.createHash('sha256');
+  for await (const chunk of fs.createReadStream(file)) h.update(chunk as Buffer);
+  return h.digest('hex');
+}
+
+/** Whether the stored beat grid was measured on the song file that plays now (a song changed by hand keeps
+ * the old song's grid, which the engine then ignores). */
+async function gridMatches(grid: BeatGrid | undefined, songFile: string | null): Promise<boolean> {
+  if (!grid?.sha256 || !songFile) return false;
+  try { return grid.sha256 === await fileSha256(songFile); } catch { return false; }
 }
 
 async function engine(ctx: ToolContext, command: string, extra: string[] = [], stageMessage?: string): Promise<any> {
@@ -597,7 +628,8 @@ async function analyzeMusic(ctx: ToolContext, ref: string, fps: number): Promise
         duration: r.duration, bpm: r.bpm, energy: r.energy, mood: r.mood, tags: r.tags, suggestedStartAt: r.suggestedStartAt,
         arrivals: Array.isArray(r.arrivals) ? r.arrivals.map((a: any) => ({ at: a.at, riseDb: a.riseDb })) : undefined,
       },
-      beats: grid && Array.isArray(grid.frames) && grid.frames.length ? { fps: grid.fps, frames: grid.frames } : null,
+      beats: grid && Array.isArray(grid.frames) && grid.frames.length && typeof grid.sha256 === 'string'
+        ? { fps: grid.fps, frames: grid.frames, seconds: grid.seconds, sha256: grid.sha256 } : null,
     };
   } catch {
     return null;
@@ -873,19 +905,21 @@ const tools: ToolDef[] = [
       }
       const { p: before } = await load(ctx);
       const prev = before.music;
+      // the same song name over another file (replaced by hand) is a new song: its grid is stale
+      const newSong = ref !== prev.track || (!!abs && !!prev.beats && !(await gridMatches(prev.beats, abs)));
       // a new song with no start point: start on the attack the engine hears after a calm bar
-      const heard = abs && ref !== prev.track ? await analyzeMusic(ctx, abs, before.format.fps) : null;
+      const heard = abs && newSong ? await analyzeMusic(ctx, abs, before.format.fps) : null;
       const song = heard?.song ?? null;
       const startAt = args.startAt !== null && args.startAt !== undefined ? args.startAt
-        : (song && typeof song.suggestedStartAt === 'number' ? song.suggestedStartAt : (ref !== prev.track ? 0 : undefined));
+        : (song && typeof song.suggestedStartAt === 'number' ? song.suggestedStartAt : (newSong ? 0 : undefined));
       // with edits on the beat, another song, no song or another start point moves the picture too
-      const movesBeats = !!prev.onBeat?.length && (ref !== prev.track || (ref !== null) !== prev.enabled
+      const movesBeats = !!prev.onBeat?.length && (newSong || (ref !== null) !== prev.enabled
         || (startAt !== undefined && startAt !== prev.startAt));
       await mutate(ctx, movesBeats ? 'beat' : 'music', (p) => {
         p.music.track = ref;
         p.music.enabled = ref !== null;
         if (startAt !== undefined) p.music.startAt = startAt;
-        if (ref !== prev.track) {          // another song's beats would put cuts between this one's
+        if (newSong) {                     // another song's beats would put cuts between this one's
           if (heard?.beats) p.music.beats = heard.beats; else delete p.music.beats;
         }
         if (args.level) p.music.level = args.level as MusicLevel;
@@ -897,7 +931,8 @@ const tools: ToolDef[] = [
       const summary = !name ? 'Took the music out'
         : ref === prev.track && prev.enabled ? (args.level && args.level !== prev.level ? levelWord[args.level] ?? 'Adjusted the music' : 'Adjusted the music')
         : `Added the song "${name}"`;
-      return { content: { ok: true, music: ctx.project!.music, ...(song ? { song } : {}) }, summary };
+      const times = approxOutputTimes(ctx.transcript!, ctx.project!.cut.keep, ctx.project!.cut.gapCap);
+      return { content: { ok: true, music: musicView(ctx.project!.music, times), ...(song ? { song } : {}) }, summary };
     },
   },
   {
@@ -938,16 +973,17 @@ const tools: ToolDef[] = [
       let heard: Awaited<ReturnType<typeof analyzeMusic>> = null;
       // a song chosen before beats were stored: listen to it once now (a drop comes back on the next beat
       // too, and without one, a moment after its line)
-      if ((onBeat?.length || drops?.length) && !p.music.beats) {
-        const song = resolveAsset(ctx, p.music.track!);
-        heard = song ? await analyzeMusic(ctx, song.abs, p.format.fps) : null;
+      // or one changed by hand, whose stored grid belongs to the old song
+      const songFile = music ? resolveAsset(ctx, p.music.track!)?.abs ?? null : null;
+      if ((onBeat?.length || drops?.length) && !(await gridMatches(p.music.beats, songFile))) {
+        heard = songFile ? await analyzeMusic(ctx, songFile, p.format.fps) : null;
         if (onBeat?.length && !heard?.beats) throw new ToolInputError('no steady beat was found in this song, so there is nothing to land on: tell the user and leave onBeat null');
       }
       // landing on beats moves the picture, and so does a grid restored under edits already on the beat;
       // drops and the echo are only heard
       const movesBeats = !!onBeat || (!!heard?.beats && !!p.music.onBeat?.length);
       await mutate(ctx, movesBeats ? 'beat' : 'music', (q) => {
-        if (heard?.beats) q.music.beats = heard.beats;
+        if (heard) { if (heard.beats) q.music.beats = heard.beats; else delete q.music.beats; }
         if (onBeat) { if (onBeat.length) q.music.onBeat = onBeat; else delete q.music.onBeat; }
         if (drops) { if (drops.length) q.music.drops = drops.map(({ from, to }) => ({ from, to })); else delete q.music.drops; }
         if (args.reverbThrow === true) q.voice = { ...q.voice, reverbThrow: true };

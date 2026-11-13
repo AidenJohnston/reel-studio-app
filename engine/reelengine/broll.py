@@ -156,7 +156,7 @@ def plan_windows(ctx) -> list[dict]:
     """[{id, index, treatment, t0, t1, words, item}] for every broll item whose anchor is in the cut,
     in start order, with hold, handoff and gap rules applied. Cheap: renders nothing."""
     items = list((ctx.project or {}).get("broll") or [])
-    grid = beats.synced(ctx.project, "broll")     # music.onBeat "broll": entrances land on beats
+    grid = beats.ctx_synced(ctx, "broll")     # music.onBeat "broll": entrances land on beats
     plans = []
     for i, it in enumerate(items):
         anc = it.get("anchor") or {}

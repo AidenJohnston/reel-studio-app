@@ -1,8 +1,11 @@
 """The music and voice moments in the final mix, measured in the audio: the song enters on its attack,
 drops out for a named line and comes back on a beat, the last word gets a reverb throw, and the same
 project mixes to the same samples every time."""
+import hashlib
 import json
 import subprocess
+
+from pathlib import Path
 
 import numpy as np
 import pytest
@@ -49,27 +52,33 @@ def test_the_song_starts_on_its_attack_and_its_beats_sit_on_the_kicks(media):
         assert np.min(np.abs(kicks() - b)) <= 0.012, b
 
 
-def project(tmp_path, media, keep=((0.05, 9.5),), words=None, **fields):
+def project(tmp_path, media, keep=((0.05, 9.5),), words=None, cut_keep=None, **fields):
     """A real render timeline and ctx (so drops and the throw see the cut the renderer plays). `words`:
-    a transcript to use instead of the fixture's evenly spaced one, all of it kept."""
+    a transcript to use instead of the fixture's evenly spaced one, all of it kept unless `cut_keep`
+    gives the ranges."""
     pdir = tmp_path / "proj"
     fx.make_project(pdir, media["take"], keep=keep)
     (pdir / "media" / "song.wav").write_bytes(media["song"].read_bytes())
     proj = projmod.load(pdir)
     if words:
         (pdir / "work" / "transcript.json").write_text(json.dumps({"words": words}), encoding="utf-8")
-        proj["cut"]["keep"] = [{"from": words[0]["id"], "to": words[-1]["id"]}]
+        proj["cut"]["keep"] = cut_keep or [{"from": words[0]["id"], "to": words[-1]["id"]}]
     proj.update(fields)
     (pdir / "project.json").write_text(json.dumps(proj), encoding="utf-8")
     words = projmod.load_transcript(pdir, proj)["words"]
-    tl = projmod.timeline(pdir, proj, words)
+    tl = projmod.timeline(pdir, proj, words, root=pdir)
     return render.make_ctx(pdir, proj, tl, True, pdir, pdir / "work" / "render")
 
 
 def song(media, **extra):
     a = media["analysis"]
     return {"enabled": True, "track": "media/song.wav", "startAt": a["suggestedStartAt"], "level": "under-voice",
-            "automation": [], "fadeOut": 0.3, "beats": beats.quantise(a["beats"], FPS), **extra}
+            "automation": [], "fadeOut": 0.3, "beats": grid_of(media), **extra}
+
+
+def grid_of(media):
+    a = media["analysis"]
+    return beats.quantise(a["beats"], FPS, a["duration"], beats.file_sha256(media["song"]))
 
 
 def mixed(ctx, tmp_path, name="voice.wav"):
@@ -78,8 +87,9 @@ def mixed(ctx, tmp_path, name="voice.wav"):
     return music.decode(out, ctx), json.loads((ctx.work / "audio" / "mix.json").read_text())
 
 
-def on_grid(t, proj):
-    return min(abs(b - t) for b in beats.output_grid(proj)) < 1e-3
+def on_grid(t, ctx):
+    grid = beats.output_grid(ctx.project, ctx.project_dir / "media" / "song.wav")
+    return min(abs(b - t) for b in grid) < 1e-3
 
 
 def rms_db(x, a, b):
@@ -102,7 +112,7 @@ def test_a_drop_silences_the_line_and_the_music_comes_back_on_a_beat(tmp_path, m
     x, rep = mixed(ctx, tmp_path)
     (drop,) = rep["music"]["drops"]
     assert drop["out"] == pytest.approx(round((ctx.word_out_time(line[0]) - music.DROP_LEAD) * FPS) / FPS)
-    assert drop["onBeat"] and on_grid(drop["back"], ctx.project)
+    assert drop["onBeat"] and on_grid(drop["back"], ctx)
     assert drop["back"] >= ctx.word_out_end(line[1])
     assert rms_db(x, drop["out"] + 0.01, drop["back"] - 0.01) < -90             # silent through the line
     assert rms_db(x, drop["back"] + 0.006, drop["back"] + 0.05) > -40           # back at full level
@@ -110,6 +120,20 @@ def test_a_drop_silences_the_line_and_the_music_comes_back_on_a_beat(tmp_path, m
     # the song kept running underneath: it comes back on a kick (to the frame the grid is stored in)
     t_song = drop["back"] + ctx.project["music"]["startAt"]
     assert np.min(np.abs(kicks() - t_song)) <= 1 / FPS
+
+
+def test_a_start_too_near_the_songs_end_starts_it_from_the_top_for_the_mix_and_the_beats_alike(tmp_path, media):
+    ctx = project(tmp_path, media)
+    line = fx.word_near(ctx, 6.4), fx.word_near(ctx, 7.2)
+    near_end = media["analysis"]["duration"] - 0.5
+    ctx = project(tmp_path, media, music=song(media, startAt=near_end, drops=[{"from": line[0], "to": line[1]}]))
+    x, rep = mixed(ctx, tmp_path)
+    assert rep["music"]["startAt"] == 0.0                     # the mixer played the song from the top...
+    (drop,) = rep["music"]["drops"]
+    assert drop["onBeat"]
+    # ...and the beat the music comes back on is a kick of the song as it plays from the top
+    assert np.min(np.abs(kicks() - drop["back"])) <= 1 / FPS
+    assert rms_db(x, drop["back"] + 0.006, drop["back"] + 0.05) > -40
 
 
 def test_the_reverb_throw_rings_out_after_the_last_word(tmp_path, media):
@@ -142,7 +166,7 @@ def test_the_same_project_mixes_to_the_same_samples(tmp_path, media):
     keep = ((0.05, 4.2), (6.0, 9.5))
     cut_at = project(tmp_path / "plain", media, keep=keep).out_timeline[-1].out_start
     # start the song so one of its beats falls a frame before the jump cut: within the cut's reach
-    grid = beats.quantise(media["analysis"]["beats"], FPS)["frames"]
+    grid = grid_of(media)["frames"]
     start = next(f for f in grid if f / FPS > cut_at + 1) / FPS - (cut_at - 1 / FPS)
 
     def once(sub):
@@ -157,6 +181,41 @@ def test_the_same_project_mixes_to_the_same_samples(tmp_path, media):
         [(s.src_start, s.src_end, s.out_start) for s in c2.out_timeline]
     # the jump cut moved onto the beat
     assert c1.out_timeline[-1].out_start == pytest.approx(cut_at - 1 / FPS, abs=1e-5)
-    assert on_grid(c1.out_timeline[-1].out_start, c1.project)
+    assert on_grid(c1.out_timeline[-1].out_start, c1)
     assert np.array_equal(x1, x2)
+    md5 = [hashlib.md5(Path(r["file"]).read_bytes()).hexdigest() for r in (r1, r2)]
+    assert md5[0] == md5[1]
     assert r1["sfx"] == r2["sfx"] and r1["reverbThrow"] == r2["reverbThrow"]
+
+
+def test_the_throw_lands_on_the_videos_last_word_when_that_word_also_plays_earlier(tmp_path, media):
+    # the last kept range repeats words from the first (the same take used twice), and the final word's
+    # text is said twice: the echo belongs at the end of the video, not on the word's first appearance
+    words = [{"id": f"w{i}", "source": "s1", "s": round(0.45 + 0.4 * i, 3), "e": round(0.75 + 0.4 * i, 3),
+              "w": "end" if i in (1, 3) else f"word{i}"} for i in range(4)]
+    ctx = project(tmp_path, media, words=words, cut_keep=[{"from": "w0", "to": "w3"}, {"from": "w2", "to": "w3"}],
+                  voice={"reverbThrow": True})
+    wid, ws, we = music.final_word(ctx)
+    last = ctx.out_timeline[-1]
+    assert wid == "w3" and ws >= last.out_start and we == pytest.approx(last.out_start + words[3]["e"] - last.src_start)
+    _, rep = mixed(ctx, tmp_path)
+    assert rep["reverbThrow"]["word"] == "w3"
+    assert rep["reverbThrow"]["from"] == pytest.approx(max(ws, we - music.THROW_S), abs=0.001)
+    assert rep["reverbThrow"]["from"] > ctx.word_out_end("w3")       # past the word's first appearance
+
+
+def test_the_throw_is_the_same_whatever_else_the_voice_holds(tmp_path, media):
+    """A preview window, or an earlier edit, changes the rest of the voice track: the tail must not move."""
+    words = [{"id": f"w{i}", "source": "s1", "s": round(0.45 + 0.4 * i, 3), "e": round(0.75 + 0.4 * i, 3),
+              "w": f"word{i}"} for i in range(4)]
+    ctx = project(tmp_path, media, words=words, voice={"reverbThrow": True})
+    voice = music.decode(fx.cut_voice(ctx, tmp_path / "voice.wav"), ctx)
+    full, _ = music.reverb_throw(ctx, voice)
+    k = int(0.8 * music.SR)                                  # a window that starts 0.8 s in
+    win, _ = music.reverb_throw(ctx, voice[k:], offset=k / music.SR)
+    loud_start = voice.copy()
+    loud_start[:k] *= 8                                      # an earlier part of the voice, much louder
+    louder, _ = music.reverb_throw(ctx, loud_start)
+    digest = lambda x: hashlib.md5(np.ascontiguousarray(x).tobytes()).hexdigest()   # noqa: E731
+    assert digest(full[k:]) == digest(win) == digest(louder[k:])
+    assert np.abs(full).max() > 0

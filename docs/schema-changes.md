@@ -66,9 +66,13 @@ All additive (optional fields only), per docs/architecture.md section 3. Schema:
 
 ## 2026-11-12 (beat sync, music drops, reverb throw)
 
-- `music.beats` (`{fps, frames}`, absent = none): the song's beat grid, each beat a whole frame of SONG time,
-  written by `choose_music` when it picks a song (engine `analyze-music --fps`) and removed when the song changes.
-  Stored rather than re-detected so the same project always lands the same edits on the same frames.
+- `music.beats` (`{fps, frames, seconds, sha256}`, absent = none): the song's beat grid, each beat a whole frame
+  of SONG time, with the song's length and the SHA-256 of the file it was measured on. Written by `choose_music`
+  when it picks a song (engine `analyze-music --fps`) and replaced when the song changes. Stored rather than
+  re-detected so the same project always lands the same edits on the same frames. A grid whose hash isn't the
+  playing file's (the song was swapped by hand) is ignored, and the AI measures the song again when asked for
+  the beat. A `startAt` less than 1 s from the song's end plays the song from the top, and the grid is read from
+  there too (`beats.effective_start`, one rule for the mixer and the beats).
 - `music.onBeat` (array of `"cuts"`, `"zooms"`, `"broll"`, absent = none): those land on the nearest beat in
   reach. A jump cut (between kept ranges, or where a long pause was taken out) moves at most 0.15 s by changing
   only the silence before it; a zoom punches in up to
@@ -76,8 +80,10 @@ All additive (optional fields only), per docs/architecture.md section 3. Schema:
 - `music.drops` (`[{from, to}]` word ids, absent = none): the music is gone 40 ms before `from` and comes back on
   the first beat within 1 s after `to` ends (0.15 s after it with no beat in reach). The song keeps running
   underneath. Remapped after a re-transcription like the other anchors.
-- `voice.reverbThrow` (boolean, absent = false): an echo tail on the last kept word (its final 0.7 s at most),
-  peaking 8 dB under the voice and fading out if it is still ringing when the video ends.
+- `voice.reverbThrow` (boolean, absent = false): an echo tail on the word the video ends on (the last word of
+  its last segment, so a word kept twice echoes at the end), from that word's final 0.7 s at most. It peaks 8 dB
+  under that word and fades out if it is still ringing when the video ends. The tail depends only on that word's
+  samples, so a preview window or an earlier edit gives the same tail.
 - All three are written by the AI's `set_sound_moments`; turning one off removes its field.
 - Defaults that change the sound of existing projects: the music no longer fades in (a 5 ms de-click instead);
   `analyze-music` now suggests a start on the song's first attack after the calm bar, and its beats sit on the

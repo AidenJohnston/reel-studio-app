@@ -133,11 +133,13 @@
         "fadeOut": { "type": "number", "minimum": 0, "maximum": 30 },
         "beats": {
           "type": "object",
-          "description": "the song's beat grid, stored once when the song is chosen: each beat a whole frame of song time at fps",
-          "required": ["fps", "frames"],
+          "description": "the song's beat grid, stored once when the song is chosen: each beat a whole frame of song time at fps, measured on the file whose SHA-256 it names (another file's grid is ignored)",
+          "required": ["fps", "frames", "seconds", "sha256"],
           "properties": {
             "fps": { "type": "number", "exclusiveMinimum": 0 },
-            "frames": { "type": "array", "items": { "type": "integer", "minimum": 0 } }
+            "frames": { "type": "array", "items": { "type": "integer", "minimum": 0 } },
+            "seconds": { "type": "number", "minimum": 0, "description": "the song's length" },
+            "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
           }
         },
         "onBeat": {

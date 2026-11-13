@@ -265,7 +265,7 @@ def cmd_analyze_music(args):
     r = dict(_music_features(p))
     if args.fps:
         from . import beats
-        r["beatGrid"] = beats.quantise(r.get("beats") or [], args.fps)
+        r["beatGrid"] = beats.quantise(r.get("beats") or [], args.fps, r["duration"], beats.file_sha256(p))
     if args.no_beats:
         r.pop("beats", None)
     if not args.curve:
