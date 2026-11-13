@@ -65,6 +65,7 @@ fi
 export RS_REPO_ROOT="$REPO" RS_RUNTIME_DIR="$RUNTIME" RS_APP_DIR="$APP_DIR"
 
 # 3. package (unsigned dmg + the unpacked .app that sign-mac.sh signs)
+bash "$HERE/dmg/render-background.sh" "$HERE/.build/dmg"
 CFG="$(node "$HERE/make-config.js")"
 cd "$APP_DIR"
 # electron-builder cannot always resolve a range like "^44.8.0" inside an npm workspace: hand it the installed version.

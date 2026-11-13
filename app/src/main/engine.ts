@@ -97,11 +97,17 @@ export interface RunnerConfig {
   onExit?: (pid: number) => void
 }
 
+// How long shutdown waits for a killed engine's pipes to close. 5 s is the figure the PR review suggested; it was not
+// measured.
+const CLOSE_WAIT_MS = 5000
+
 const running = new Set<ChildProcess>()
+// Cancellation settles before process-group termination; shutdown must still await that drain.
+const stopping = new Set<Promise<void>>()
 
 /** Kills every engine process this runner started. Used when the app quits. */
 export async function killAllEngines(): Promise<void> {
-  await Promise.all([...running].map((c) => (c.pid ? killTree(c.pid) : Promise.resolve())))
+  await Promise.all([...stopping, ...[...running].map((c) => (c.pid ? killTree(c.pid) : Promise.resolve()))])
 }
 
 export function createEngineRunner(cfg: RunnerConfig) {
@@ -148,7 +154,26 @@ export function createEngineRunner(cfg: RunnerConfig) {
       }
 
       const onAbort = (): void => {
-        if (child.pid) void killTree(child.pid)
+        if (child.pid) {
+          const closed = new Promise<void>((resolve) => child.once('close', () => resolve()))
+          // `close` waits for every copy of the stdio pipes. A grandchild that left the process group can hold one
+          // open forever, and then quitting and --self-test would hang, so stop waiting CLOSE_WAIT_MS after the kill.
+          const stopped = killTree(child.pid).then(
+            () =>
+              new Promise<void>((resolve) => {
+                const timer = setTimeout(() => {
+                  log(`[engine ${command}] pipes still open ${CLOSE_WAIT_MS} ms after the kill`)
+                  resolve()
+                }, CLOSE_WAIT_MS)
+                void closed.then(() => {
+                  clearTimeout(timer)
+                  resolve()
+                })
+              })
+          )
+          stopping.add(stopped)
+          void stopped.finally(() => stopping.delete(stopped))
+        }
         finish(() => rejectPromise(cancelled()))
       }
       signal?.addEventListener('abort', onAbort, { once: true })
