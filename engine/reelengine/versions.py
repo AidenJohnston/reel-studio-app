@@ -26,8 +26,8 @@ INPUTS = "inputs.json"
 
 
 def _link_or_copy(src: Path, dst: Path) -> None:
-    """dst becomes src's file. A hard link costs nothing, and the engine replaces the preview's files
-    (never writes into them), so the version keeps what it linked. A copy where links don't work."""
+    """dst becomes src's file: a hard link (it costs nothing), else a copy. Only for files nothing writes
+    into, since a write into either name changes both."""
     try:
         os.link(src, dst)
     except OSError:
@@ -100,9 +100,11 @@ def save(project_dir: Path, root: Optional[Path] = None) -> dict:
     part.mkdir(parents=True)
     projmod.write_json(part / "project.json", dict(shown, version=n))
     projmod.write_json(part / INPUTS, made["inputs"])          # what the draft was really made from
+    # Copies, never links: the preview's files are rewritten in place (a cached cover is copied over
+    # preview/cover.png), and a saved version must never change with them.
     if made.get("cover") and Path(made["cover"]).exists():     # only when that draft made it
-        _link_or_copy(Path(made["cover"]), part / "cover.png")
-    _link_or_copy(draft, part / "draft.mp4")
+        shutil.copy2(made["cover"], part / "cover.png")
+    shutil.copy2(draft, part / "draft.mp4")
     os.replace(part, vdir)        # the version appears whole, or not at all
     # Re-read: patch the one field this command owns, as render does.
     fresh = projmod.load(project_dir)

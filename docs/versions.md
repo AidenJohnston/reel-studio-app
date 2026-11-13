@@ -28,7 +28,7 @@ run finishes.
 
 Rules:
 
-1. **Only `save-version` creates `versions/vN/`, and only `export` adds to it.** `save-version` links
+1. **Only `save-version` creates `versions/vN/`, and only `export` adds to it.** `save-version` copies
    the draft of this edit from `preview/` (rendering it first when `preview/` shows another edit, or
    was made from a file that has changed since) with its cover, the snapshot and `inputs.json`, writes
    them under `.vN.part/` and renames that to `vN/`,

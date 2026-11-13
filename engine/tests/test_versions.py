@@ -139,6 +139,19 @@ def test_a_saved_version_never_changes(project):
     assert files_of(v1) == before
 
 
+def test_a_saved_version_keeps_its_files_when_the_preview_is_rewritten_in_place(project):
+    """The preview's files are rewritten in place (CoverJob copies a cached cover over preview/cover.png):
+    a saved version holds copies of its own."""
+    versions.save(project)
+    v1 = project / "versions" / "v1"
+    before = files_of(v1)
+    preview = project / "versions" / "preview"
+    for name in ("cover.png", "draft.mp4"):
+        with open(preview / name, "r+b") as fh:          # into the same file, as shutil.copy2 over it does
+            fh.write(b"another edit")
+    assert files_of(v1) == before
+
+
 def test_a_take_replaced_under_the_same_name_is_a_new_version_and_the_old_draft_stays(project):
     versions.save(project)
     v1 = project / "versions" / "v1"
