@@ -27,7 +27,7 @@ from fractions import Fraction
 from pathlib import Path
 from typing import Optional
 
-from . import __version__, captions as capmod, cut as cutmod, project as projmod, safepath, tools
+from . import __version__, captions as capmod, cut as cutmod, project as projmod, reads, safepath, tools
 from .proto import EngineError, log, progress
 from .render_ctx import Layer, RenderCtx, Segment, ZoomSpan
 
@@ -731,11 +731,11 @@ def unknown_anchor_skips(proj: dict, tl) -> tuple:
     return rows, warns
 
 
-def read_broll_report(project_dir: Path) -> list:
-    """Per b-roll item, from A2's work/layers/layers.json: how it was actually shown. Items that
+def read_broll_report(work: Path) -> list:
+    """Per b-roll item, from A2's <work>/layers/layers.json: how it was actually shown. Items that
     could not be shown as asked carry `fallback` (and `shownAs`) or `skipped`, in plain words the
     editor can repeat to the user ("no room on the left of the face; shown above you instead")."""
-    side = Path(project_dir) / "work" / "layers" / "layers.json"
+    side = Path(work) / "layers" / "layers.json"
     try:
         items = projmod.read_json(side).get("items") or []
     except (ValueError, OSError):
@@ -787,9 +787,12 @@ def first_look_project(project_dir: Path, proj: dict, music: Optional[str] = Non
 
 def run(project_dir: Path, draft: bool = False, window: Optional[str] = None,
         root: Optional[Path] = None, verify: bool = True, first_look: bool = False,
-        music: Optional[str] = None, cover: bool = True, version: Optional[int] = None) -> dict:
+        music: Optional[str] = None, cover: bool = True, version: Optional[int] = None,
+        work: Optional[Path] = None) -> dict:
     """`version`: rebuild that saved version's full render from its own snapshot, into its own folder
-    (versions.export), whatever the project is now."""
+    (versions.export), whatever the project is now. `work`: the folder it reads the project's work files
+    from and writes its reports and scratch into, instead of <project>/work (versions.export gives a
+    rebuild one of its own, so the current edit's reports are never replaced)."""
     t_start = time.time()
     project_dir = Path(project_dir).resolve()
     if version is None:
@@ -800,6 +803,7 @@ def run(project_dir: Path, draft: bool = False, window: Optional[str] = None,
         draft = True
         proj = first_look_project(project_dir, proj, music)
     root = tools.root_dir(str(root) if root else None)
+    reads.start(project_dir, root, {work: project_dir / "work"} if work else None)   # what this video is made from
     progress(STAGE, 1, "Getting your video ready", force=True)
     # Taken before anything is read: a file changed during the render can only make the key older than
     # the picture, so frames then draws stills instead of trusting this render (current_render).
@@ -820,7 +824,7 @@ def run(project_dir: Path, draft: bool = False, window: Optional[str] = None,
                 old.unlink()
             except OSError:
                 pass
-    rwork = project_dir / "work" / "render"
+    rwork = Path(work or project_dir / "work") / "render"
     rwork.mkdir(parents=True, exist_ok=True)
     warnings: list = []
 
@@ -828,6 +832,8 @@ def run(project_dir: Path, draft: bool = False, window: Optional[str] = None,
     faces = source_faces(project_dir, proj)
 
     ctx = make_ctx(project_dir, proj, tl, draft, root, rwork)
+    if work:
+        ctx.work = Path(work)
     ctx.out_dir = vdir
     ctx.window = win
     timings = {}
@@ -842,7 +848,7 @@ def run(project_dir: Path, draft: bool = False, window: Optional[str] = None,
     t = time.time()
     layers, zooms, broll_report = overlays(ctx, proj, tl, warnings)
     # this render's own, for its manifest; with no b-roll, layers.json is an older edit's
-    anim_windows = animation_windows(_layer_items(project_dir)) if proj.get("broll") else []
+    anim_windows = animation_windows(_layer_items(ctx.work)) if proj.get("broll") else []
     timings["layers"] = round(time.time() - t, 2)
 
     # 3. captions
@@ -853,7 +859,7 @@ def run(project_dir: Path, draft: bool = False, window: Optional[str] = None,
         if win:
             cap_report = [r for r in cap_report if r["e"] > win[0] and r["s"] < win[1]]
         else:
-            projmod.write_json(project_dir / "work" / "captions.json", {"cues": cap_report})
+            projmod.write_json(Path(ctx.work) / "captions.json", {"cues": cap_report})
 
     # 4. the picture
     if win:
@@ -951,7 +957,7 @@ def run(project_dir: Path, draft: bool = False, window: Optional[str] = None,
     if not win:
         snap = json.loads(json.dumps(proj))
         projmod.write_json(vdir / "project.json", snap)
-        manifest = dict(result, segmentsDetail=[s.__dict__ for s in tl.segments][:2000], pictureKey=pkey,
+        manifest = dict(result, segmentsDetail=[s.__dict__ for s in tl.segments][:2000], pictureKey=pkey, inputs=reads.stop(),
                         animations=anim_windows)
         projmod.write_json(vdir / ("render_draft.json" if draft else "render.json"), manifest)
         if not preview:
@@ -1002,7 +1008,7 @@ def overlays(ctx: RenderCtx, proj: dict, tl, warnings: list) -> tuple:
             # dev detail goes to the log, never into a warning the app may show
             log(f"# broll.build_layers crashed: {exc!r}")
             warnings.append(BROLL_FAILED)
-    broll_report = read_broll_report(ctx.project_dir) if proj.get("broll") and broll is not None else []
+    broll_report = read_broll_report(ctx.work) if proj.get("broll") and broll is not None else []
     gone_rows, gone_warns = unknown_anchor_skips(proj, tl)
     broll_report = [r for r in broll_report if r.get("id") not in {g["id"] for g in gone_rows}] + gone_rows
     warnings += gone_warns
@@ -1118,10 +1124,10 @@ def frame_at(t: float, fps: float, n_frames: int) -> int:
     return min(max(0, int(round(float(t) * fps))), max(0, n_frames - 1))
 
 
-def _layer_items(project_dir: Path) -> list:
-    """The rows of work/layers/layers.json, which the last thing drawn wrote."""
+def _layer_items(work: Path) -> list:
+    """The rows of <work>/layers/layers.json, which the last thing drawn there wrote."""
     try:
-        return projmod.read_json(Path(project_dir) / "work" / "layers" / "layers.json").get("items") or []
+        return projmod.read_json(Path(work) / "layers" / "layers.json").get("items") or []
     except (ValueError, OSError):
         return []
 
@@ -1142,7 +1148,7 @@ def settle_on_animations(project_dir: Path, times: list, windows: Optional[list]
     this reads work/layers/layers.json, so it must run right after the layers of the picture being looked
     at were built. -> (times, [{asked, sampled, id}] for each time it moved)"""
     if windows is None:
-        windows = animation_windows(_layer_items(project_dir))
+        windows = animation_windows(_layer_items(Path(project_dir) / "work"))
     anims = windows
     pick, moved = [], []
     for t in times:

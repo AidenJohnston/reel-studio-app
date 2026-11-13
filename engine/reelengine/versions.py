@@ -2,28 +2,27 @@
 is made once, when the person exports it (docs/versions.md).
 
 A saved version is complete and never changes. `save-version` writes versions/vN in one step: the project
-snapshot, a record of every file outside project.json that its video is made from (`inputs.json`), the
-draft that shows it and that draft's cover. project.json's `version` becomes N. No full-quality render runs.
-`export` rebuilds a version's full-quality file from its own snapshot, so any version, newest or not,
-exports the same file. It renders once and hands that file back afterwards, and it refuses when a file
-the version was made from has changed since, rather than make a different video under its number.
+snapshot, the draft that shows it with that draft's cover, and `inputs.json`, every file that draft was
+rendered from as the renderer itself recorded it (reads.py). project.json's `version` becomes N. No
+full-quality render runs. `export` rebuilds a version's full-quality file from its own snapshot, so any
+version, newest or not, exports the same video. It renders once and hands that file back afterwards, and
+it refuses when a file the version was made from has changed since, rather than make a different video
+under its number. The draft a save reuses, the version an edit keeps and the files an export accepts are
+all judged by that same recorded set, sound included.
 """
 from __future__ import annotations
 
-import hashlib
 import os
-import re
 import shutil
 from pathlib import Path
 from typing import Optional
 
-from . import moments, project as projmod, render, tools
+from . import moments, project as projmod, reads, render, tools
 from .probe import probe
 from .proto import EngineError, progress
 
 STAGE = "render"
 INPUTS = "inputs.json"
-_ANIMATION_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,80}$")    # broll.py resolves these in work/animations
 
 
 def _link_or_copy(src: Path, dst: Path) -> None:
@@ -35,43 +34,10 @@ def _link_or_copy(src: Path, dst: Path) -> None:
         shutil.copyfile(src, dst)
 
 
-def _sha256(f: Path) -> Optional[str]:
-    try:
-        return hashlib.sha256(f.read_bytes()).hexdigest()
-    except OSError:
-        return None
-
-
-def inputs(project_dir: Path, proj: dict, root: Optional[Path] = None) -> dict:
-    """Every file outside project.json that the video of `proj` is made from: the takes, the song and the
-    pictures by size and time (render.asset_fingerprint), and the app's animations, the face track and the
-    transcript by content, since they are rewritten in place under the same name."""
-    work = Path(project_dir) / "work"
-    ids = {a for b in proj.get("broll") or []
-           for a in [b.get("asset"), *((b.get("params") or {}).get("items") or [])]
-           if isinstance(a, str) and _ANIMATION_ID.match(a)}
-    animations = {f.name: _sha256(f) for a in sorted(ids) for f in sorted((work / "animations").glob(f"{a}.*"))}
-    return {"assets": render.asset_fingerprint(project_dir, proj, root), "animations": animations,
-            "faces": {f.name: _sha256(f) for f in sorted(work.glob("face*.json"))},
-            "transcript": _sha256(projmod.transcript_path(project_dir, proj))}
-
-
-def _same_video(vdir: Path, proj: dict, now: dict) -> bool:
-    """vdir is a saved version of this very video: the same edit, made from the same files."""
-    try:
-        if projmod.edit_signature(projmod.read_json(vdir / "project.json")) != projmod.edit_signature(proj):
-            return False
-        if (vdir / INPUTS).exists():
-            return projmod.read_json(vdir / INPUTS) == now
-        # saved by an earlier build, as a full render: it recorded only the takes, song and pictures
-        return (vdir / "assets.json").exists() and projmod.read_json(vdir / "assets.json") == now["assets"]
-    except (OSError, ValueError):
-        return False
-
-
 def fresh_draft(project_dir: Path, proj: dict, root: Optional[Path] = None) -> Optional[Path]:
-    """versions/preview/draft.mp4 when it shows this edit: its snapshot has the edit's signature (music
-    included, a draft has sound), and its manifest, written after the mp4, carries the picture key."""
+    """versions/preview/draft.mp4 when it shows this edit: its snapshot has the edit's signature, its
+    manifest (written after the mp4) carries the picture key (the engine that drew it), and every file it
+    was rendered from, the song included, is unchanged."""
     video = render.preview_dir(project_dir) / "draft.mp4"
     manifest = video.with_name("render_draft.json")
     try:
@@ -82,15 +48,32 @@ def fresh_draft(project_dir: Path, proj: dict, root: Optional[Path] = None) -> O
         return None
     if projmod.edit_signature(shown) != projmod.edit_signature(proj):
         return None
-    if render.render_manifest(video).get("pictureKey") != render.picture_key(project_dir, proj, root):
+    made = render.render_manifest(video)
+    if made.get("pictureKey") != render.picture_key(project_dir, proj, root):
         return None
+    if made.get("inputs") is None or not reads.unchanged(made["inputs"], project_dir, root):
+        return None               # an older engine's draft, or a file it read has changed
     return video
+
+
+def _same_video(vdir: Path, proj: dict, project_dir: Path, root: Optional[Path]) -> bool:
+    """vdir is a saved version of this very video: the same edit, and every file it was made from unchanged."""
+    try:
+        if projmod.edit_signature(projmod.read_json(vdir / "project.json")) != projmod.edit_signature(proj):
+            return False
+        if (vdir / INPUTS).exists():
+            return reads.unchanged(projmod.read_json(vdir / INPUTS), project_dir, root)
+        # saved by an earlier build, as a full render: it recorded only the takes, song and pictures
+        return (vdir / "assets.json").exists() and \
+            projmod.read_json(vdir / "assets.json") == render.asset_fingerprint(project_dir, proj, root)
+    except (OSError, ValueError):
+        return False
 
 
 def save(project_dir: Path, root: Optional[Path] = None) -> dict:
     """Saves the edit as it is now as a version, from its draft (rendered here when the preview shows
-    another edit). The current version when it already is this video, else a new one. Returns the
-    version and the file to play."""
+    another edit or was made from files that have changed). The current version when it already is this
+    video, else a new one. Returns the version and the file to play."""
     project_dir = Path(project_dir).resolve()
     root = tools.root_dir(str(root) if root else None)
     proj = projmod.load(project_dir)
@@ -98,10 +81,9 @@ def save(project_dir: Path, root: Optional[Path] = None) -> dict:
     if draft is None:
         draft = Path(render.run(project_dir, draft=True, root=root)["file"])
     shown = projmod.read_json(draft.with_name("project.json"))     # exactly what the draft shows
-    now = inputs(project_dir, shown, root)
     cur = int(proj.get("version") or 0)
     vdir = project_dir / "versions" / f"v{cur}"
-    if cur and _same_video(vdir, shown, now):
+    if cur and _same_video(vdir, shown, project_dir, root):
         moments.mark(project_dir)
         exported = _exported(vdir)
         return {"version": cur, "file": str(vdir / ("export.mp4" if exported else "draft.mp4")),
@@ -113,12 +95,11 @@ def save(project_dir: Path, root: Optional[Path] = None) -> dict:
         if stale.exists():
             shutil.rmtree(stale)
     part.mkdir(parents=True)
+    made = render.render_manifest(draft)
     projmod.write_json(part / "project.json", dict(shown, version=n))
-    projmod.write_json(part / INPUTS, now)
-    projmod.write_json(part / "assets.json", now["assets"])       # what render.pick_version reads
-    cover = render.render_manifest(draft).get("cover")      # only when that draft made it
-    if cover and Path(cover).exists():
-        _link_or_copy(Path(cover), part / "cover.png")
+    projmod.write_json(part / INPUTS, made["inputs"])          # what the draft was really made from
+    if made.get("cover") and Path(made["cover"]).exists():     # only when that draft made it
+        _link_or_copy(Path(made["cover"]), part / "cover.png")
     _link_or_copy(draft, part / "draft.mp4")
     os.replace(part, vdir)        # the version appears whole, or not at all
     # Re-read: patch the one field this command owns, as render does.
@@ -148,6 +129,28 @@ def _exported(vdir: Path) -> bool:
         return False
 
 
+def _rebuild_work(project_dir: Path, vdir: Path) -> Path:
+    """A work folder of the rebuild's own: the project's work files the render may read (everything but
+    what the engine writes, reads.GENERATED), so the rebuild reads exactly those and writes its reports
+    and scratch here, never over the current edit's. Big media is hard-linked (the engine never writes
+    into it); the rest is copied, so nothing written here can reach the project."""
+    view = vdir / ".rebuild"
+    shutil.rmtree(view, ignore_errors=True)
+    src = Path(project_dir) / "work"
+    for f in sorted(src.rglob("*")) if src.is_dir() else []:
+        rel = f.relative_to(src).as_posix()
+        if not f.is_file() or reads.generated(f"work/{rel}"):
+            continue
+        dst = view / rel
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        if f.stat().st_size > reads.HASH_UP_TO:
+            _link_or_copy(f, dst)
+        else:
+            shutil.copy2(f, dst)
+    view.mkdir(parents=True, exist_ok=True)
+    return view
+
+
 def export(project_dir: Path, root: Optional[Path] = None, version: Optional[int] = None) -> dict:
     """Version `version`'s full-quality file, rebuilt from its own snapshot the first time and handed
     back after that. Without `version`: the edit as it is now, saved as a version first."""
@@ -160,12 +163,15 @@ def export(project_dir: Path, root: Optional[Path] = None, version: Optional[int
         raise EngineError("NO_VERSION", f"no {vdir}", f"I couldn't find Version {version}. Pick another version and export again.")
     reused = _exported(vdir)
     if not reused:
-        snap = projmod.read_json(vdir / "project.json")
-        if (vdir / INPUTS).exists() and projmod.read_json(vdir / INPUTS) != inputs(project_dir, snap, root):
+        if (vdir / INPUTS).exists() and not reads.unchanged(projmod.read_json(vdir / INPUTS), project_dir, root):
             raise EngineError("VERSION_INPUTS_CHANGED", f"a file v{version} was made from has changed",
                               f"A picture, song, animation or take used in Version {version} has changed since it was "
                               "saved, so I can't make that exact video any more. Export a newer version instead.")
-        render.run(project_dir, root=root, version=version)
+        view = _rebuild_work(project_dir, vdir)
+        try:
+            render.run(project_dir, root=root, version=version, work=view)
+        finally:
+            shutil.rmtree(view, ignore_errors=True)
     else:
         progress(STAGE, 100, "Your video is ready", force=True)
     cover = vdir / "cover.png"

@@ -20,6 +20,7 @@ import re
 from pathlib import Path
 from typing import Iterable, Optional
 
+from . import reads
 from .proto import EngineError
 
 _DRIVE = re.compile(r"^[A-Za-z]:")
@@ -105,6 +106,8 @@ def safe_resolve(project_dir: Path, p, root: Optional[Path] = None, write: bool 
     if not _inside(real, bases):
         raise EngineError("UNSAFE_PATH", f"{what}: {p!r} resolves to {real}, outside "
                           + ", ".join(str(b) for b in bases), USER_MESSAGE)
+    if not write:
+        reads.note(real)        # what a render is made from (reads.py)
     return real
 
 

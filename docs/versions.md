@@ -12,9 +12,9 @@ A saved version is complete and never changes, and Export rebuilds any version f
 ```
 <project>/versions/
   v1/            a VERSION, saved from its draft and then never changed: project.json (the snapshot),
-                 inputs.json (every file outside project.json its video is made from), assets.json,
+                 inputs.json (every file its draft was rendered from, as the renderer recorded it),
                  draft.mp4, cover.png (+ notes.md); once exported, also export.mp4 + render.json +
-                 verify.json and the render's reports, all made from that snapshot
+                 verify.json, made from that snapshot
   v2/
   preview/       the ONE scratch folder for previews, overwritten every time:
                  draft.mp4, window_<a>-<b>.mp4 (only the latest window), cover.png, verify.json,
@@ -29,23 +29,32 @@ run finishes.
 Rules:
 
 1. **Only `save-version` creates `versions/vN/`, and only `export` adds to it.** `save-version` links
-   the draft of this edit from `preview/` (rendering it first when `preview/` shows another edit) with
-   its cover, the snapshot and `inputs.json`, writes them under `.vN.part/` and renames that to `vN/`,
+   the draft of this edit from `preview/` (rendering it first when `preview/` shows another edit, or
+   was made from a file that has changed since) with its cover, the snapshot and `inputs.json`, writes
+   them under `.vN.part/` and renames that to `vN/`,
    so a version is whole or absent. It records the moments base (the screen now shows this version).
    Nothing ever rewrites or deletes a saved version's files.
 2. **Every `render --draft` and every `render --window a:b` writes into `versions/preview/`**,
    replacing what was there (a new window deletes the previous `window_*.mp4`). It never creates a
    `vN` folder and never changes `project.json`'s `version`.
 3. `project.json` `version` = the last SAVED version number (saved from its draft or exported).
-4. `save-version` keeps the current `vN` when it is this very video (the same edit signature and the
-   same `inputs.json`: the takes, song and pictures by size and time, the animations, face track and
-   transcript by content), and otherwise saves `v(N+1)`. A file replaced under the same name is a new
-   version, never a changed old one.
+4. **What a video is made from is recorded by the renderer, never listed by hand** (`reads.py`): while
+   a full render or a draft runs, every file the engine opens for reading, every existing file it hands
+   to FFmpeg and every path the project resolver resolves, under the project or the Reel Studio root, is
+   kept, except what the engine writes itself (`reads.GENERATED`) and project.json. Each one goes into
+   the render's manifest (`inputs`) with a digest: content for files up to 16 MB, size and time for
+   larger ones (the takes). A draft in `preview/` is reused only while every file in its `inputs` is
+   unchanged, the song included. `save-version` copies those `inputs` into `inputs.json`, keeps the
+   current `vN` when it is this very video (the same edit signature, its `inputs.json` unchanged), and
+   otherwise saves `v(N+1)`. A file replaced under the same name is a new version, never a changed old one.
 5. `export --version K` makes version K's `export.mp4` by rendering K's own snapshot into `vK/`
    (`render.run(version=K)`), whatever the project is now, so every version, newest or only ever a
-   preview, exports its own video. It renders once: a whole `export.mp4` (its `render.json` written
-   after it) is handed back as it is. When a file K was made from has changed since K was saved, it
-   refuses (`VERSION_INPUTS_CHANGED`) instead of making a different video under K's number. Without
+   preview, exports its own video. The rebuild reads the project's work files through a work folder of
+   its own (`vK/.rebuild/`, removed after) and writes its reports and scratch there, so the current
+   edit's `work/captions.json` and `work/layers/` are never replaced. It renders once: a whole
+   `export.mp4` (its `render.json` written after it) is handed back as it is. When a file in K's
+   `inputs.json` has changed since K was saved, it refuses (`VERSION_INPUTS_CHANGED`) instead of making
+   a different video under K's number. Without
    `--version` it saves the edit as it is now first. Its result carries `facts` read from the file with
    ffprobe: width, height, fps, bytes, duration and `fullResolution` (the version's format).
 6. `cover` (cover only) writes into `vN` when that edit already has its `export.mp4` (the same edit

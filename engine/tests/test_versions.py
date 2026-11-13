@@ -10,7 +10,7 @@ import subprocess
 import pytest
 
 from conftest import sentence_words
-from reelengine import compose_util, init, project as projmod, render, versions
+from reelengine import compose_util, init, project as projmod, reads, render, versions
 from reelengine.proto import EngineError
 
 
@@ -20,6 +20,24 @@ def make_take(path, hue=0):
                     "-f", "lavfi", "-i", "sine=frequency=220:duration=2.5",
                     "-vf", f"hue=h={hue}", "-c:v", "libx264", "-preset", "ultrafast", "-pix_fmt", "yuv420p",
                     "-c:a", "aac", "-shortest", str(path)], check=True, capture_output=True)
+
+
+def make_song(path, freq):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    subprocess.run([compose_util.ffmpeg_bin(), "-y", "-v", "error", "-f", "lavfi", "-i", f"sine=frequency={freq}:duration=4",
+                    "-c:a", "pcm_s16le", str(path)], check=True, capture_output=True)
+
+
+def make_animation(path, layout="top"):
+    """A stand-in for a rendered template (as in compositing/test_animation_layers.py), with its sidecar."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    subprocess.run([compose_util.ffmpeg_bin(), "-y", "-v", "error", "-f", "lavfi", "-i", "color=c=black@0.0:s=1080x1920:r=30:d=1",
+                    "-f", "lavfi", "-i", "color=c=red:s=600x300:r=30:d=1",
+                    "-filter_complex", "[0:v]format=argb[b];[b][1:v]overlay=240:250:format=auto,format=argb",
+                    "-c:v", "qtrle", "-pix_fmt", "argb", str(path)], check=True, capture_output=True)
+    path.with_suffix(".anim.json").write_text(json.dumps(
+        {"kind": "reelstudio-animation", "template": "big-quote", "params": {"text": "x"}, "duration": 1.0,
+         "layout": layout, "transparent": True}), encoding="utf-8")
 
 
 def make_project(tmp_path, name="p"):
@@ -80,11 +98,15 @@ def test_a_saved_edit_is_a_complete_version_and_no_full_render(project, renders)
     v1 = project / "versions" / "v1"
     assert r == {"version": 1, "file": str(v1 / "draft.mp4"), "draft": True, "versionDir": str(v1)}
     assert renders == [(True, None)]
-    assert sorted(f.name for f in v1.iterdir()) == ["assets.json", "cover.png", "draft.mp4", "inputs.json", "project.json"]
+    assert sorted(f.name for f in v1.iterdir()) == ["cover.png", "draft.mp4", "inputs.json", "project.json"]
     assert not list((project / "versions").glob(".v*"))      # written whole, under its own name at the end
     assert projmod.load(project)["version"] == 1
     assert projmod.edit_signature(projmod.read_json(v1 / "project.json")) == projmod.edit_signature(projmod.load(project))
-    assert projmod.read_json(v1 / "inputs.json") == versions.inputs(project, projmod.load(project))
+    # what the draft was rendered from, as the renderer recorded it
+    recorded = projmod.read_json(v1 / "inputs.json")
+    assert recorded == projmod.read_json(project / "versions" / "preview" / "render_draft.json")["inputs"]
+    take = projmod.load(project)["sources"][0]["path"]
+    assert set(recorded) == {f"project/{take}", "project/work/transcript.json"}
     # the screen shows this version now: the next edit's moments are measured from it
     base = projmod.read_json(project / "work" / "moments" / "base.json")
     assert projmod.edit_signature(base["project"]) == projmod.edit_signature(projmod.load(project))
@@ -124,20 +146,70 @@ def test_a_take_replaced_under_the_same_name_is_a_new_version_and_the_old_draft_
     assert files_of(v1) == before
 
 
-def test_inputs_follow_files_rewritten_in_place(project):
-    proj = projmod.load(project)
-    anim = project / "work" / "animations" / "card-1.mov"
-    anim.parent.mkdir(parents=True)
-    anim.write_bytes(b"first take of the animation")
-    proj["broll"] = [{"id": "b1", "anchor": {"from": "w1", "to": "w2"}, "treatment": "full", "asset": "card-1"}]
-    first = versions.inputs(project, proj)
-    assert first["animations"] == {"card-1.mov": sha(anim)}
-    (project / "work" / "animations" / "other.mov").write_bytes(b"an animation this edit does not use")
-    assert versions.inputs(project, proj) == first
-    anim.write_bytes(b"remade under the same name")
-    assert versions.inputs(project, proj) != first
-    (project / "work" / "transcript.json").write_text('{"words": []}', encoding="utf-8")
-    assert versions.inputs(project, proj)["transcript"] != first["transcript"]
+def test_a_song_replaced_under_the_same_name_is_drawn_again_and_saved_as_a_new_version(project, tmp_path, renders):
+    root = tmp_path / "root"
+    song = root / "Library" / "Music" / "song.wav"
+    make_song(song, 300)
+    edit(project, music=dict(projmod.load(project)["music"], enabled=True, track="Library/Music/song.wav"))
+    versions.save(project, root)
+    v1 = project / "versions" / "v1"
+    assert projmod.read_json(v1 / "inputs.json")["root/Library/Music/song.wav"] == sha(song)
+    before = files_of(v1)
+    make_song(song, 600)                      # same name, a different song
+    renders.clear()
+    r = versions.save(project, root)
+    assert renders == [(True, None)]          # the preview has the old song: not reused
+    assert r["version"] == 2 and files_of(v1) == before
+    assert projmod.read_json(project / "versions" / "v2" / "inputs.json")["root/Library/Music/song.wav"] == sha(song)
+    with pytest.raises(EngineError) as e:     # v1's song is gone: its video can't be made any more
+        versions.export(project, root, version=1)
+    assert e.value.code == "VERSION_INPUTS_CHANGED"
+
+
+def test_an_animation_sidecar_edited_in_place_is_a_new_version_and_its_old_one_is_refused(project, renders):
+    anim = project / "work" / "assets" / "anim-big-quote-1.mov"
+    make_animation(anim)
+    edit(project, broll=[{"id": "b1", "anchor": {"from": "w1", "to": "w3"}, "treatment": "animation",
+                          "asset": "work/assets/anim-big-quote-1.mov", "params": {}}])
+    versions.save(project)
+    v1 = project / "versions" / "v1"
+    assert "project/work/assets/anim-big-quote-1.anim.json" in projmod.read_json(v1 / "inputs.json")
+    make_animation(anim, layout="full")       # the app rewrote the sidecar: the layer is drawn differently
+    renders.clear()
+    assert versions.save(project)["version"] == 2 and renders == [(True, None)]
+    with pytest.raises(EngineError) as e:
+        versions.export(project, version=1)
+    assert e.value.code == "VERSION_INPUTS_CHANGED"
+
+
+def test_the_recorder_keeps_what_is_read_and_nothing_written_or_generated(tmp_path):
+    proj, root = tmp_path / "p", tmp_path / "root"
+    for f in ("work/assets/a.anim.json", "work/layers/layers.json", "media/take.mp4"):
+        (proj / f).parent.mkdir(parents=True, exist_ok=True)
+        (proj / f).write_text("x", encoding="utf-8")
+    (root / "Library").mkdir(parents=True)
+    (root / "Library" / "pic.png").write_bytes(b"png")
+    (tmp_path / "elsewhere.txt").write_text("x", encoding="utf-8")
+    view = tmp_path / "view"
+    (view / "assets").mkdir(parents=True)
+    (view / "assets" / "b.json").write_text("y", encoding="utf-8")
+    reads.start(proj, root, {view: proj / "work"})
+    (proj / "work" / "assets" / "a.anim.json").read_text(encoding="utf-8")
+    (proj / "work" / "layers" / "layers.json").read_text(encoding="utf-8")     # the engine's own report
+    (tmp_path / "elsewhere.txt").read_text(encoding="utf-8")                   # outside the project and root
+    (proj / "work" / "written.json").write_text("{}", encoding="utf-8")
+    (view / "assets" / "b.json").read_text(encoding="utf-8")                   # read through a stand-in folder
+    subprocess.run([compose_util.ffmpeg_bin(), "-v", "quiet", "-i", str(proj / "media" / "take.mp4"),
+                    "-i", str(root / "Library" / "pic.png"), "-f", "null", "-"], capture_output=True)
+    got = reads.stop()
+    assert set(got) == {"project/work/assets/a.anim.json", "project/media/take.mp4", "root/Library/pic.png",
+                        "project/work/assets/b.json"}
+    assert got["project/work/assets/a.anim.json"] == sha(proj / "work" / "assets" / "a.anim.json")
+    (proj / "work" / "assets" / "b.json").write_text("y", encoding="utf-8")   # the real file the alias stands for
+    del got["project/work/assets/b.json"]
+    assert reads.unchanged(got, proj, root)
+    (proj / "work" / "assets" / "a.anim.json").write_text("changed", encoding="utf-8")
+    assert not reads.unchanged(got, proj, root)
 
 
 # --- export -------------------------------------------------------------------------------------
@@ -199,6 +271,21 @@ def test_export_without_a_version_saves_the_edit_first(project, renders):
     r = versions.export(project)
     assert r["version"] == 1 and renders == [(True, None), (False, 1)]
     assert (project / "versions" / "v1" / "draft.mp4").exists()
+
+
+def test_rebuilding_an_old_version_leaves_the_current_edits_reports_alone(project, renders):
+    edit(project, captions=dict(projmod.load(project)["captions"], enabled=True))
+    versions.save(project)
+    shorter(project)
+    versions.save(project)                    # v2's draft wrote the current subtitle rows
+    work = project / "work"
+    current = {f: (work / f).read_bytes() for f in ("captions.json",)}
+    assert json.loads(current["captions.json"])["cues"]
+    versions.export(project, version=1)       # v1 is the longer cut: its rows differ
+    assert {f: (work / f).read_bytes() for f in current} == current
+    assert not (project / "versions" / "v1" / ".rebuild").exists()
+    rebuilt = projmod.read_json(project / "versions" / "v1" / "render.json")
+    assert rebuilt["inputs"] == projmod.read_json(project / "versions" / "v1" / "inputs.json")
 
 
 def test_a_final_that_stopped_before_its_manifest_is_made_again(project, renders):
