@@ -304,6 +304,28 @@ describe('answering the question', () => {
     expect(await ai().approveStyleProposal(a)).toMatchObject({ status: 'saved' });
   });
 
+  it('No to the question that turned the rule back on leaves it on when a later question was answered Yes', async () => {
+    const { ai, a, b } = await pausedRule();
+    const c = captionCaseProposal({ project: 'p3', title: 'A third video', version: 1 });
+    expect(await ai().approveStyleProposal(b)).toMatchObject({ status: 'saved' });
+    expect(await ai().approveStyleProposal(c)).toMatchObject({ status: 'exists' });
+    await ai().declineStyleProposal(b);
+    const [rule] = await ai().styleRules();
+    expect(rule.paused).toBeUndefined();
+    expect(rule.consent).toEqual({ proposal: a.id, at: expect.any(String), also: [c.id] });
+    expect(await ai().approveStyleProposal(b)).toEqual({ status: 'forgotten' });
+  });
+
+  it('No to the question that turned the rule back on leaves it as the person reworded it', async () => {
+    const { ai, b } = await pausedRule();
+    await ai().approveStyleProposal(b);
+    const [rule] = await ai().styleRules();
+    await ai().updateStyleRule(rule.id, { text: 'Use lowercase captions in tutorials.' });
+    await ai().declineStyleProposal(b);
+    expect(await ai().styleRules()).toEqual([expect.objectContaining({ text: 'Use lowercase captions in tutorials.' })]);
+    expect((await ai().styleRules())[0].paused).toBeUndefined();
+  });
+
   it('a Yes and a rule saved at once through two separate AI objects keep both', async () => {
     const { dir, ai } = await setup();
     const asked = (await ai(new ScriptedModel([{ toolCalls: [lowercase()] }, finish()])).applyNote(dir, 'make the captions lowercase', () => undefined)).styleProposal!;

@@ -226,16 +226,19 @@ export class StyleStore {
   }
 
   /** The person said No to `p`. If a Yes to it was saved before a crash cut off the reply, that Yes is undone: a rule
-   * it saved goes, and a paused rule it only turned back on is paused again. Either way the question is remembered as
-   * answered so it cannot save again. */
+   * it saved goes, and a paused rule it only turned back on is paused again, unless the person said Yes to it again or
+   * changed its words since (their later choice stands). Either way the question is remembered as answered so it
+   * cannot save again. */
   async decline(p: StyleProposal): Promise<void> {
     return this.serial(async () => {
       const data = await this.read();
       const forgotten = [...(data.forgotten ?? []), p.id];
       const resumed = data.rules.find((r) => resumedYes(r).includes(p.id));
       if (resumed) {
-        resumed.paused = true;
-        const rest = answeredYes(resumed).filter((id) => id !== p.id);
+        const answered = answeredYes(resumed);
+        const later = answered.slice(answered.indexOf(p.id) + 1);
+        if (!later.length && isCaptionCase(resumed.payload)) resumed.paused = true;
+        const rest = answered.filter((id) => id !== p.id);
         const back = resumedYes(resumed).filter((id) => id !== p.id);
         if (!rest.length) delete resumed.consent;
         else resumed.consent = { proposal: rest[0], at: resumed.consent!.at, ...(rest.length > 1 ? { also: rest.slice(1) } : {}), ...(back.length ? { resumed: back } : {}) };

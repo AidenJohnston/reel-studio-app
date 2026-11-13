@@ -400,11 +400,14 @@ export const createMockAI: CreateAI = ({ host }) => {
     },
     async declineStyleProposal(proposal) {
       return withStyle(async (s) => {
-        // as the real store: a Yes that only turned a paused rule back on is undone by pausing it again
+        // as the real store: a Yes that only turned a paused rule back on is undone by pausing it again, unless a later
+        // Yes or new words since are the person's last choice
         const resumed = s.rules.find((r) => resumedYes(r).includes(proposal.id))
         if (resumed) {
-          resumed.paused = true
-          const rest = answeredYes(resumed).filter((id) => id !== proposal.id)
+          const answered = answeredYes(resumed)
+          const later = answered.slice(answered.indexOf(proposal.id) + 1)
+          if (!later.length && isCaptionCase(resumed.payload)) resumed.paused = true
+          const rest = answered.filter((id) => id !== proposal.id)
           const back = resumedYes(resumed).filter((id) => id !== proposal.id)
           if (!rest.length) delete resumed.consent
           else resumed.consent = { proposal: rest[0], at: resumed.consent!.at, ...(rest.length > 1 ? { also: rest.slice(1) } : {}), ...(back.length ? { resumed: back } : {}) }
