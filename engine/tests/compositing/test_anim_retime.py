@@ -122,6 +122,39 @@ def test_the_same_cut_always_names_the_same_clip(tmp_path, video):
     assert anim_timing.jobs(fx.make_ctx(pdir)) == first      # deterministic: same project, same clip
 
 
+def test_readable_text_check_is_the_editors():
+    # the same cases as ai/test/e2efix.test.ts (ai/src/readable.ts)
+    assert anim_timing.hero_px("stat-count-up", {"value": "9", "text": "days"}, {"w": 1004, "h": 650}) > 250
+    small = {"value": "9", "text": "people who signed up for the beta in the first week"}
+    assert anim_timing.hero_px("stat-count-up", small, {"w": 300, "h": 160}) < anim_timing.min_hero_px("stat-count-up")
+    assert not anim_timing.readable_above_face("stat-count-up", small, {"w": 300, "h": 160})
+    assert anim_timing.readable_above_face("price-tag", {"value": "$5"}, {"w": 980, "h": 590})
+    assert anim_timing.readable_above_face("not-a-template", {}, {"w": 10, "h": 10})
+
+
+def test_a_recut_that_leaves_no_readable_room_above_the_face_goes_full_screen(tmp_path, video):
+    pdir = tmp_path / "p"
+    fx.make_project(pdir, video, keep=((1.0, 11.0),))
+    ctx = fx.make_ctx(pdir)
+    a, b = fx.word_near(ctx, 2.0), fx.word_near(ctx, 4.5)
+    item = _quote_item(ctx, a, b, "work/assets/a.mov")
+    essay = {"template": "big-quote", "params": {"text": "word " * 120}}
+    params = anim_timing.resolve(ctx, item, essay)
+    assert params["layout"] == "full" and "region" not in params
+    pinned = anim_timing.resolve(ctx, item, {**essay, "params": {**essay["params"], "layout": "top"}})
+    assert pinned["layout"] == "top" and "region" in pinned                  # the editor's choice stays
+
+
+def test_a_clip_re_timed_after_a_version_was_saved_starts_a_new_version(tmp_path, video):
+    from reelengine import render
+    pdir = tmp_path / "p"
+    proj = fx.make_project(pdir, video, keep=((1.0, 11.0),))
+    before = render.asset_fingerprint(pdir, proj)
+    _render_stand_in(pdir / "work" / "animations" / "big-quote-abc.mov", "big-quote", {"text": "x"})
+    after = render.asset_fingerprint(pdir, proj)
+    assert before != after and "work/animations/big-quote-abc.mov" in after
+
+
 def test_an_editor_choice_of_full_screen_is_kept(tmp_path, video):
     pdir = tmp_path / "p"
     fx.make_project(pdir, video, keep=((1.0, 11.0),))

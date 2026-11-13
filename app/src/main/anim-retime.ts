@@ -5,7 +5,7 @@
 // failure here never stops a render.
 import type { EngineProgress, RunEngine } from './engine'
 
-type RenderAnimation = (template: string, params: Record<string, unknown>, outPath: string) => Promise<string>
+type RenderAnimation = (template: string, params: Record<string, unknown>, outPath: string, signal?: AbortSignal) => Promise<string>
 
 interface AnimJob {
   id: string
@@ -42,11 +42,11 @@ export async function retimeAnimations(
     return
   }
   for (const job of jobs) {
-    if (signal?.aborted) return // the render itself reports the cancel
     onProgress?.({ stage: 'animations', pct: 0, message: 'Re-timing an animation' })
     try {
-      await render(job.template, job.params, job.out)
+      await render(job.template, job.params, job.out, signal)
     } catch (e) {
+      if (signal?.aborted) throw e // Stop: the job ends here, no render after it
       log(`[animation] ${job.id}: could not re-time (${(e as { message?: string })?.message ?? e}); the old one plays`)
     }
   }
