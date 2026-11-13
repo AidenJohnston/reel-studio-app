@@ -6,7 +6,9 @@ program it starts (`subprocess.Popen`, whose existing file arguments are ffmpeg'
 resolver notes every path it resolves for reading too (safepath.safe_resolve). A file the engine looks
 for and does not find (`os.stat`, `os.path.exists`, `os.path.isfile`, which `Path.exists` and
 `Path.is_file` use) is kept as absent: an optional input such as a face track made later changes the
-video as much as an edited one. While a render records (`start`), the paths under the project or the
+video as much as an edited one. A file the render writes itself (a face track it detects and caches)
+is an input too, with the content it ends the render with: every file is hashed when recording stops,
+and a path looked for and not found is looked at again then. While a render records (`start`), the paths under the project or the
 Reel Studio root are kept, except what the engine itself writes (GENERATED) and project.json, which
 the snapshot holds. `stop()` returns them as {key: digest}: a key relative to the project
 ("project/...") or the root ("root/..."), so a moved Reel Studio folder keeps its keys, and a digest
@@ -38,8 +40,9 @@ def generated(rel: str) -> bool:
 
 
 def _key(rec: dict, path) -> Optional[tuple]:
-    """(key, real path) of `path` when it lies under the project or the root and is not generated."""
-    p = os.path.realpath(os.fspath(path))
+    """(key, real path) of `path` when it lies under the project or the root and is not generated. A path
+    in a stand-in folder (`aliases`) gets its project key, and keeps its own real path to be hashed."""
+    own = p = os.path.realpath(os.fspath(path))
     # compared without case where the file system ignores it (normcase); the key keeps the file's own case
     for alias, real in rec["aliases"]:
         if os.path.normcase(p) == alias or os.path.normcase(p).startswith(alias + os.sep):
@@ -47,20 +50,22 @@ def _key(rec: dict, path) -> Optional[tuple]:
     for base, prefix in rec["bases"]:
         if os.path.normcase(p).startswith(base + os.sep):
             rel = p[len(base) + 1:].replace(os.sep, "/")
-            return None if prefix == "project" and generated(rel) else (f"{prefix}/{rel}", p)
+            return None if prefix == "project" and generated(rel) else (f"{prefix}/{rel}", own)
     return None
 
 
-def _keep(path) -> None:
+def _keep(path, written: bool = False) -> None:
+    """`path` is read (or, `written`, made) by the render: an input, hashed when recording stops."""
     rec = _rec
     if rec is None or not isinstance(path, (str, os.PathLike)):
         return
-    _busy.on = True           # this check is not the engine looking for the file
-    try:
-        if not _isfile(path):
-            return
-    finally:
-        _busy.on = False
+    if not written:
+        _busy.on = True           # this check is not the engine looking for the file
+        try:
+            if not _isfile(path):
+                return
+        finally:
+            _busy.on = False
     found = _key(rec, path)
     if found:
         with _lock:
@@ -77,7 +82,7 @@ def _looked_for(path) -> None:
         found = _key(rec, path)
         if found:
             with _lock:
-                rec["absent"].add(found[0])
+                rec["absent"].setdefault(found[0], found[1])
     finally:
         _busy.on = False
 
@@ -117,8 +122,7 @@ def _hook(event: str, args) -> None:
     if event == "open":
         path, mode, flags = args
         writes = (mode and any(c in mode for c in "wax+")) or (flags or 0) & (os.O_WRONLY | os.O_RDWR | os.O_CREAT)
-        if not writes:
-            _keep(path)
+        _keep(path, written=bool(writes))
     elif event == "subprocess.Popen":
         _exe, argv, cwd, _env = args
         for a in _arguments(argv)[1:]:
@@ -143,7 +147,7 @@ def start(project_dir: Path, root: Optional[Path], aliases: Optional[dict] = Non
     global _rec
     norm = lambda p: os.path.normcase(os.path.realpath(os.fspath(p)))  # noqa: E731
     bases = [(norm(project_dir), "project")] + ([(norm(root), "root")] if root else [])
-    _rec = {"bases": sorted(bases, key=lambda b: -len(b[0])), "files": {}, "absent": set(),
+    _rec = {"bases": sorted(bases, key=lambda b: -len(b[0])), "files": {}, "absent": {},
             "aliases": [(norm(a), os.path.realpath(os.fspath(r))) for a, r in (aliases or {}).items()]}
 
 
@@ -153,14 +157,14 @@ def note(path) -> None:
 
 
 def stop() -> dict:
-    """Stops recording; {key: digest} of everything read since start(), and None for each file looked
-    for and not found (unless it was read later on)."""
+    """Stops recording; {key: digest} of everything read or written since start(), as each file is now,
+    and of each file looked for and not found: None while it is still not there, its digest when the
+    render made it after all."""
     global _rec
     rec, _rec = _rec, None
     if rec is None:
         return {}
-    out = {k: digest(Path(p)) for k, p in rec["files"].items()}
-    out.update({k: None for k in rec["absent"] if k not in out})
+    out = {k: digest(Path(p)) for k, p in {**rec["absent"], **rec["files"]}.items()}
     return dict(sorted(out.items()))
 
 

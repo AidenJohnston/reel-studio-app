@@ -209,7 +209,24 @@ def test_files_added_for_later_edits_do_not_block_an_earlier_export(project, ren
     assert r["reused"] is False and renders[-1] == (False, 1)
 
 
-def test_the_recorder_keeps_what_is_read_and_nothing_written_or_generated(tmp_path):
+def test_a_face_track_the_render_makes_is_saved_with_it_and_the_first_export_succeeds(project, renders):
+    """A zoom with no focus is framed on the face: the draft detects the face track and caches it as
+    work/face-<sid>.json, and the cover comes from its cache, so nothing reads that file back."""
+    versions.save(project)                    # no zoom: no face track looked at
+    sid = projmod.load(project)["sources"][0]["id"]
+    face = project / "work" / f"face-{sid}.json"
+    assert not face.exists()
+    edit(project, zooms=[{"anchor": {"from": "w1", "to": "w3"}, "scale": 1.2}])
+    assert versions.save(project)["version"] == 2
+    assert face.exists()                      # the draft made it
+    assert projmod.read_json(project / "versions" / "v2" / "inputs.json")[f"project/work/face-{sid}.json"] == sha(face)
+    renders.clear()
+    r = versions.export(project, version=2)
+    assert r["version"] == 2 and r["reused"] is False and renders == [(False, 2)]
+    assert versions.save(project)["version"] == 2       # and the same edit is still the same video
+
+
+def test_the_recorder_keeps_what_is_read_and_made_and_nothing_generated(tmp_path):
     proj, root = tmp_path / "p", tmp_path / "root"
     for f in ("work/assets/a.anim.json", "work/layers/layers.json", "media/take.mp4"):
         (proj / f).parent.mkdir(parents=True, exist_ok=True)
@@ -221,10 +238,12 @@ def test_the_recorder_keeps_what_is_read_and_nothing_written_or_generated(tmp_pa
     (view / "assets").mkdir(parents=True)
     (view / "assets" / "b.json").write_text("y", encoding="utf-8")
     reads.start(proj, root, {view: proj / "work"})
+    (proj / "work" / "late.json").exists()                                      # looked for, then made
+    (proj / "work" / "late.json").write_text("made later", encoding="utf-8")
     (proj / "work" / "assets" / "a.anim.json").read_text(encoding="utf-8")
     (proj / "work" / "layers" / "layers.json").read_text(encoding="utf-8")     # the engine's own report
     (tmp_path / "elsewhere.txt").read_text(encoding="utf-8")                   # outside the project and root
-    (proj / "work" / "written.json").write_text("{}", encoding="utf-8")
+    (proj / "work" / "made.json").write_text("{}", encoding="utf-8")            # made by the render: an input
     (view / "assets" / "b.json").read_text(encoding="utf-8")                   # read through a stand-in folder
     subprocess.run([compose_util.ffmpeg_bin(), "-v", "quiet", "-i", str(proj / "media" / "take.mp4"),
                     "-i", str(root / "Library" / "pic.png"), "-f", "null", "-"], capture_output=True)
@@ -232,8 +251,11 @@ def test_the_recorder_keeps_what_is_read_and_nothing_written_or_generated(tmp_pa
     (proj / "work" / "render" / "x.json").exists()                             # the engine's own scratch
     got = reads.stop()
     assert set(got) == {"project/work/assets/a.anim.json", "project/media/take.mp4", "root/Library/pic.png",
-                        "project/work/assets/b.json", "project/work/face.json"}
+                        "project/work/assets/b.json", "project/work/face.json", "project/work/made.json",
+                        "project/work/late.json"}
+    assert got["project/work/late.json"] == sha(proj / "work" / "late.json")      # not absent: the render made it
     assert got["project/work/face.json"] is None
+    assert got["project/work/made.json"] == sha(proj / "work" / "made.json")      # with the content it ended with
     assert got["project/work/assets/a.anim.json"] == sha(proj / "work" / "assets" / "a.anim.json")
     (proj / "work" / "assets" / "b.json").write_text("y", encoding="utf-8")   # the real file the alias stands for
     del got["project/work/assets/b.json"]

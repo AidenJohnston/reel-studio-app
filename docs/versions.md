@@ -42,9 +42,11 @@ Rules:
    a full render or a draft runs, every file the engine opens for reading, every existing file it hands
    to FFmpeg and every path the project resolver resolves, under the project or the Reel Studio root, is
    kept, except what the engine writes itself (`reads.GENERATED`) and project.json. So is every file it
-   looks for and does not find (an optional input such as a face track), as absent. Each one goes into
-   the render's manifest (`inputs`) with a digest: content for files up to 16 MB, size and time for
-   larger ones (the takes), `null` for absent, so a file that appears later counts as a change. A draft in `preview/` is reused only while every file in its `inputs` is
+   looks for and does not find (an optional input such as a face track), as absent, and every file it
+   writes there itself (a face track it detects and caches). Each one goes into the render's manifest
+   (`inputs`) with a digest taken when the render ends, so a file the render made counts with the content
+   it ended with: content for files up to 16 MB, size and time for larger ones (the takes), `null` for a
+   file still not there, so a file that appears later counts as a change. A draft in `preview/` is reused only while every file in its `inputs` is
    unchanged, the song included. `save-version` copies those `inputs` into `inputs.json`, keeps the
    current `vN` when it is this very video (the same edit signature, its `inputs.json` unchanged), and
    otherwise saves `v(N+1)`. A file replaced under the same name is a new version, never a changed old one.
