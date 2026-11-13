@@ -93,6 +93,9 @@ async function mutate(ctx: ToolContext, field: string, fn: (p: Project, t: Trans
   (ctx.state.dirty ??= new Set()).add(field);
 }
 
+/** A note that asks to flip the picture ("it's mirrored", "flip it", "the writing is backwards"). */
+const MIRROR_REQUEST = /\b(mirror\w*|flip\w*|backwards?|reversed?)\b/i;
+
 export class ToolInputError extends Error {
   constructor(message: string) { super(message); this.name = 'ToolInputError'; }
 }
@@ -1098,11 +1101,17 @@ const tools: ToolDef[] = [
     async run(ctx, args) {
       const on = args.on === true;
       const hit: string[] = [];
+      // The user already answered the app's "it looked mirrored" line with "as filmed": only their own note
+      // asking for a flip may undo that, never the editor's own look at the frames.
+      const userAsked = MIRROR_REQUEST.test(ctx.userNote ?? '');
       await mutate(ctx, 'mirror', (p) => {
         const all = args.source === null || args.source === undefined;
         if (!all && !p.sources.some((s) => s.id === args.source)) return `unknown source ${args.source}`;
+        const kept = (s: Project['sources'][number]) => on && !userAsked && (s.mirrorCheck?.answer === 'undone' || s.mirrorCheck?.answer === 'kept');
+        const targets = p.sources.filter((s) => all || s.id === args.source);
+        if (targets.every(kept)) return 'the user already said this video is the right way round (userSaidAsFilmed): leave it as filmed unless their note asks you to flip it';
         for (const s of p.sources) {
-          if (!all && s.id !== args.source) continue;
+          if ((!all && s.id !== args.source) || kept(s)) continue;
           hit.push(s.id);
           if (on) s.mirror = true; else delete s.mirror;    // absent = as shot (old projects look the same)
         }
