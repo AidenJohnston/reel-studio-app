@@ -15,7 +15,19 @@ import {
 } from './paths'
 import { createEngineRunner, killAllEngines, type RunEngine } from './engine'
 import { cpus, totalmem } from 'node:os'
-import { DIAGNOSTICS_LOG_BYTES, DIAGNOSTICS_LOG_LINES, diagnosticsReport, lastLines, logDuration, redactDiagnostics, type CliFacts } from './diagnostics'
+import {
+  DIAGNOSTICS_CHECK_MS,
+  DIAGNOSTICS_LOG_BYTES,
+  DIAGNOSTICS_LOG_LINES,
+  diagnosticsReport,
+  lastLines,
+  logDuration,
+  redactDiagnostics,
+  sharedDeadline,
+  timedOutText,
+  type CliFacts,
+  type Settled
+} from './diagnostics'
 import { handleMediaProtocol, registerMediaScheme } from './media'
 import {
   addChat,
@@ -269,19 +281,41 @@ async function readLogTail(): Promise<string> {
   }
 }
 
-/** The redacted diagnostics text (Copy diagnostics, and Report a problem when ticked). Only the state, version and plan
- * kind of each CLI go in, never a path. */
+/** The diagnostics text, redacted. Only the state, version and plan kind of each CLI go in, never a path. */
 async function diagnosticsText(): Promise<string> {
-  const settled = <T>(p: Promise<T> | undefined): Promise<T | null> => (p ?? Promise.resolve(null)).catch(() => null)
-  const [active, claude, codex, model, logTail] = await Promise.all([
-    settled(ai.active()),
-    settled(ai.claudeCodeStatus?.()),
-    settled(ai.codexStatus?.()),
-    settled(Promise.resolve().then(() => models.status())),
-    readLogTail()
+  // Every check shares one deadline: a CLI that hangs (or ignores its stop signal) must not hold the report back.
+  const deadline = sharedDeadline(DIAGNOSTICS_CHECK_MS)
+  const call = <T>(fn: () => T | Promise<T>): Promise<Settled<T>> => deadline.within(Promise.resolve().then(fn))
+  const [rActive, rClaude, rCodex, rModel, rLog] = await Promise.all([
+    call(() => ai.active()),
+    call(() => ai.claudeCodeStatus?.() ?? null),
+    call(() => ai.codexStatus?.() ?? null),
+    call(() => models.status()),
+    call(() => readLogTail())
   ])
-  const facts = (c: { state: string; version?: string; plan?: string } | null): CliFacts | null =>
-    c ? { state: c.state, ...(c.version ? { version: c.version } : {}), ...(c.plan ? { plan: c.plan } : {}) } : null
+  deadline.done()
+  const r = { active: rActive, claude: rClaude, codex: rCodex, model: rModel, log: rLog }
+  const late = timedOutText(DIAGNOSTICS_CHECK_MS)
+  const value = <T>(s: Settled<T>): T | null => (s.ok ? s.value : null)
+  const names: Record<keyof typeof r, string> = {
+    active: 'AI editor',
+    claude: 'Claude Code app',
+    codex: 'Codex app',
+    model: 'listening model',
+    log: 'log'
+  }
+  const timedOut = (Object.keys(r) as (keyof typeof r)[]).filter((k) => {
+    const s = r[k]
+    return !s.ok && s.reason === 'timeout'
+  })
+  const active = value(r.active)
+  const model = value(r.model)
+  const logTail = r.log.ok ? r.log.value : `(${r.log.reason === 'timeout' ? late : 'could not read the log'})`
+  const facts = (s: Settled<{ state: string; version?: string; plan?: string } | null>): CliFacts | null => {
+    if (!s.ok) return { state: s.reason === 'timeout' ? late : 'check failed' }
+    const c = s.value
+    return c ? { state: c.state, ...(c.version ? { version: c.version } : {}), ...(c.plan ? { plan: c.plan } : {}) } : null
+  }
   const mac = process.platform === 'darwin'
   const osName = mac ? 'macOS' : process.platform === 'win32' ? 'Windows' : process.platform
   const text = diagnosticsReport(
@@ -298,16 +332,17 @@ async function diagnosticsText(): Promise<string> {
       engine: engineMode(),
       aiEditor: active
         ? `${active.label}, ${active.connected ? 'connected' : 'not connected'}${active.error ? ` (${active.error.code})` : ''}`
-        : 'unknown',
-      claudeCode: facts(claude),
-      codex: facts(codex),
+        : r.active.ok ? 'unknown' : r.active.reason === 'timeout' ? late : 'check failed',
+      claudeCode: facts(r.claude),
+      codex: facts(r.codex),
       listeningModel: !model
-        ? 'unknown'
+        ? r.model.ok ? 'unknown' : r.model.reason === 'timeout' ? late : 'check failed'
         : model.installed
           ? `${model.name}, ready`
           : model.downloading
             ? `${model.name}, downloading (${Math.round(model.pct)}%)`
-            : `${model.name}, not downloaded${model.error ? ` (${model.error})` : ''}`
+            : `${model.name}, not downloaded${model.error ? ` (${model.error})` : ''}`,
+      ...(timedOut.length ? { timedOut: timedOut.map((k) => names[k]) } : {})
     },
     logTail,
     new Date()
@@ -316,8 +351,8 @@ async function diagnosticsText(): Promise<string> {
   return redactDiagnostics(text, app.getPath('home'))
 }
 
+/** Puts the diagnostics text on the clipboard ("Copy diagnostics" in Settings > About, and Help on a Mac). */
 async function copyDiagnostics(): Promise<void> {
-  // Electron 44's clipboard calls return promises.
   await clipboard.writeText(await diagnosticsText())
   log('[diagnostics] copied to the clipboard')
 }

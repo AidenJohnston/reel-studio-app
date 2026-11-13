@@ -46,6 +46,8 @@ export interface DiagnosticsFacts {
   claudeCode: CliFacts | null
   codex: CliFacts | null
   listeningModel: string
+  /** the checks that did not answer within DIAGNOSTICS_CHECK_MS, in plain words */
+  timedOut?: string[]
 }
 
 const SECRET_PATTERNS: [RegExp, string][] = [
@@ -76,7 +78,10 @@ export function redactDiagnostics(text: string, home: string): string {
     // only a whole folder name: /Users/zoe must not eat the start of /Users/zoey
     out = out.replace(new RegExp(`${pattern}(?=[\\\\/\\s"']|$)`, 'gim'), '~')
   }
-  out = out.replace(/([\\/](?:Users|home)[\\/]+)[^\\/\r\n"']+/gi, '$1<user>')
+  // The whole folder name, up to the next slash: account names can hold apostrophes, spaces, dots, hyphens and
+  // non-ASCII letters (O'Connor, Zoë-Ann Smith Jr.). A name with no slash after it runs to a double quote (a JSON
+  // string) or the end of the line, which may take a little more than the name: better too much than part of it.
+  out = out.replace(/([\\/](?:Users|home)[\\/]+)[^\\/\r\n"]+/gi, '$1<user>')
   for (const [re, to] of SECRET_PATTERNS) out = out.replace(re, to)
   return out
 }
@@ -88,6 +93,41 @@ export function lastLines(text: string, n: number, cutAtStart = false): string {
   while (lines.length && lines[lines.length - 1] === '') lines.pop()
   return lines.slice(-n).join('\n')
 }
+
+// ---- one time limit for the optional checks -----------------------------------------------------------------------
+// Asking the Claude Code and Codex apps can take up to 15 s each, and a broken install can hang. The report must still
+// copy, so every optional check shares ONE deadline; whatever has not answered by then is marked as timed out.
+
+/** How long the optional checks may take, all together. */
+export const DIAGNOSTICS_CHECK_MS = 5000
+
+export type Settled<T> = { ok: true; value: T } | { ok: false; reason: 'timeout' | 'error' }
+
+/**
+ * One deadline, `ms` from now, shared by every check wrapped in `within()`: each resolves to its value, `error` if it
+ * threw, or `timeout` if it was still running when the deadline passed. A check left running is not stopped here (its
+ * own code owns that). Call `done()` once all are settled, so the timer does not keep the process busy.
+ */
+export function sharedDeadline(ms: number): { within<T>(check: Promise<T>): Promise<Settled<T>>; done(): void } {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const passed = new Promise<{ ok: false; reason: 'timeout' }>((resolve) => {
+    timer = setTimeout(() => resolve({ ok: false, reason: 'timeout' }), ms)
+  })
+  return {
+    within: <T>(check: Promise<T>): Promise<Settled<T>> =>
+      Promise.race([
+        check.then(
+          (value): Settled<T> => ({ ok: true, value }),
+          (): Settled<T> => ({ ok: false, reason: 'error' })
+        ),
+        passed
+      ]),
+    done: () => clearTimeout(timer)
+  }
+}
+
+/** The words for a check that did not answer in time. */
+export const timedOutText = (ms: number): string => `no answer within ${Math.round(ms / 1000)} s`
 
 const cli = (c: CliFacts | null): string =>
   c ? [c.state, c.version && `version ${c.version}`, c.plan && `plan ${c.plan}`].filter(Boolean).join(', ') : 'not checked'
@@ -106,6 +146,7 @@ export function diagnosticsReport(f: DiagnosticsFacts, log: string, when: Date):
     `Claude Code app: ${cli(f.claudeCode)}`,
     `Codex app: ${cli(f.codex)}`,
     `Listening model: ${f.listeningModel}`,
+    ...(f.timedOut?.length ? [`Timed out: ${f.timedOut.join(', ')}`] : []),
     '',
     `Recent log (last ${DIAGNOSTICS_LOG_LINES} lines):`,
     log || '(empty)'
