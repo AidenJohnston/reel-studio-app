@@ -34,7 +34,7 @@ from typing import Optional
 
 from .vocab import sound_key
 
-VERSION = 2
+VERSION = 3
 FILE = "script-align.json"
 MATCH, MISMATCH, GAP = 2, -1, -1     # alignment scores
 GAP_MAX = 3          # more unmatched words than this in a row (either side) ends a span: off-script

@@ -115,10 +115,23 @@ def test_a_skipped_sentence_inside_one_heard_word_stays_out():
     assert groups == [{"ids": ["w0"], "words": ["今天开始。", "工作结束。"]}]
 
 
+def test_a_mapping_saved_by_an_older_version_is_rebuilt(tmp_path, monkeypatch):
+    words = heard("今天开始工作结束。")
+    proj = project(tmp_path, "今天开始。谢谢。工作结束。")
+    # what the previous version stored: the skipped sentence drawn back in
+    monkeypatch.setattr(scriptalign, "VERSION", scriptalign.VERSION - 1)
+    old = {"version": scriptalign.VERSION, "key": scriptalign._key(proj["script"], words), "script": proj["script"],
+           "groups": [{"ids": ["w0"], "words": ["今天开始。谢谢。工作结束。"]}], "spans": [["w0", "w0"]]}
+    monkeypatch.undo()
+    (tmp_path / "work").mkdir()
+    (tmp_path / "work" / scriptalign.FILE).write_text(json.dumps(old), encoding="utf-8")
+    assert scriptalign.mapping(tmp_path, proj, words)["groups"] == [{"ids": ["w0"], "words": ["今天开始。", "工作结束。"]}]
+
+
 def test_the_mapping_key_is_pinned():
     # the same inputs and value as ai/test/script-follow.test.ts: the AI checks the key the same way
     words = [{"id": "w0", "w": " Nave"}, {"id": "w1", "w": "今天。"}]
-    assert scriptalign._key('Use Neve, 4.0 — 今天。\n"quoted"', words) == "28dbbddf08b14e6e8e4ba9c2a5f1f6fac039eeb866b003c1c6aba2b2c7b9a579"
+    assert scriptalign._key('Use Neve, 4.0 — 今天。\n"quoted"', words) == "1600ca474501091523e309c7b2bf0f1d69bc8bff38d7cf0709690a809cf2a28b"
 
 
 def test_an_ad_lib_stays_as_heard():

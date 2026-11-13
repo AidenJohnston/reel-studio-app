@@ -18,7 +18,7 @@ async function setup(script: unknown) {
   if (script !== null) p.script = script;
   await saveProject(dir, p);
   const align = {
-    version: 2, key: mappingKey(SCRIPT, transcript.words), script: SCRIPT,
+    version: 3, key: mappingKey(SCRIPT, transcript.words), script: SCRIPT,
     groups: [{ ids: ['w0'], words: ['We'] }, { ids: ['w3'], words: ['Neve'] }], spans: [['w0', 'w5']],
   };
   await fsp.writeFile(path.join(dir, 'work', 'script-align.json'), JSON.stringify(align));
@@ -34,7 +34,7 @@ describe('captions that follow the script, as the AI is told', () => {
   it('computes the mapping key exactly as the engine does', () => {
     // the same inputs and value as engine/tests/test_captions_follow_script.py
     const words = [{ id: 'w0', w: ' Nave' }, { id: 'w1', w: '今天。' }];
-    expect(mappingKey('Use Neve, 4.0 — 今天。\n"quoted"', words)).toBe('28dbbddf08b14e6e8e4ba9c2a5f1f6fac039eeb866b003c1c6aba2b2c7b9a579');
+    expect(mappingKey('Use Neve, 4.0 — 今天。\n"quoted"', words)).toBe('1600ca474501091523e309c7b2bf0f1d69bc8bff38d7cf0709690a809cf2a28b');
   });
 
   it('shows the current script and each word drawn from it', async () => {

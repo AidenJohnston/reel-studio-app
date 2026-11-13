@@ -9,7 +9,7 @@ import * as path from 'node:path';
 import { CaptionCorrection, Project, Transcript, Word, keptWords, readJson } from './project';
 
 /** scriptalign.VERSION: a mapping made by another version is not this one's. */
-export const SCRIPT_ALIGN_VERSION = 2;
+export const SCRIPT_ALIGN_VERSION = 3;
 const SCRIPT_FILES = ['script.txt', 'script.md'];
 const SCRIPT_FILE_MAX = 200_000;
 
