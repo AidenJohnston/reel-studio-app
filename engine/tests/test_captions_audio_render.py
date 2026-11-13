@@ -50,7 +50,19 @@ def test_fit_shrinks_long_lines_and_never_grows():
     assert size == 76 and lines == ["HI"]
     size, lines = captions.fit("INTERNATIONALIZATION EVERYWHERE", 76, 940, 6, m)
     assert size <= 76
-    assert max(m.width(t, size, 6) for t in lines) <= 940 + 1
+    assert max(m.width(t, size, 6) for t in lines) <= 940
+    # a real cue the old size-by-ratio estimate left 1 px too wide
+    size, lines = captions.fit("AND IMPERSONATED BEING 7", 105, 939.6, 8, m)
+    assert m.width(lines[0], size, 8) <= 939.6
+    # the widest real cue at render_ass's safe width at 1080 (verify.ig_right_limit, a pixel inside)
+    size, lines = captions.fit("SOMEONE'S PERSONAL BRAND", 105, 797.2, 8, m)
+    # FreeType builds measure this line a fraction of a pixel apart (73 on macOS, 74 on Ubuntu), so check that
+    # fit picked the largest size that fits rather than one exact number.
+    assert lines == ["SOMEONE'S PERSONAL BRAND"] and m.width(lines[0], size, 8) <= 797.2 < m.width(lines[0], size + 1, 8)
+    assert size in (73, 74)
+    # stepping down past 62% of the size wraps the line instead (at 877.2 the first guess is just above 62%)
+    size, lines = captions.fit("INTERNATIONALIZATION EVERYWHERE", 105, 877.2, 8, m)
+    assert lines == ["INTERNATIONALIZATION", "EVERYWHERE"] and size >= 105 * captions.MIN_SHRINK
 
 
 def test_unknown_font_falls_back_with_a_warning():

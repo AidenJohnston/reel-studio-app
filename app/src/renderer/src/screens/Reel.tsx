@@ -8,7 +8,8 @@ import type { Go } from '../nav'
 import { Check, Confirm, FOLDER_APP, Modal, MoreMenu, Progress, Spinner, Thinking } from '../components/ui'
 import { SendToPhone } from '../components/SendToPhone'
 import { Icon } from '../components/icons'
-import { PhonePlayer, type SubtitleLook } from '../components/Player'
+import { PhonePlayer } from '../components/Player'
+import type { SubtitleLook } from '../../../shared/caption-presets'
 import { EXPORT_EVENT, NOTE_DROP_DONE, useNotify } from '../App'
 import { ShowMeHow, type Tab } from './ShowMeHow'
 import { AttachmentChips, AttachmentThumb, useNoteAttachments } from '../components/NoteAttachments'
@@ -60,7 +61,7 @@ export function Reel({ slug, go, fresh }: { slug: string; go: Go; fresh?: boolea
   const [holding, setHolding] = useState(false)
   const [duration, setDuration] = useState<number | null>(null)
   // Live subtitle preview from the drawer's Subtitles tab.
-  const [preview, setPreview] = useState<{ look: SubtitleLook; text: string; at: number } | null>(null)
+  const [preview, setPreview] = useState<{ look: SubtitleLook; text: string; at: number; lit?: number } | null>(null)
   const chatEnd = useRef<HTMLDivElement>(null)
   // pictures, GIFs and clips on the note being written (components/NoteAttachments.tsx)
   const att = useNoteAttachments(slug, notify)
