@@ -179,7 +179,7 @@ describe('what reaches the person\'s server, and what comes back', () => {
   it('no credential from the environment rides along with the key', async () => {
     const saved = { token: process.env.ANTHROPIC_AUTH_TOKEN, headers: process.env.ANTHROPIC_CUSTOM_HEADERS };
     process.env.ANTHROPIC_AUTH_TOKEN = 'env-token-should-stay-home';
-    process.env.ANTHROPIC_CUSTOM_HEADERS = 'Authorization: Bearer env-header-token\nX-Api-Key: env-key\nX-Leak: env-secret';
+    process.env.ANTHROPIC_CUSTOM_HEADERS = 'Authorization: Bearer env-header-token\nX-Api-Key: env-key\nX-Leak: env-secret\nAnthropic-Beta: env-beta, thinking-binding-controls-2026-08-01';
     try {
       const ai = createAI({ host: new FakeHost(tmpDir()), settingsDir: tmpDir(), secretStore: fakeSafeStorage, localClaude: { bin: null } });
       expect((await ai.saveConnection({ label: 'P', kind: 'anthropic', baseURL: mock.origin, model: 'mock-small', key: KEY })).error).toBeUndefined();
@@ -187,10 +187,12 @@ describe('what reaches the person\'s server, and what comes back', () => {
       expect(h['x-api-key']).toBe(KEY);
       expect(h.authorization).toBeUndefined();
       expect(h['x-leak']).toBeUndefined();
+      expect(h['anthropic-beta']).toBeUndefined();
       // the Claude key path drops the env token too (it is still sent to Anthropic's own host otherwise)
       await new AnthropicProvider({ apiKey: KEY, baseURL: mock.origin, model: 'mock-small', maxRetries: 0 }).complete(sayOk);
       expect(mock.requests.at(-1)!.headers.authorization ?? '').not.toContain('env-token');
       expect(mock.requests.at(-1)!.headers['x-leak']).toBeUndefined();
+      expect(mock.requests.at(-1)!.headers['anthropic-beta']).toBeUndefined();
     } finally {
       for (const [k, v] of [['ANTHROPIC_AUTH_TOKEN', saved.token], ['ANTHROPIC_CUSTOM_HEADERS', saved.headers]] as const) {
         if (v === undefined) delete process.env[k]; else process.env[k] = v;
