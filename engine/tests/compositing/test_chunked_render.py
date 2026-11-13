@@ -160,6 +160,30 @@ def test_an_edited_chunked_final_is_the_full_render_frame_for_frame(tmp_path, me
     assert edited.read_bytes() == full.read_bytes()
 
 
+def test_no_pass_opens_more_encoders_than_the_bound_and_the_split_changes_nothing(tmp_path, media, root,
+                                                                                 monkeypatch):
+    """A first export encodes every chunk; FFmpeg keeps each encoder of a pass until the pass ends, so a long
+    video is drawn in passes of at most ENCODERS_PER_PASS chunks, which give the bytes one pass gives."""
+    one = tmp_path / "one"
+    _busy_project(one, media["video"])
+    whole, res = _render(one, root, tmp_path / "out" / "one-pass.mp4")
+    assert len(res["chunks"]["encoded"]) == 7
+    outputs = []
+    run = tools.ffmpeg_progress
+
+    def counting(cmd, *args, **kwargs):
+        if kwargs.get("what") == "chunk render":
+            outputs.append(sum(1 for a, b in zip(cmd, cmd[1:]) if a == "-f" and b == "mp4"))
+        return run(cmd, *args, **kwargs)
+    monkeypatch.setattr(chunks, "ENCODERS_PER_PASS", 3)
+    monkeypatch.setattr(tools, "ffmpeg_progress", counting)
+    split = tmp_path / "split"
+    _busy_project(split, media["video"])
+    passes, _ = _render(split, root, tmp_path / "out" / "split.mp4")
+    assert outputs == [3, 3, 1]
+    assert passes.read_bytes() == whole.read_bytes()
+
+
 def test_the_one_pass_fallback_draws_the_same_picture(tmp_path, media, root):
     """The single pass encodes the same frames with one encoder, whose motion search may pick a different
     vector of the same cost where the picture is flat: the same picture, not always the same bits."""

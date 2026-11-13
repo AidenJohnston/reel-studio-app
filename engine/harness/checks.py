@@ -167,18 +167,16 @@ def check_preview_video(ffmpeg: str, ffprobe: str, ref: Path, cand: Path, captio
 
 
 def check_still(ffmpeg: str, ffprobe: str, ref: Path, png: Path, t: float, captions: list, th: dict,
-                want: tuple, millisecond_seek: bool = True) -> dict:
-    """One still `frames --times t` made: the first reference frame at or after t (what ffmpeg's
-    accurate input seek in frames.py returns), scaled to the required still size `want`."""
+                want: tuple) -> dict:
+    """One still `frames --times t` made: the reference frame nearest t (the frame render.frame_at picks,
+    for a still taken from a render and for one drawn without one), scaled to the required still size `want`."""
     b = media.read_image(png)
     h, w = b.shape[:2]
     bad = _wrong_size((w, h), want)
     if bad:
         return bad
     rp = media.video_pts(ffprobe, ref)
-    # frames.py rounds its seek; moments uses render.stills at the exact output frame instead.
-    seek = round(t, 3) if millisecond_seek else t
-    idx = next((i for i, x in enumerate(rp) if x >= seek - 1e-6), len(rp) - 1)
+    idx = min(range(len(rp)), key=lambda i: (abs(rp[i] - t), i))
     a: Optional[object] = None
     for i, fr in enumerate(media.iter_frames(ffmpeg, ref, w, h)):
         if i == idx:

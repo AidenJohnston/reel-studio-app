@@ -20,9 +20,10 @@ def test_chunks_are_two_keyframe_intervals_and_the_last_one_is_short():
     assert chunks.plan(1, 30) == [(0, 1)]
 
 
-def test_missing_chunks_group_into_consecutive_runs():
-    assert chunks.runs([0, 1, 2, 5, 7, 8]) == [[0, 1, 2], [5], [7, 8]]
-    assert chunks.runs([]) == []
+def test_missing_chunks_group_into_consecutive_runs_of_a_bounded_size():
+    assert chunks.runs([0, 1, 2, 5, 7, 8], 8) == [[0, 1, 2], [5], [7, 8]]
+    assert chunks.runs(list(range(20)), 8) == [list(range(8)), list(range(8, 16)), list(range(16, 20))]
+    assert chunks.runs([], 8) == []
 
 
 def test_a_chunk_is_keyed_on_the_caption_events_on_screen_in_it():

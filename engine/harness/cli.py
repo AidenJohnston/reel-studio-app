@@ -145,6 +145,10 @@ def cmd_setup(a) -> int:
 
 
 def cmd_run(a) -> int:
+    if a.proxy and a.flow == "moments":
+        # replay_moments never builds the preview copies, so the run would time the originals and its
+        # report would have no copies to show
+        raise Refusal("--proxy times drafts and windows read from preview copies; --flow moments does not build them")
     c = Ctx(a)
     ids = split_ids(c.cfg, a.split, a.takes.split(",") if a.takes is not None else None)
     if not ids:

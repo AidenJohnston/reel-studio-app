@@ -161,6 +161,33 @@ describe('job manager (main): the contract on the wire', () => {
     expect(events.at(-1)).toMatchObject({ type: 'cancelled' })
   })
 
+  it('a stopped job starts no queued copy and ends only after the one copying', async () => {
+    setupPaths()
+    const slug = 'stopped-copying'
+    mkdirSync(projectDir(slug), { recursive: true })
+    const started: number[] = []
+    const finished: number[] = []
+    let release = (): void => undefined
+    const slow = new Promise<void>((r) => (release = r))
+    const jobs = createJobManager(() => undefined, () => undefined, undefined, undefined, async (_s, e) => {
+      const t = e.kind === 'still' ? e.t : e.from
+      started.push(t)
+      if (t === 1) await slow
+      finished.push(t)
+      return `reel-media://f/${t}`
+    })
+    jobs.start(slug, 'note', async (emit) => {
+      emit({ type: 'moment', kind: 'still', t: 1, file: 'a.png' })
+      emit({ type: 'moment', kind: 'still', t: 2, file: 'b.png' })
+      setTimeout(release, 30)
+      throw { code: 'CANCELLED', userMessage: 'Stopped.' }
+    })
+    await jobs.forSlug(slug)?.done
+    expect(finished).toEqual([1])   // the copy under way was waited for
+    await new Promise((r) => setTimeout(r, 30))
+    expect(started).toEqual([1])    // the queued one never started
+  })
+
   it('keeps thinking across the once-a-second repeats, adds video to renders before done, passes reply + heard', async () => {
     setupPaths()
     const slug = 'wire'

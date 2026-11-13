@@ -22,6 +22,16 @@ def test_empty_selection_is_refused_before_setup(monkeypatch, capsys, command, t
     assert "no takes selected" in capsys.readouterr().err
 
 
+def test_moments_with_preview_copies_is_refused_before_setup(monkeypatch, capsys):
+    def unexpected(*args):
+        pytest.fail("a refused run must not build the corpus")
+
+    monkeypatch.setattr(cli, "Ctx", unexpected)
+    monkeypatch.setattr(cli, "setup", unexpected)
+    assert cli.main(["run", "--flow", "moments", "--proxy"]) == 2
+    assert "--flow moments does not build them" in capsys.readouterr().err
+
+
 def test_setup_with_empty_ids_builds_no_takes(monkeypatch, tmp_path):
     song = tmp_path / "song"
     song.write_bytes(b"song")

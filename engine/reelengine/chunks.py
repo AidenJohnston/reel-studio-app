@@ -29,6 +29,10 @@ DIR = "chunks"              # under work/render/
 # Caption events this close to a chunk still count as on screen in it: libass reads the frame's time in
 # milliseconds, and an event a frame away may be what a neighbouring event's layout makes room for.
 CAPTION_MARGIN = 0.1
+# Encoders open at once in one pass. FFmpeg keeps each x264 encoder, with its frame threads, lookahead and
+# reference frames, until the pass ends: a first export of a 60 s 1080x1920 reel peaked at 9.7 GB with all
+# 31 in one pass, 3.0 GB at 8 and 1.7 GB at 4 (21.7 s for the export, against 18.9 s at 8).
+ENCODERS_PER_PASS = 4
 # Chunks from older edits are kept for undo, up to this many times the chunks of the current video.
 KEEP_FACTOR = 3
 PART_HASH_LIMIT = 64 << 20  # files up to this size are hashed whole; larger ones (a 4K take) are sampled
@@ -52,11 +56,12 @@ def plan(n_frames: int, fps: float) -> list:
     return [(f, min(f + step, n_frames)) for f in range(0, n_frames, step)]
 
 
-def runs(indices: list) -> list:
-    """Consecutive chunk indices grouped: each run is encoded by one FFmpeg process."""
+def runs(indices: list, limit: int) -> list:
+    """Consecutive chunk indices grouped, at most `limit` to a group: each group is drawn by one FFmpeg
+    pass with an encoder per chunk, and FFmpeg keeps every encoder of a pass until the pass ends."""
     out = []
     for i in indices:
-        if out and out[-1][-1] == i - 1:
+        if out and out[-1][-1] == i - 1 and len(out[-1]) < limit:
             out[-1].append(i)
         else:
             out.append([i])

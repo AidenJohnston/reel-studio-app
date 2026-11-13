@@ -407,8 +407,7 @@ def check_take(take: Take, refs: list, runs: list, ffmpeg: str, ffprobe: str, th
             elif name is None or any(name not in run["files"][k] for run in runs):
                 stills.append(_missing(f"no still for {t}s in every run"))
             else:
-                stills.append(_merge([checks.check_still(ffmpeg, ffprobe, export, f, t, caps, pv, still_want,
-                                                        millisecond_seek=not moments)
+                stills.append(_merge([checks.check_still(ffmpeg, ffprobe, export, f, t, caps, pv, still_want)
                                       for f in distinct(lambda r, name=name: r["files"][k][name])]))
         if not agree:
             stills.append(_missing("runs chose different moments for this note"))

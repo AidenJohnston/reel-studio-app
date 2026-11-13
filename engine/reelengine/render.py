@@ -759,9 +759,10 @@ def chunked_video(ctx: RenderCtx, tl, src_meta: dict, src_paths: dict, faces: di
     todo = sum(spans[i][1] - spans[i][0] for i in missing)
     made_dir, graph = cache.dir / "new", rwork / "graph_chunk.txt"
     done = 0
-    for run in chunkmod.runs(missing):
+    for run in chunkmod.runs(missing, chunkmod.ENCODERS_PER_PASS):
         # One pass draws the run's frames; each chunk gets its own encoder, which starts fresh on the
-        # chunk's first frame (chunks.py). The first output only counts frames, for the progress.
+        # chunk's first frame (chunks.py), so how runs are split never changes a chunk. The first output
+        # only counts frames, for the progress.
         f0, f1 = spans[run[0]][0], spans[run[-1]][1]
         cmd, chains, dur, shift = picture(f0, f1)
         chains.append(f"[vout]split={len(run) + 1}[count]" + "".join(f"[c{j}]" for j in range(len(run))))
