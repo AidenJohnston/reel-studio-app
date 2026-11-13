@@ -14,7 +14,20 @@ import {
   settingsDir
 } from './paths'
 import { createEngineRunner, killAllEngines, toUserError, type RunEngine } from './engine'
-import { logDuration } from './diagnostics'
+import { cpus, totalmem } from 'node:os'
+import {
+  DIAGNOSTICS_CHECK_MS,
+  DIAGNOSTICS_LOG_BYTES,
+  DIAGNOSTICS_LOG_LINES,
+  diagnosticsReport,
+  lastLines,
+  logDuration,
+  redactDiagnostics,
+  sharedDeadline,
+  timedOutText,
+  type CliFacts,
+  type Settled
+} from './diagnostics'
 import { handleMediaProtocol, registerMediaScheme } from './media'
 import {
   addChat,
@@ -249,6 +262,100 @@ function handle(channel: string, fn: Handler): void {
   })
 }
 
+// ---- Copy diagnostics (Settings > About; Help on a Mac) -----------------------------------------------------------
+async function readLogTail(): Promise<string> {
+  try {
+    const fh = await fs.open(logFile(), 'r')
+    try {
+      const { size } = await fh.stat()
+      const len = Math.min(size, DIAGNOSTICS_LOG_BYTES)
+      const buf = Buffer.alloc(len)
+      await fh.read(buf, 0, len, size - len)
+      return lastLines(buf.toString('utf8'), DIAGNOSTICS_LOG_LINES, size > len)
+    } finally {
+      await fh.close()
+    }
+  } catch {
+    return ''
+  }
+}
+
+/** The diagnostics text, redacted. Only the state, version and plan kind of each CLI go in, never a path. */
+async function diagnosticsText(): Promise<string> {
+  // Every check shares one deadline: a CLI that hangs (or ignores its stop signal) must not hold the report back.
+  const deadline = sharedDeadline(DIAGNOSTICS_CHECK_MS)
+  const call = <T>(fn: () => T | Promise<T>): Promise<Settled<T>> => deadline.within(Promise.resolve().then(fn))
+  const [rActive, rClaude, rCodex, rModel, rLog] = await Promise.all([
+    call(() => ai.active()),
+    call(() => ai.claudeCodeStatus?.() ?? null),
+    call(() => ai.codexStatus?.() ?? null),
+    call(() => models.status()),
+    call(() => readLogTail())
+  ])
+  deadline.done()
+  const r = { active: rActive, claude: rClaude, codex: rCodex, model: rModel, log: rLog }
+  const late = timedOutText(DIAGNOSTICS_CHECK_MS)
+  const value = <T>(s: Settled<T>): T | null => (s.ok ? s.value : null)
+  const names: Record<keyof typeof r, string> = {
+    active: 'AI editor',
+    claude: 'Claude Code app',
+    codex: 'Codex app',
+    model: 'listening model',
+    log: 'log'
+  }
+  const timedOut = (Object.keys(r) as (keyof typeof r)[]).filter((k) => {
+    const s = r[k]
+    return !s.ok && s.reason === 'timeout'
+  })
+  const active = value(r.active)
+  const model = value(r.model)
+  const logTail = r.log.ok ? r.log.value : `(${r.log.reason === 'timeout' ? late : 'could not read the log'})`
+  const facts = (s: Settled<{ state: string; version?: string; plan?: string } | null>): CliFacts | null => {
+    if (!s.ok) return { state: s.reason === 'timeout' ? late : 'check failed' }
+    const c = s.value
+    return c ? { state: c.state, ...(c.version ? { version: c.version } : {}), ...(c.plan ? { plan: c.plan } : {}) } : null
+  }
+  const mac = process.platform === 'darwin'
+  const osName = mac ? 'macOS' : process.platform === 'win32' ? 'Windows' : process.platform
+  const text = diagnosticsReport(
+    {
+      appVersion: app.getVersion(),
+      packaged: app.isPackaged,
+      os: `${osName} ${process.getSystemVersion()}`,
+      arch: process.arch,
+      cpu: cpus()[0]?.model?.trim() || 'unknown',
+      memoryGb: Math.round(totalmem() / 1024 ** 3),
+      ...(app.runningUnderARM64Translation ? { translated: true } : {}),
+      ...(mac ? { inApplications: app.isInApplicationsFolder() } : {}),
+      electron: process.versions.electron,
+      engine: engineMode(),
+      aiEditor: active
+        ? `${active.label}, ${active.connected ? 'connected' : 'not connected'}${active.error ? ` (${active.error.code})` : ''}`
+        : r.active.ok ? 'unknown' : r.active.reason === 'timeout' ? late : 'check failed',
+      claudeCode: facts(r.claude),
+      codex: facts(r.codex),
+      listeningModel: !model
+        ? r.model.ok ? 'unknown' : r.model.reason === 'timeout' ? late : 'check failed'
+        : model.installed
+          ? `${model.name}, ready`
+          : model.downloading
+            ? `${model.name}, downloading (${Math.round(model.pct)}%)`
+            : `${model.name}, not downloaded${model.error ? ` (${model.error})` : ''}`,
+      ...(timedOut.length ? { timedOut: timedOut.map((k) => names[k]) } : {})
+    },
+    logTail,
+    new Date()
+  )
+  // One pass over the whole text: the log and every fact above (a CPU name or a plan kind cannot carry a path, but cheap).
+  return redactDiagnostics(text, app.getPath('home'))
+}
+
+/** Puts the diagnostics text on the clipboard ("Copy diagnostics" in Settings > About, and Help on a Mac). */
+async function copyDiagnostics(): Promise<void> {
+  await clipboard.writeText(await diagnosticsText())
+  log('[diagnostics] copied to the clipboard')
+}
+
 async function appInfo(): Promise<AppInfo> {
   const s = await loadSettings()
   // The real long path, never an 8.3 short name like USERNA~1 (design critique 1.9).
@@ -401,6 +508,7 @@ function registerIpc(): void {
     else shell.showItemInFolder(p)
   })
   handle('app:copyText', (_e, t: string) => clipboard.writeText(String(t)))
+  handle('app:copyDiagnostics', () => copyDiagnostics())
   handle('app:dimTitleBar', (_e, on: boolean) => {
     if (process.platform !== 'darwin' && win && !win.isDestroyed()) win.setTitleBarOverlay(titleBarOverlay(on === true))
   })
@@ -766,7 +874,14 @@ async function carryOverClaudeCode(settings: { aiAutoPicked: boolean; aiCarriedO
 // ---- window -------------------------------------------------------------------------------------
 function createWindow(): void {
   win = createMainWindow({ preload: join(__dirname, '../preload/index.js'), stateFile: windowStateFile(settingsDir()), test: TEST })
-  installMenu(sendCommand, DEV_PROVIDERS || !app.isPackaged)
+  installMenu(sendCommand, DEV_PROVIDERS || !app.isPackaged, () => {
+    void copyDiagnostics()
+      .then(() => {
+        const opts = { type: 'info' as const, message: 'Diagnostics copied', detail: 'Paste them into your bug report.' }
+        return win && !win.isDestroyed() ? dialog.showMessageBox(win, opts) : dialog.showMessageBox(opts)
+      })
+      .catch((e) => log(`[diagnostics] copy failed: ${String((e as Error)?.message ?? e)}`))
+  })
   win.once('ready-to-show', () => win?.show())
   // Stop flashing the taskbar once the person is back.
   win.on('focus', () => win?.flashFrame(false))
