@@ -93,8 +93,9 @@ async function mutate(ctx: ToolContext, field: string, fn: (p: Project, t: Trans
   (ctx.state.dirty ??= new Set()).add(field);
 }
 
-/** A note that asks to flip the picture ("it's mirrored", "flip it", "the writing is backwards"). */
-const MIRROR_REQUEST = /\b(mirror\w*|flip\w*|backwards?|reversed?)\b/i;
+/** A note that asks to flip the picture ("it's mirrored", "unmirror it", "flip it", "the writing is backwards",
+ * "swap left and right", "it's the wrong way round"). */
+const MIRROR_REQUEST = /mirror|flip|backwards?|revers|left[ -](and|to)[ -]right|right[ -](and|to)[ -]left|wrong way/i;
 
 export class ToolInputError extends Error {
   constructor(message: string) { super(message); this.name = 'ToolInputError'; }

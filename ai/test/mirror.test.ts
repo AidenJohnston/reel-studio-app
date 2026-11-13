@@ -88,7 +88,7 @@ describe('set_mirror', () => {
       await executeTool(ctx, 'set_mirror', { on: false, source: null });   // undoing is always fine
     }
     // the user's own note asks for it
-    for (const note of ["my video is mirrored", 'flip it please', 'the writing is backwards']) {
+    for (const note of ["my video is mirrored", 'flip it please', 'the writing is backwards', 'unmirror my video', 'swap left and right', "it's the wrong way round"]) {
       ctx.userNote = note;
       expect((await executeTool(ctx, 'set_mirror', { on: true, source: 's1' })).isError).toBe(false);
       await executeTool(ctx, 'set_mirror', { on: false, source: null });
