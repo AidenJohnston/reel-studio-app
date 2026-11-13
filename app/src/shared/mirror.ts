@@ -42,20 +42,24 @@ export function mergeSourcesPatch(current: Sources | undefined, patch: unknown):
 // ---- the check `engine init` runs on every new take (engine/reelengine/mirror_detect.py) ----------
 // A clearly mirrored take comes in flipped (`mirror: true`) and the editor says so in the chat, with a
 // one-click undo. A take that only looks somewhat mirrored is left alone and the editor asks instead.
+// Each question carries the ids of the takes it is about (ChatMessage.sources), and its buttons act on
+// those takes only. Once the user has answered, only their own tap changes that take again: the AI
+// editor never flips it (ai set_mirror), it can only make the app ask (`declinedQuestion`).
 
 /** The buttons under those chat lines. */
 export type MirrorAnswer = 'mirror-undo' | 'mirror-flip' | 'mirror-keep'
 export const MIRROR_ANSWERS: readonly MirrorAnswer[] = ['mirror-undo', 'mirror-flip', 'mirror-keep']
 
+/** A chat line about some takes, and the ids of those takes. */
+export interface MirrorQuestion {
+  text: string
+  actions: MirrorAnswer[]
+  sources: string[]
+}
+
 type Source = Sources[number]
 const autoFlipped = (s: Source): boolean => s.mirrorCheck?.verdict === 'mirrored' && s.mirror === true && !s.mirrorCheck.answer
 const askable = (s: Source): boolean => s.mirrorCheck?.verdict === 'maybe-mirrored' && s.mirror !== true && !s.mirrorCheck.answer
-/** the user said "as filmed", and the AI editor later saw backwards writing anyway (it may not flip it itself) */
-const declined = (s: Source): boolean => s.mirror !== true && (s.mirrorCheck?.answer === 'undone' || s.mirrorCheck?.answer === 'kept')
-
-/** The editor's line when it would have flipped a take the user had said is the right way round (the AI's
- * set_mirror refuses that unless the user's note asks): "Flip it" / "Keep as filmed" answer it. */
-export const STILL_LOOKS_MIRRORED = 'It still looks mirrored to me (some writing behind you seems to read backwards), so I left it the way you chose. Flip it?'
 
 /** "your video" / "your videos" when it is every take, otherwise "take 2" / "take 1 and take 3"; and
  * the pronoun that goes with it. */
@@ -66,34 +70,55 @@ function whichTakes(all: Sources, hit: Sources): { what: string; it: string } {
   return { what: names.length > 1 ? `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}` : names[0], it }
 }
 
+const capital = (s: string): string => s.charAt(0).toUpperCase() + s.slice(1)
+const ids = (hit: Sources): string[] => hit.map((s) => s.id)
+
 /** The editor's chat lines once init has looked at the takes: what it flipped and why, with "Undo flip",
  * and what it is unsure about, with "Flip it" / "Keep as filmed". Empty when there is nothing to say. */
-export function mirrorNotices(sources: Sources | undefined): { text: string; actions: MirrorAnswer[] }[] {
+export function mirrorNotices(sources: Sources | undefined): MirrorQuestion[] {
   const all = sources ?? []
-  const out: { text: string; actions: MirrorAnswer[] }[] = []
+  const out: MirrorQuestion[] = []
   const flipped = all.filter(autoFlipped)
   if (flipped.length) {
     const w = whichTakes(all, flipped)
     const why = flipped[0].mirrorCheck?.why ?? 'the writing behind you reads backwards'
-    out.push({ text: `I flipped ${w.what}: ${w.it} looked mirrored (${why}).`, actions: ['mirror-undo'] })
+    out.push({ text: `I flipped ${w.what}: ${w.it} looked mirrored (${why}).`, actions: ['mirror-undo'], sources: ids(flipped) })
   }
   const asked = all.filter(askable)
   if (asked.length) {
     const w = whichTakes(all, asked)
     const why = asked[0].mirrorCheck?.why ?? 'some writing behind you seems to read backwards'
-    const what = w.what.replace(/^your/, 'Your').replace(/^take/, 'Take')
-    out.push({ text: `${what} ${asked.length > 1 ? 'look' : 'looks'} mirrored (${why}). Flip ${w.it === 'they' ? 'them' : 'it'}?`, actions: ['mirror-flip', 'mirror-keep'] })
+    out.push({
+      text: `${capital(w.what)} ${asked.length > 1 ? 'look' : 'looks'} mirrored (${why}). Flip ${w.it === 'they' ? 'them' : 'it'}?`,
+      actions: ['mirror-flip', 'mirror-keep'],
+      sources: ids(asked)
+    })
   }
   return out
 }
 
-/** One of those buttons: the takes it is about, flipped or not, with the answer kept in
- * `mirrorCheck.answer` so nothing asks or undoes twice. `change` = what to call a new version (empty
- * when the picture did not change); `reply` = the editor's answer in the chat, null when the takes were
- * already changed another way (the "Flip picture" switch, or the AI). */
-export function answerMirror(sources: Sources | undefined, a: MirrorAnswer): { sources: Sources; change: string; reply: string | null } {
+/** The editor's question when the AI wanted to flip takes the user had said are the right way round
+ * (AgentResult.mirrorDeclined): the AI may not, so the user decides with one tap. Null when none of
+ * those takes is still as filmed. */
+export function declinedQuestion(sources: Sources | undefined, declined: string[] | undefined): MirrorQuestion | null {
+  const all = sources ?? []
+  const hit = all.filter((s) => declined?.includes(s.id) && s.mirror !== true)
+  if (!hit.length) return null
+  const w = whichTakes(all, hit)
+  return {
+    text: `It still looks mirrored to me (some writing behind you seems to read backwards), so I left ${w.what} the way you chose. Flip ${w.it === 'they' ? 'them' : 'it'}?`,
+    actions: ['mirror-flip', 'mirror-keep'],
+    sources: ids(hit)
+  }
+}
+
+/** One of those buttons, for the takes its question is about (`ids`), with the answer kept in
+ * `mirrorCheck.answer`. `change` = what to call a new version (empty when the picture did not change);
+ * `reply` = the editor's answer in the chat, null when those takes were already changed another way
+ * (the "Flip picture" switch, or Undo in What I did). */
+export function answerMirror(sources: Sources | undefined, a: MirrorAnswer, ids: string[]): { sources: Sources; change: string; reply: string | null } {
   const cur = sources ?? []
-  const hit = (s: Source): boolean => (a === 'mirror-undo' ? autoFlipped(s) : askable(s) || declined(s))
+  const hit = (s: Source): boolean => ids.includes(s.id) && !!s.mirrorCheck && (a === 'mirror-undo' ? s.mirror === true : s.mirror !== true)
   if (!cur.some(hit)) return { sources: cur, change: '', reply: null }
   const answer = a === 'mirror-undo' ? 'undone' : a === 'mirror-flip' ? 'flipped' : 'kept'
   const next = cur.map((s) => {

@@ -63,6 +63,8 @@ export interface ChatMessage {
   suggestion?: string
   /** Pictures, GIFs or clips the user attached to this note (a "you" message). */
   attachments?: NoteAttachment[]
+  /** The takes a mirror question is about (shared/mirror.ts): its buttons act on these only. */
+  sources?: string[]
 }
 
 /** A file attached to a note: what `engine attach` wrote in its sidecar (shared/attachments.ts). */

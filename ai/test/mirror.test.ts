@@ -70,31 +70,25 @@ describe('set_mirror', () => {
     expect(seen[2].mirror).toBe(true);
   });
 
-  it('never re-flips a take the user said is the right way round, unless their own note asks', async () => {
+  it('never re-flips a take the user said is the right way round, whatever the note says: it records it for the app to ask', async () => {
     const { ctx, dir } = await ctxFor();
     const p = await loadProject(dir);
     p.sources[0].mirrorCheck = { verdict: 'mirrored', answer: 'undone' };
     p.sources.push({ ...p.sources[0], id: 's2', mirrorCheck: { verdict: 'unsure' } });
     await saveProject(dir, p);
-    // the editor's own look at the frames (first edit, or a note about something else)
-    for (const note of [undefined, 'make the subtitles bigger']) {
+    // the editor's own look at the frames (first edit), a note about something else, one that only
+    // sounds like it ("inverted colors"), and even a real request: only the user's tap in the app flips it
+    for (const note of [undefined, 'make the subtitles bigger', 'inverted colors on the captions', 'unmirror my video']) {
       ctx.userNote = note;
       ctx.state.mirrorDeclined = undefined;
       const one = await executeTool(ctx, 'set_mirror', { on: true, source: 's1' });
       expect(one.isError).toBe(true);
-      expect(one.content).toMatch(/the user already said this video is the right way round/);
-      expect(ctx.state.mirrorDeclined).toEqual(['s1']);                  // the app then asks "Flip it?"
+      expect(one.content).toMatch(/only they can flip it: the app now shows them a Flip it button/);
+      expect(ctx.state.mirrorDeclined).toEqual(['s1']);
       const all = await executeTool(ctx, 'set_mirror', { on: true, source: null });
       expect(JSON.parse(all.content).sources).toEqual(['s2']);         // the other take still flips
       expect((await loadProject(dir)).sources.map((s) => s.mirror ?? null)).toEqual([null, true]);
-      await executeTool(ctx, 'set_mirror', { on: false, source: null });   // undoing is always fine
-    }
-    // the user's own note asks for it
-    for (const note of ["my video is mirrored", 'flip it please', 'the writing is backwards', 'unmirror my video', 'swap left and right',
-      "it's the wrong way round", 'switch the sides', 'can you swap my left and right', "it's inverted", 'the other way around please']) {
-      ctx.userNote = note;
-      expect((await executeTool(ctx, 'set_mirror', { on: true, source: 's1' })).isError).toBe(false);
-      await executeTool(ctx, 'set_mirror', { on: false, source: null });
+      expect((await executeTool(ctx, 'set_mirror', { on: false, source: null })).isError).toBe(false);   // undoing is always fine
     }
   });
 

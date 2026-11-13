@@ -61,4 +61,7 @@ All additive (optional fields only), per docs/architecture.md section 3. Schema:
 - `init` now writes `sources[].mirror = true` for a `mirrored` take. A `maybe-mirrored` one is left alone and the
   app asks. The user's choice goes in `mirrorCheck.answer` (`undone` / `flipped` / `kept`): from the chat
   buttons ("Undo flip", "Flip it", "Keep as filmed"), Undo in "What I did" or the "Flip picture" switch. So
-  nothing is undone or asked twice, and the AI editor's `get_project` shows `userSaidAsFilmed` for `undone` / `kept`.
+  nothing is undone or asked twice. After `undone` / `kept` only the user's own tap flips that take again: the AI
+  editor's `get_project` shows `userSaidAsFilmed`, its `set_mirror` refuses to flip the take whatever the note says,
+  and the app asks "Flip it?" instead. Each mirror question in the chat keeps the ids of its takes
+  (`ChatMessage.sources`, app state), and its buttons act on those takes only.
