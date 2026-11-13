@@ -121,37 +121,37 @@
   },
   {
     "name": "area:app",
-    "color": "0e8a16",
+    "color": "1a7f37",
     "description": "Set from changed files: the desktop app (app/)."
   },
   {
     "name": "area:ai",
-    "color": "0e8a16",
+    "color": "1f6feb",
     "description": "Set from changed files: the AI editor (ai/)."
   },
   {
     "name": "area:engine",
-    "color": "0e8a16",
+    "color": "8250df",
     "description": "Set from changed files: the render engine (engine/)."
   },
   {
     "name": "area:templates",
-    "color": "0e8a16",
+    "color": "bf8700",
     "description": "Set from changed files: animation templates (templates/)."
   },
   {
     "name": "area:packaging",
-    "color": "0e8a16",
+    "color": "bc4c00",
     "description": "Set from changed files: installers, signing and icons (packaging/)."
   },
   {
     "name": "area:docs",
-    "color": "0e8a16",
+    "color": "57606a",
     "description": "Set from changed files: docs/ and top-level Markdown."
   },
   {
     "name": "area:ci",
-    "color": "0e8a16",
+    "color": "db61a2",
     "description": "Set from changed files: .github/ and scripts/."
   }
 ]
