@@ -10,6 +10,7 @@ import { pausedSentence, pausedWords } from '../../../shared/pause'
 import type { Step } from '../../../shared/steps'
 import { droppedPaths, reel, userMessage } from '../api'
 import type { Go } from '../nav'
+import { removeVideo } from './remove'
 import { Button, Confirm, IS_MAC, IconButton, MOD, PickFiles, Segmented, Spinner } from '../components/ui'
 import { CombineDialog, VersionTree } from '../components/VersionTree'
 import { SideBySide, saveLayout, savedLayout, type CompareLayout } from '../components/SideBySide'
@@ -1472,8 +1473,8 @@ export function Reel({ slug, at, go, draft: startDraft }: { slug: string; at?: n
           danger
           onNo={() => setConfirmDelete(false)}
           onYes={async () => {
-            await reel.projects.remove(slug).catch((e) => notify(userMessage(e), 'error'))
-            go({ name: 'home' })
+            setConfirmDelete(false)
+            await removeVideo(slug, go, notify)
           }}
         />
       )}
