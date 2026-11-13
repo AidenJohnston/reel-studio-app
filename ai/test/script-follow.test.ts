@@ -67,17 +67,38 @@ describe('captions that follow the script, as the AI is told', () => {
   it('reports what a caption correction draws, not the script', async () => {
     const { dir, t, p } = await setup(SCRIPT);
     for (const [fix, shown] of [
-      [{ from: 'Nave', to: 'CUSTOM' }, 'CUSTOM'],                         // a single word, everywhere
-      [{ from: 'with Nave', to: 'with Rode' }, 'with Rode'],              // a phrase: w3 is drawn inside it
-      [{ from: 'Nave', to: 'Nevé', at: 'w3' }, 'Nevé'],                   // one word, from the subtitle list
+      [{ from: 'Nave', to: 'CUSTOM' }, 'w3: "Nave" -> "CUSTOM"'],                     // a single word, everywhere
+      [{ from: 'with Nave', to: 'with Rode' }, 'w2-w3: "with Nave" -> "with Rode"'],  // a phrase, over all its words
+      [{ from: 'Nave', to: 'Nevé', at: 'w3' }, 'w3: "Nave" -> "Nevé"'],               // one word, from the subtitle list
     ] as const) {
       p.captions.corrections = [fix];
-      expect(await section(dir, p, t)).toContain(`w3: "Nave" -> "${shown}" (a caption correction)`);
+      expect(await section(dir, p, t)).toContain(`${shown} (a caption correction)`);
     }
     p.captions.corrections = [{ from: 'Nave', to: '', at: 'w3' }];        // taken off the captions
     expect(await section(dir, p, t)).toContain('w3: "Nave" -> "" (a caption correction)');
     p.captions.corrections = [{ from: 'Dave', to: 'X', at: 'w3' }];       // no longer heard as "Dave": no effect
     expect(await section(dir, p, t)).toMatch(/\nw3: "Nave" -> "Neve"$/);
+  });
+
+  it('reports a correction across several script groups once', async () => {
+    const { dir, transcript: t } = await makeProject({ lines: ['We use Nave daily.'] });
+    const p = await loadProject(dir);
+    p.captions.corrections = [{ from: 'use Nave', to: 'record with Neve' }];
+    const align = { key: '', script: '', spans: [], groups: [{ ids: ['w1'], words: ['use'] }, { ids: ['w2'], words: ['Neve'] }] };
+    const out = scriptSection(t, p, { script: 'We use Neve daily.', align: align as never }, asData);
+    expect(out.match(/record with Neve/g)).toHaveLength(1);
+    expect(out).toContain('\nw1-w2: "use Nave" -> "record with Neve" (a caption correction)');
+  });
+
+  it('reports a script word only where the cut plays its whole group', async () => {
+    const { dir, transcript: t } = await makeProject({ lines: ['Version four point oh ships today.'] });
+    const p = await loadProject(dir);
+    const align = { key: '', script: '', spans: [], groups: [{ ids: ['w1', 'w2', 'w3'], words: ['4.0'] }] };
+    const follow = { script: 'Version 4.0 ships today.', align: align as never };
+    p.cut.keep = [{ from: 'w0', to: 'w5' }];
+    expect(scriptSection(t, p, follow, asData)).toContain('w1-w3: "four point oh" -> "4.0"');
+    p.cut.keep = [{ from: 'w0', to: 'w2' }, { from: 'w4', to: 'w5' }];          // "oh" cut: captions keep "four point"
+    expect(scriptSection(t, p, follow, asData)).not.toContain('4.0"');
   });
 
   it('applies corrections in the engine\'s order', () => {

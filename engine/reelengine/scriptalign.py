@@ -118,12 +118,13 @@ def script_units(text: str) -> list:
     return out
 
 
-def _display(units: list, s0: int, s1: int) -> list:
-    """Script units s0..s1 as the words to draw: glued characters joined back into one word."""
+def _display(units: list, chosen: list) -> list:
+    """Script units `chosen` (sorted indices) as the words to draw: characters glued to the one right
+    before them join it into one word; after a left-out stretch a new word starts."""
     out: list = []
-    for k in range(s0, s1 + 1):
+    for n, k in enumerate(chosen):
         word, glued = units[k]
-        if out and glued:
+        if out and glued and chosen[n - 1] == k - 1:
             out[-1] += word
         else:
             out.append(word)
@@ -397,23 +398,25 @@ def _key_groups(span: list, a: list, b: list, sentence: list) -> list:
 
 
 def _word_ranges(groups: list, sk: list, tk: list) -> list:
-    """Key groups -> [[s0, s1, t0, t1]] word ranges (inclusive). Groups that share a word on either
-    side (one word gave keys to both) become one."""
+    """Key groups -> [(script words, t0, t1)]: the script words a group draws (sorted) over heard words
+    t0..t1. Groups that share a word on either side (one word gave keys to both, or one heard word
+    holds a whole unspaced phrase) become one, keeping only the script words they chose: a sentence
+    _key_groups left out between them stays out."""
     out: list = []
     for gs, gt in groups:
-        r = [min(sk[x][1] for x in gs), max(sk[x][2] for x in gs),
-             min(tk[x][1] for x in gt), max(tk[x][2] for x in gt)]
-        if out and (r[0] <= out[-1][1] or r[2] <= out[-1][3]):
+        words = _words_of(gs, sk)
+        t0, t1 = min(tk[x][1] for x in gt), max(tk[x][2] for x in gt)
+        if out and (t0 <= out[-1][2] or words & out[-1][0]):
             last = out[-1]
-            out[-1] = [min(last[0], r[0]), max(last[1], r[1]), min(last[2], r[2]), max(last[3], r[3])]
+            out[-1] = (last[0] | words, min(last[1], t0), max(last[2], t1))
         else:
-            out.append(r)
-    return out
+            out.append((words, t0, t1))
+    return [(sorted(w), t0, t1) for w, t0, t1 in out]
 
 
 def align(script: list, heard: list) -> tuple:
-    """Script words and heard words -> (ranges, spans): each range [s0, s1, t0, t1] shows heard words
-    t0..t1 as script words s0..s1; spans [[t0, t1]] are the heard words that follow the script. Speech
+    """Script words and heard words -> (ranges, spans): each range (script word indices, t0, t1) shows
+    heard words t0..t1 as those script words; spans [[t0, t1]] are the heard words that follow the script. Speech
     left unmatched around and between matches (a retake, a line said twice) is aligned against the
     whole script again."""
     sk, tk = keys(script), keys(heard)
@@ -447,10 +450,10 @@ def align(script: list, heard: list) -> tuple:
             spans.append([tk[t0][1], tk[t1][2]])
         if free > lo:            # something matched: look again in what is left after it
             todo.append((free, hi))
-    ranges.sort(key=lambda r: r[2])
+    ranges.sort(key=lambda r: r[1])
     spans.sort()
     # a heard word whose keys landed in two separate matches keeps the first
-    kept = [r for k, r in enumerate(ranges) if not k or r[2] > ranges[k - 1][3]]
+    kept = [r for k, r in enumerate(ranges) if not k or r[1] > ranges[k - 1][2]]
     return kept, spans
 
 
@@ -464,8 +467,8 @@ def build(script: str, words: list) -> dict:
     units = script_units(script)
     heard = [str(w["w"]).strip() for w in words]
     ranges, spans = align([u for u, _ in units], heard)
-    groups = [{"ids": [words[t]["id"] for t in range(t0, t1 + 1)], "words": _display(units, s0, s1)}
-              for s0, s1, t0, t1 in ranges]
+    groups = [{"ids": [words[t]["id"] for t in range(t0, t1 + 1)], "words": _display(units, chosen)}
+              for chosen, t0, t1 in ranges]
     return {"script": script, "groups": groups,
             "spans": [[words[t0]["id"], words[t1]["id"]] for t0, t1 in spans]}
 

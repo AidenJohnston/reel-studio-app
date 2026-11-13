@@ -6,7 +6,7 @@ import { createHash } from 'node:crypto';
 import * as fs from 'node:fs';
 import * as fsp from 'node:fs/promises';
 import * as path from 'node:path';
-import { CaptionCorrection, Project, Transcript, Word, readJson } from './project';
+import { CaptionCorrection, Project, Transcript, Word, keptWords, readJson } from './project';
 
 /** scriptalign.VERSION: a mapping made by another version is not this one's. */
 export const SCRIPT_ALIGN_VERSION = 2;
@@ -120,7 +120,8 @@ export function correctedWords(t: Transcript, corrections: CaptionCorrection[]):
 }
 
 /** The get_transcript section: the locked script, where the speech follows it, and each word the
- * captions draw differently from what was heard (the script's spelling, or the person's correction). */
+ * captions draw differently from what was heard: the script's spelling where the cut plays the whole
+ * group, or the person's correction where one covers it. */
 export function scriptSection(t: Transcript, p: Project, follow: ScriptFollow, asData: (s: string) => string): string {
   let out = "\n\nLOCKED SCRIPT (the captions show the script's words wherever the speech follows it, at the audio's times; ad-libs and skipped lines show as said; caption corrections still win)\n"
     + `<script_data>\n${asData(follow.script.trim().slice(0, 2000))}\n</script_data>`;
@@ -130,18 +131,29 @@ export function scriptSection(t: Transcript, p: Project, follow: ScriptFollow, a
   if (follow.align.spans.length) {
     out += `\nFOLLOWS THE SCRIPT: ${follow.align.spans.slice(0, 40).map(([x, y]) => (x === y ? x : `${x}-${y}`)).join(', ')}`;
   }
+  // the words the cut plays, in order (the whole take before there is a cut)
+  const kept = p.cut.keep.length ? keptWords(t, p.cut.keep).map((w) => w.id) : t.words.map((w) => w.id);
+  const keptSet = new Set(kept);
+  // captions.follow_script draws a group only where the cut plays all its words together, in order
+  const drawn = (ids: string[]) => kept.some((id, k) => id === ids[0] && ids.every((x, n) => kept[k + n] === x));
+  const pos = new Map(t.words.map((w, i) => [w.id, i]));
+  const line = (ids: string[], shown: string, note = '') => {
+    const range = ids.length > 1 ? `${ids[0]}-${ids[ids.length - 1]}` : ids[0];
+    const heard = ids.map((i) => said.get(i) ?? '').join(' ');
+    return shown === heard ? [] : [{ at: pos.get(ids[0]) ?? 0, text: `${asData(range)}: "${asData(heard)}" -> "${asData(shown)}"${note}` }];
+  };
+  const fixes = new Set<string>();      // corrections over words the script would draw, by their first word
   const changes = follow.align.groups.flatMap((g) => {
-    const heard = g.ids.map((i) => said.get(i) ?? '').join(' ');
-    const byFix = g.ids.some((i) => fixed.has(i));
-    // a fixed stretch is drawn whole, once, even when it starts before this group or ends after it
-    const shown = byFix
-      ? g.ids.filter((i, k) => !fixed.has(i) || k === 0 || fixed.get(g.ids[k - 1])?.first !== fixed.get(i)!.first)
-        .map((i) => fixed.get(i)?.text ?? said.get(i) ?? '').filter(Boolean).join(' ')
-      : g.words.join(' ');
-    if (shown === heard) return [];
-    const ids = g.ids.length > 1 ? `${g.ids[0]}-${g.ids[g.ids.length - 1]}` : g.ids[0];
-    return [`${asData(ids)}: "${asData(heard)}" -> "${asData(shown)}"${byFix ? ' (a caption correction)' : ''}`];
+    const hit = g.ids.filter((i) => fixed.has(i));
+    hit.forEach((i) => fixes.add(fixed.get(i)!.first));
+    return hit.length || !drawn(g.ids) ? [] : line(g.ids, g.words.join(' '));
   });
-  if (changes.length) out += '\nCAPTIONS SHOW THE SCRIPT HERE (ids: heard -> shown)\n' + changes.slice(0, 40).join('\n');
+  // each correction once, over every word it covers, as the engine draws it
+  for (const first of fixes) {
+    const ids = t.words.filter((w) => fixed.get(w.id)?.first === first).map((w) => w.id);
+    if (ids.some((i) => keptSet.has(i))) changes.push(...line(ids, fixed.get(first)!.text, ' (a caption correction)'));
+  }
+  changes.sort((x, y) => x.at - y.at);
+  if (changes.length) out += '\nCAPTIONS SHOW THE SCRIPT HERE (ids: heard -> shown)\n' + changes.slice(0, 40).map((c) => c.text).join('\n');
   return out;
 }

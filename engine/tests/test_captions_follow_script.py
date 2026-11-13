@@ -109,6 +109,12 @@ def test_a_script_without_spaces_aligns_to_whispers_words():
     assert {"ids": ["w0"], "words": ["今日は"]} in groups           # drawn back as the script's own run
 
 
+def test_a_skipped_sentence_inside_one_heard_word_stays_out():
+    # whisper heard the whole unspaced line as one word: the sentence between still wasn't said
+    groups = scriptalign.build("今天开始。谢谢。工作结束。", [{"id": "w0", "w": "今天开始工作结束。"}])["groups"]
+    assert groups == [{"ids": ["w0"], "words": ["今天开始。", "工作结束。"]}]
+
+
 def test_the_mapping_key_is_pinned():
     # the same inputs and value as ai/test/script-follow.test.ts: the AI checks the key the same way
     words = [{"id": "w0", "w": " Nave"}, {"id": "w1", "w": "今天。"}]
