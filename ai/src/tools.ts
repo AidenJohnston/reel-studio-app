@@ -31,8 +31,6 @@ export interface ToolState {
   toolCalls: number;
   /** fields changed since the last render (render_draft skips when none of them can be seen) */
   dirty?: Set<string>;
-  /** render_draft was skipped (nothing visible changed): look_at_frames may use the newest render on disk */
-  previewSkipped?: boolean;
   /** raw-take times of the cover stills the model was shown (set_cover on one of them is exact) */
   coverCandidates?: number[];
 }
@@ -1200,7 +1198,7 @@ const tools: ToolDef[] = [
   },
   {
     name: 'render_draft',
-    description: 'Render a quick preview of the current edit. Needed before look_at_frames.',
+    description: 'Render a quick preview of the whole edit and check it.',
     parameters: S.obj({}),
     async run(ctx) {
       const drafts = ctx.state.renders.filter((r) => r.draft).length;
@@ -1211,7 +1209,6 @@ const tools: ToolDef[] = [
       // show the same frames. The full-quality render after finish includes the change anyway.
       const prior = ctx.state.renders.at(-1);
       if (!visibleChangeSinceRender(ctx) && (prior || ctx.state.changed.size)) {
-        ctx.state.previewSkipped = true;
         return { content: { ok: true, skipped: 'Nothing visible changed since the last preview, so I did not make a new one. The final video after finish includes your change. Do not render again for this.', version: prior?.version ?? null } };
       }
       const info = await doRender(ctx, true);
@@ -1221,17 +1218,8 @@ const tools: ToolDef[] = [
       // Some engine builds do not draw every layer yet. Never delete the user's edit because a frame lacks it.
       if (p.broll.length && r.layers === 0) notes.push('This preview engine did not draw the b-roll layers. They are saved in the project and will appear when supported, so do not remove them because frames lack them.');
       if (p.zooms.length && r.zooms === 0) notes.push('This preview engine did not apply zooms yet; they are saved in the project.');
-      // b-roll the engine had to show differently (e.g. no room beside a close-up face): tell the user, don't loop
-      const shown = Array.isArray(r.broll) ? r.broll.filter((b: any) => b?.fallback || b?.skipped) : [];
-      if (shown.length) notes.push('Some b-roll could not be shown exactly as asked (see brollShownDifferently). That is the engine being honest about the framing: do not retry the same placement; tell the user in plain words in your summary.');
-      // An animation's box is fixed when it is made; a later cut can move the face/captions under it.
-      // The engine flags it (`remake`); hand the editor the exact call that makes it again.
-      const remake = Array.isArray(r.broll) ? r.broll.filter((b: any) => b?.remake && !b?.skipped) : [];
-      const remakeAnimations = remake.map((b: any) => {
-        const item = p.broll.find((x) => x.id === b.id);
-        return { id: b.id, problem: b.remake, covers: b.clash ?? [],
-          fix: item ? { tool: 'update_broll', args: { id: b.id, anchor: { from: item.anchor.from, to: item.anchor.to } } } : null };
-      });
+      const { shownNote, remakeNote, content: brollContent } = brollFindings(r, p);
+      if (shownNote) notes.push(shownNote);
       const bare = ctx.transcript ? faceOnlyStretches(p, ctx.transcript) : [];
       if (bare.length) notes.push(`${bare.length} stretch${bare.length > 1 ? 'es' : ''} of plain face over 4 s (see faceOnly): the screen should change every 3 to 5 s. Fill each now: first a picture, an animation or a label for something said there (search for it in this same reply); a zoom on a whole line in its MIDDLE only where nothing there can be shown (set_zoom replaces the list: send every zoom).`);
       // pictures clumped in one half: a long run held up by zooms alone reads as unedited
@@ -1248,10 +1236,9 @@ const tools: ToolDef[] = [
       const moments = brollMoments(p);
       const want = Math.round((typeof r.duration === 'number' ? r.duration : 60) / 6);
       if (moments < Math.round(want * 0.75)) notes.push(`Only ${moments} b-roll moments (pictures, animations, labels; the hook title not counted) for a ${Math.round(r.duration ?? 60)} s video: hand edits carry about ${want}. Before finishing, add pictures or animations for the named things, places, numbers and examples still bare: search_images for them now, all in one reply.`);
-      if (remakeAnimations.length) notes.push(`Animation${remakeAnimations.length > 1 ? 's' : ''} ${remakeAnimations.map((a: any) => a.id).join(', ')} now cover${remakeAnimations.length > 1 ? '' : 's'} the face or captions because the edit changed after ${remakeAnimations.length > 1 ? 'they were' : 'it was'} made. Remake each one now with its "fix" call (update_broll with the same anchor re-renders it into the free space), then render_draft again.`);
+      if (remakeNote) notes.push(remakeNote);
       return { content: { ok: true, version: info.version, duration: r.duration ?? null, verify: r.verify ?? null, warnings: r.warnings ?? null,
-        ...(shown.length ? { brollShownDifferently: shown.map((b: any) => ({ id: b.id, treatment: b.treatment, ...(b.fallback ? { shownAs: b.shownAs, why: b.fallback } : { skipped: b.skipped }) })) } : {}),
-        ...(remakeAnimations.length ? { remakeAnimations } : {}),
+        ...brollContent,
         ...(bare.length ? { faceOnly: bare } : {}),
         ...(noPicture.length ? { noPicture } : {}),
         ...(pops.length > 2 ? { wordCards: pops } : {}),
@@ -1263,13 +1250,12 @@ const tools: ToolDef[] = [
   },
   {
     name: 'look_at_frames',
-    description: 'See still frames from the latest render. Give output-video seconds (times) or word ids (words; the frame where each word is said). Max 6.',
+    description: 'See still frames of the current edit, with or without a preview (no need to render first). Give output-video seconds (times) or word ids (words; the frame where each word is said). Max 6.',
     parameters: S.obj({
-      times: S.opt(S.arr(S.num(), 'seconds in the rendered video')),
+      times: S.opt(S.arr(S.num(), 'seconds in the edited video')),
       words: S.opt(S.arr(S.str(), 'word ids')),
     }),
     async run(ctx, args) {
-      if (!ctx.state.renders.length && !ctx.state.previewSkipped) throw new ToolInputError('call render_draft first');
       const { p, t } = await load(ctx);
       const times: number[] = [...(args.times ?? [])];
       if (args.words?.length) {
@@ -1281,8 +1267,12 @@ const tools: ToolDef[] = [
         }
       }
       if (!times.length) throw new ToolInputError('give times or words');
-      const { pick, moved } = await settleOnAnimations(ctx, times.slice(0, 6));
+      const pick = times.slice(0, 6);
+      // With no up-to-date render the engine draws the stills, writing work/render/ as a render does.
+      if (ctx.renderGate) await ctx.renderGate.catch(() => undefined);
       const r = await engine(ctx, 'frames', ['--times', pick.join(',')]);
+      // the engine moves a time inside an animation to its settled end (render.settle_on_animations)
+      const moved = Array.isArray(r?.animationsSampledAtEnd) ? r.animationsSampledAtEnd : [];
       const frames: { time: number; path: string }[] = (Array.isArray(r) ? r : (r?.frames ?? [])).map((f: any, i: number) =>
         typeof f === 'string' ? { time: pick[i], path: f } : { time: f.time ?? f.t ?? pick[i], path: f.path ?? f.file });
       const images: ImagePart[] = [];
@@ -1294,11 +1284,18 @@ const tools: ToolDef[] = [
         } catch { /* missing frame reported below */ }
       }
       ctx.emit({ type: 'status', message: 'Checking how it looks' });
+      // The same b-roll report and warnings a preview gives: a picture the frames lack may have been
+      // skipped or shown differently, and an animation may need remaking.
+      const { shownNote, remakeNote, content: brollContent } = brollFindings(r, p);
+      const warnings = Array.isArray(r?.warnings) && r.warnings.length ? r.warnings : null;
+      const imagesNote = ctx.supportsImages ? `${images.length} image(s) attached in order.` : 'This model cannot see images; trust the project instead.';
       return {
         content: {
           frames: frames.map((f) => ({ time: f.time, file: path.basename(f.path) })),
           ...(moved.length ? { animationsSampledAtEnd: moved } : {}),
-          note: ctx.supportsImages ? `${images.length} image(s) attached in order.` : 'This model cannot see images; trust the project instead.',
+          ...(warnings ? { warnings } : {}),
+          ...brollContent,
+          note: [imagesNote, shownNote, remakeNote].filter(Boolean).join(' '),
         },
         images: ctx.supportsImages ? images : undefined,
       };
@@ -1315,22 +1312,26 @@ const tools: ToolDef[] = [
   },
 ];
 
-/** A frame in the middle of an animation shows a count-up half way or half the words (live e2e: the
- * model read a count-up mid-way and reported the wrong number). Times inside an animation's window
- * move to its settled end (0.15 s before it ends), and the result says so. */
-async function settleOnAnimations(ctx: ToolContext, times: number[]): Promise<{ pick: number[]; moved: { asked: number; sampled: number; id: string }[] }> {
-  let recs: any[] = [];
-  try { recs = JSON.parse(await fsp.readFile(path.join(ctx.projectDir, 'work', 'layers', 'layers.json'), 'utf8'))?.items ?? []; } catch { /* no layers yet */ }
-  const anims = recs.filter((r) => (r?.treatment === 'animation' || r?.zone === 'animation' || r?.zone === 'full') && typeof r.t0 === 'number' && typeof r.t1 === 'number' && !r.skipped);
-  const moved: { asked: number; sampled: number; id: string }[] = [];
-  const pick = times.map((tm) => {
-    const a = anims.find((r) => tm >= r.t0 && tm < r.t1);
-    if (!a) return tm;
-    const end = Math.round(Math.max(a.t0, a.t1 - 0.15) * 100) / 100;
-    if (end !== tm) moved.push({ asked: tm, sampled: end, id: String(a.id) });
-    return end;
+/** What an engine result's b-roll report (render_draft, frames) means for the editor: pictures it showed
+ * differently or skipped, and animations a later cut now puts over the face or captions. */
+function brollFindings(r: any, p: Project) {
+  // b-roll the engine had to show differently (e.g. no room beside a close-up face): tell the user, don't loop
+  const shown: any[] = Array.isArray(r?.broll) ? r.broll.filter((b: any) => b?.fallback || b?.skipped) : [];
+  const shownNote = shown.length ? 'Some b-roll could not be shown exactly as asked (see brollShownDifferently). That is the engine being honest about the framing: do not retry the same placement; tell the user in plain words in your summary.' : '';
+  // An animation's box is fixed when it is made; a later cut can move the face/captions under it.
+  // The engine flags it (`remake`); hand the editor the exact call that makes it again.
+  const remake: any[] = Array.isArray(r?.broll) ? r.broll.filter((b: any) => b?.remake && !b?.skipped) : [];
+  const remakeAnimations = remake.map((b: any) => {
+    const item = p.broll.find((x) => x.id === b.id);
+    return { id: b.id, problem: b.remake, covers: b.clash ?? [],
+      fix: item ? { tool: 'update_broll', args: { id: b.id, anchor: { from: item.anchor.from, to: item.anchor.to } } } : null };
   });
-  return { pick, moved };
+  const remakeNote = remakeAnimations.length ? `Animation${remakeAnimations.length > 1 ? 's' : ''} ${remakeAnimations.map((a: any) => a.id).join(', ')} now cover${remakeAnimations.length > 1 ? '' : 's'} the face or captions because the edit changed after ${remakeAnimations.length > 1 ? 'they were' : 'it was'} made. Remake each one now with its "fix" call (update_broll with the same anchor re-renders it into the free space), then render_draft again.` : '';
+  const content = {
+    ...(shown.length ? { brollShownDifferently: shown.map((b: any) => ({ id: b.id, treatment: b.treatment, ...(b.fallback ? { shownAs: b.shownAs, why: b.fallback } : { skipped: b.skipped }) })) } : {}),
+    ...(remakeAnimations.length ? { remakeAnimations } : {}),
+  };
+  return { shownNote, remakeNote, content };
 }
 
 export function cleanSummary(s: string): string {

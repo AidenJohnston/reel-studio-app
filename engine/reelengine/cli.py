@@ -342,7 +342,7 @@ def build_parser() -> argparse.ArgumentParser:
     sp = add("verify", cmd_verify, "check an mp4")
     sp.add_argument("file")
     sp.add_argument("--expect-duration", type=float)
-    sp = add("frames", cmd_frames, "extract frames from the latest render")
+    sp = add("frames", cmd_frames, "stills of the edit: from a render that is up to date, else drawn directly")
     sp.add_argument("--times", required=True)
     sp.add_argument("--file")
     add("captions", cmd_captions, "write the caption file only (debug)")
