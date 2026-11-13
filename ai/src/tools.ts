@@ -13,9 +13,19 @@ import { ANIMATION_IDS, ENGINE_FED, TimedWord, alignWordTimes, animationParamsSc
 import { chooseReadableLayout, minHeroPx } from './readable';
 import { AgentEvent, AIError, EngineHost, ImagePart, ToolSchema } from './types';
 import { StyleStore, cleanRuleText, noteAsksToRemember } from './style';
+import { CHECK_PARAM, CheckChoice, CheckedRule, Lint, LintFailure, failureText, rulesFile, rulesFilePath } from './rules';
 import { BlockedUrlError, LookupFn, UnsafePathError, guardedFetch, pathProblem, safeResolve, slugName, sniffImage } from './safety';
 
 export interface RenderInfo { version: number; draft: boolean; result: any }
+
+/** A note's checked My style rules. `before`: the ones already failing in the version the note started from;
+ * `unknown`: ones that version was never measured against (rendered before checks, or before the rule was saved
+ * or turned back on); `startFailures`: that version's report of them. A note has to meet neither: they are named
+ * in the reply, never chased, so "make the captions blue" must not send the AI after b-roll placed three notes ago. */
+export interface NoteRules { active: CheckedRule[]; before: Set<string>; unknown: Set<string>; startFailures: LintFailure[] }
+
+/** A rule this note need not meet: the video already broke it, or may have. */
+const exempt = (rules: NoteRules | undefined, id: string) => !!rules && (rules.before.has(id) || rules.unknown.has(id));
 
 export interface ToolState {
   changed: Set<string>;
@@ -24,6 +34,8 @@ export interface ToolState {
   styleSuggestions: string[];
   /** ids of the rules above, so a failed note can take them back out of My style */
   styleRuleIds: string[];
+  /** paused rules this note turned back on, so a failed note can pause them again */
+  styleRulesResumed: { id: string; text: string }[];
   /** every user-facing tool summary, in order (an honest "what I changed" when the agent stops early) */
   summaries: string[];
   renders: RenderInfo[];
@@ -35,6 +47,12 @@ export interface ToolState {
   previewSkipped?: boolean;
   /** raw-take times of the cover stills the model was shown (set_cover on one of them is exact) */
   coverCandidates?: number[];
+  /** the newest render's checked-rule results, including a final render stopped before its encode */
+  lint?: Lint;
+  /** finish refused once because a checked rule failed and nothing changed: it never refuses twice */
+  finishRefused?: boolean;
+  /** rules the AI proposed with a check: the app turns each into a checked rule measured on the finished video */
+  styleChecks?: { text: string; choice: CheckChoice }[];
 }
 
 export interface ToolContext {
@@ -57,6 +75,8 @@ export interface ToolContext {
   /** A render already running for this project (the first look). Every engine render waits for it:
    * two renders would share work/render/ and versions/preview/. */
   renderGate?: Promise<unknown>;
+  /** set for an AI edit: every render measures these (`render --rules`) */
+  rules?: NoteRules;
   /** cached; reloaded from disk by `load()` */
   project?: Project;
   transcript?: Transcript;
@@ -70,7 +90,7 @@ export interface ToolDef extends ToolSchema {
 }
 
 export function newToolState(): ToolState {
-  return { changed: new Set(), styleRulesAdded: [], styleSuggestions: [], styleRuleIds: [], summaries: [], renders: [], finished: null, toolCalls: 0 };
+  return { changed: new Set(), styleRulesAdded: [], styleSuggestions: [], styleRuleIds: [], styleRulesResumed: [], summaries: [], renders: [], finished: null, toolCalls: 0 };
 }
 
 // ---------------------------------------------------------------- helpers
@@ -374,11 +394,19 @@ async function shortFlashes(ctx: ToolContext, p: Project, t: Transcript | undefi
   let recs: any[] = [];
   try { recs = JSON.parse(await fsp.readFile(path.join(ctx.projectDir, 'work', 'layers', 'layers.json'), 'utf8'))?.items ?? []; } catch { return []; }
   return recs.filter((r) => typeof r?.t0 === 'number' && typeof r?.t1 === 'number' && !r.skipped && r.t1 - r.t0 < min)
-    .map((r) => {
+    .flatMap((r) => {
       const b = p.broll.find((x) => x.id === r.id);
-      return { id: String(r.id), seconds: Math.round((r.t1 - r.t0) * 10) / 10, says: b && t ? quote(t, b.anchor) : '' };
+      // a video clip is meant to be short (0.5 to 1.5 s): the clip-length check covers it, not "a picture needs 2 s"
+      if (b && isClip(r.treatment, b.asset)) return [];
+      return [{ id: String(r.id), seconds: Math.round((r.t1 - r.t0) * 10) / 10, says: b && t ? quote(t, b.anchor) : '' }];
     });
 }
+
+/** engine/reelengine/compose_util.py VIDEO_EXT */
+const VIDEO_EXT = new Set(['.mp4', '.mov', '.m4v', '.webm', '.mkv', '.avi']);
+/** Footage, as against a still, a card or an animation (lint.py `_is_clip`). */
+const isClip = (treatment: unknown, asset: string | null | undefined) =>
+  treatment !== 'animation' && !!asset && VIDEO_EXT.has(path.extname(asset).toLowerCase());
 
 /** The kept captions as a viewer reads them, one sentence a line, every word the speech model was
  * unsure of marked "(?)", plus the corrections already made: the input of the proofread pass. */
@@ -405,17 +433,44 @@ export function visibleChangeSinceRender(ctx: ToolContext): boolean {
   return [...(ctx.state.dirty ?? [])].some((f) => !NOT_VISIBLE.has(f));
 }
 
-export async function doRender(ctx: ToolContext, draft: boolean): Promise<RenderInfo> {
+/** The checked rules a render failed that this note has to meet (not the ones failing before it). */
+export function unmetRules(ctx: ToolContext, lint = ctx.state.lint): LintFailure[] {
+  return (lint?.failures ?? []).filter((f) => !exempt(ctx.rules, f.id));
+}
+
+/** `stopOnRules`: a final render that fails a rule this note has to meet stops before its encode (the result
+ * says `encoded: false`), so a fix costs seconds rather than a whole video. Drafts always encode. */
+export async function doRender(ctx: ToolContext, draft: boolean, opts: { stopOnRules?: boolean } = {}): Promise<RenderInfo> {
   if (ctx.renderGate) await ctx.renderGate.catch(() => undefined);
   ctx.state.dirty = new Set();
-  const result = await engine(ctx, 'render', draft ? ['--draft'] : [], draft ? 'Making a preview' : 'Making the final video');
+  const extra = draft ? ['--draft'] : [];
+  if (ctx.rules) {
+    const stopOn = opts.stopOnRules && !draft ? ctx.rules.active.filter((r) => !exempt(ctx.rules, r.id)).map((r) => r.id) : [];
+    const file = rulesFilePath(ctx.projectDir);
+    await fsp.mkdir(path.dirname(file), { recursive: true });
+    await fsp.writeFile(file, rulesFile(ctx.rules.active, stopOn));
+    extra.push('--rules', file);
+  }
+  const result = await engine(ctx, 'render', extra, draft ? 'Making a preview' : 'Making the final video');
+  if (result?.lint) ctx.state.lint = result.lint;
   const p = await loadProject(ctx.projectDir);
   const version = Number(result?.version ?? p.version ?? 0);
   ctx.project = p;
   const info: RenderInfo = { version, draft, result };
+  if (result?.encoded === false) return info;
   ctx.state.renders.push(info);
   ctx.emit({ type: 'render', version, draft, ...(result?.file ? { file: String(result.file) } : {}) });
   return info;
+}
+
+function rulesFeedback(ctx: ToolContext): { myStyleRules?: { rule: string; problem: string }[]; note?: string } {
+  const unmet = unmetRules(ctx);
+  if (!unmet.length) return {};
+  const byId = new Map(ctx.rules!.active.map((r) => [r.id, r]));
+  return {
+    myStyleRules: unmet.map((f) => ({ rule: byId.get(f.id)?.text ?? f.id, problem: failureText(f, byId.get(f.id)?.check) })),
+    note: 'This preview breaks the user\'s My style rules or Reel Studio\'s defaults (see myStyleRules). The app measures them on every render and the edit is not done until they hold: change the project to meet them before finish. A "Reel Studio default" gives way when the note or the user\'s My style asks otherwise.',
+  };
 }
 
 const MIME: Record<string, string> = { '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.webp': 'image/webp', '.gif': 'image/gif' };
@@ -754,7 +809,7 @@ const tools: ToolDef[] = [
   },
   {
     name: 'set_gap_cap',
-    description: 'Longest pause (seconds) kept between words. ~0.12 tight, 0.25-0.4 for slow heartfelt delivery.',
+    description: 'Longest pause (seconds) kept between words. 0.25 is the default; 0.3-0.4 for slow heartfelt delivery; tighter only when the user asks.',
     parameters: S.obj({ seconds: S.num('0.05 to 1.0', { minimum: 0.02, maximum: 2 }) }),
     async run(ctx, args) {
       await mutate(ctx, 'cut', (p) => { p.cut.gapCap = args.seconds; });
@@ -1075,7 +1130,7 @@ const tools: ToolDef[] = [
   },
   {
     name: 'set_zoom',
-    description: 'Replace all zoom-ins. Each zoom spans one whole line, from its first word to its last; scale ~1.08-1.15. Use on punchlines and key lines, and on face-only stretches with no b-roll (about 3-6 per minute, never two back to back). Empty list = no zooms.',
+    description: 'Replace all zoom-ins. Each zoom spans one whole line, from its first word to its last; scale ~1.08-1.15. Use on punch lines only: at most about 6 per minute, never two back to back. Empty list = no zooms.',
     parameters: S.obj({ zooms: S.arr(S.obj({ anchor: ANCHOR, scale: S.num('1.0-1.5', { minimum: 1, maximum: 1.6 }) })) }),
     async run(ctx, args) {
       const { t } = await load(ctx);
@@ -1182,18 +1237,33 @@ const tools: ToolDef[] = [
   },
   {
     name: 'add_style_rule',
-    description: "Propose a lasting preference for the user's My style list (one plain sentence, applies to every future video). The user is ASKED whether to keep it; it is saved straight away only when their note itself says always / from now on / remember.",
-    parameters: S.obj({ rule: S.str('e.g. "Keep music quieter under talking."') }),
+    description: "Propose a lasting preference for the user's My style list (one plain sentence, applies to every future video). The user is ASKED whether to keep it; it is saved straight away only when their note itself says always / from now on / remember. A rule with a check is always asked about.",
+    parameters: S.obj({ rule: S.str('e.g. "Keep music quieter under talking."'), check: CHECK_PARAM }),
     async run(ctx, args) {
       let text: string;
       try { text = cleanRuleText(args.rule); } catch { throw new ToolInputError('rule is empty'); }
+      if (args.check) {
+        // The number and the words come from the finished video (editor.ts), so this only notes the kind.
+        const list = (ctx.state.styleChecks ??= []);
+        if (!list.some((c) => c.choice === args.check)) list.push({ text, choice: args.check });
+        return { content: { ok: true, proposed: text, note: 'NOT saved. When the video is finished the app measures it and asks the user whether to check this on every video. Do not say you saved it or that you will remember it.' } };
+      }
+      if (noteAsksToRemember(ctx.userNote)) {
+        // One store call decides and writes, so only what this note did is undone if it fails: a rule it saved is
+        // removed, and a paused rule it turned back on (not one that was already on) is paused again.
+        const r = await ctx.style.add(text);
+        if (r.added) {
+          ctx.state.styleRulesAdded.push(r.rule.text); ctx.state.styleRuleIds.push(r.rule.id);
+          return { content: { ok: true, saved: r.rule.text }, summary: `Saved to My style: "${r.rule.text}"` };
+        }
+        if (r.resumed) {
+          ctx.state.styleRulesResumed.push({ id: r.rule.id, text: r.rule.text });
+          return { content: { ok: true, alreadySaved: r.rule.text, turnedBackOn: true }, summary: `Turned back on in My style: "${r.rule.text}"` };
+        }
+        return { content: { ok: true, alreadySaved: r.rule.text } };
+      }
       const existing = await ctx.style.find(text);
       if (existing) return { content: { ok: true, alreadySaved: existing.text } };
-      if (noteAsksToRemember(ctx.userNote)) {
-        const r = await ctx.style.add(text);
-        if (r.added) { ctx.state.styleRulesAdded.push(r.rule.text); ctx.state.styleRuleIds.push(r.rule.id); }
-        return { content: { ok: true, saved: r.rule.text }, summary: r.added ? `Saved to My style: "${r.rule.text}"` : undefined };
-      }
       if (!ctx.state.styleSuggestions.includes(text)) ctx.state.styleSuggestions.push(text);
       return { content: { ok: true, proposed: text, note: 'NOT saved. The app will ask the user "Remember this for next time?". Do not say you saved it or that you will remember it.' } };
     },
@@ -1237,18 +1307,18 @@ const tools: ToolDef[] = [
       // pictures clumped in one half: a long run held up by zooms alone reads as unedited
       const noPicture = ctx.transcript ? faceOnlyStretches(p, ctx.transcript, 10, false) : [];
       if (noPicture.length) notes.push(`${noPicture.length === 1 ? 'One stretch has' : `${noPicture.length} stretches have`} no picture for over 10 s (see noPicture; zooms alone): the pictures are clumped. Put a picture or an animation on something said in the middle of each (a word card does not count: a real thing, place, number, list or quote).`);
-      const perMin = (p.zooms.length * 60) / Math.max(20, typeof r.duration === 'number' ? r.duration : 60);
-      if (perMin > 10) notes.push(`${p.zooms.length} zooms is about ${Math.round(perMin)} a minute, which reads as constant: keep 4 to 8 a minute, on punchlines and in the middle of bare stretches (set_zoom replaces the list).`);
       const pops = popCards(p);
       if (pops.length > 2) notes.push(`${pops.length} big word cards (see wordCards): they read as filler and each one stays up about 2 s, past the end of a short line. Keep at most 2 (a number or a name the viewer must remember); replace the rest with a picture or an animation, or remove them.`);
       const flashes = await shortFlashes(ctx, p, ctx.transcript);
-      if (flashes.length) notes.push(`${flashes.length} visual${flashes.length > 1 ? 's are' : ' is'} on screen for under 1.2 s (see tooShort), too short to read. For each: extend its anchor to the end of its phrase (a picture needs about 2 s), or when the next visual starts right after it, keep the stronger one or move the next one later.`);
+      if (flashes.length) notes.push(`${flashes.length} picture or card${flashes.length > 1 ? 's are' : ' is'} on screen for under 1.2 s (see tooShort), too short to read. For each: extend its anchor to the end of its phrase (a picture needs about 2 s), or when the next visual starts right after it, keep the stronger one or move the next one later.`);
       const names = ctx.transcript ? unshownNames(p, ctx.transcript) : [];
       if (names.length) notes.push(`Named things the viewer hears but never sees (see namedNotShown). A brand, app, product, company or show: search_images "<name> logo" and place it on its words; a place or event: "<name> photo". Skip people the viewer would not know and anything that is not really a name.`);
       const moments = brollMoments(p);
       const want = Math.round((typeof r.duration === 'number' ? r.duration : 60) / 6);
       if (moments < Math.round(want * 0.75)) notes.push(`Only ${moments} b-roll moments (pictures, animations, labels; the hook title not counted) for a ${Math.round(r.duration ?? 60)} s video: hand edits carry about ${want}. Before finishing, add pictures or animations for the named things, places, numbers and examples still bare: search_images for them now, all in one reply.`);
       if (remakeAnimations.length) notes.push(`Animation${remakeAnimations.length > 1 ? 's' : ''} ${remakeAnimations.map((a: any) => a.id).join(', ')} now cover${remakeAnimations.length > 1 ? '' : 's'} the face or captions because the edit changed after ${remakeAnimations.length > 1 ? 'they were' : 'it was'} made. Remake each one now with its "fix" call (update_broll with the same anchor re-renders it into the free space), then render_draft again.`);
+      const rules = rulesFeedback(ctx);
+      if (rules.note) notes.unshift(rules.note);
       return { content: { ok: true, version: info.version, duration: r.duration ?? null, verify: r.verify ?? null, warnings: r.warnings ?? null,
         ...(shown.length ? { brollShownDifferently: shown.map((b: any) => ({ id: b.id, treatment: b.treatment, ...(b.fallback ? { shownAs: b.shownAs, why: b.fallback } : { skipped: b.skipped }) })) } : {}),
         ...(remakeAnimations.length ? { remakeAnimations } : {}),
@@ -1258,6 +1328,7 @@ const tools: ToolDef[] = [
         ...(flashes.length ? { tooShort: flashes } : {}),
         ...(names.length ? { namedNotShown: names } : {}),
         brollMoments: { have: moments, handEditsCarry: want },
+        ...(rules.myStyleRules ? { myStyleRules: rules.myStyleRules } : {}),
         ...(notes.length ? { note: notes.join(' ') } : {}) } };
     },
   },
@@ -1309,6 +1380,14 @@ const tools: ToolDef[] = [
     description: 'Call last. summary_for_user: 1-3 plain, warm sentences about what you did (no jargon, no em dashes).',
     parameters: S.obj({ summary_for_user: S.str() }),
     async run(ctx, args) {
+      // The newest render broke a checked My style rule and nothing changed since: the final video would too.
+      // Asks for a change, never a render (the preview budget may be spent), and only once, so it can't loop.
+      const unmet = unmetRules(ctx);
+      if (unmet.length && !ctx.state.dirty?.size && !ctx.state.finishRefused) {
+        ctx.state.finishRefused = true;
+        const fb = rulesFeedback(ctx).myStyleRules!;
+        throw new ToolInputError(`Not finished: the newest render breaks ${fb.length > 1 ? 'these rules' : 'this rule'}: ${fb.map((r) => `"${r.rule}" (${r.problem})`).join('; ')}. Change the project to meet ${fb.length > 1 ? 'them' : 'it'}, then call finish. The final video is checked without a preview. If the note itself asks for the opposite, or the user's My style does for a "Reel Studio default", call finish again and say so.`);
+      }
       ctx.state.finished = cleanSummary(args.summary_for_user);
       return { content: { ok: true } };
     },

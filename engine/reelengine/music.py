@@ -322,7 +322,8 @@ def normalize(ctx, x: np.ndarray, work: Path, tag: str = "mix") -> tuple[np.ndar
 
 def build_audio(ctx, voice_wav) -> Path:
     """Cut voice wav (output timeline) + project.music -> work/audio/mix-<hash>.wav at -14 LUFS.
-    Writes work/audio/mix.json with the measured numbers."""
+    Writes the measured numbers to mix-<hash>.json beside it and to work/audio/mix.json, which
+    always describes the mix this call returned (mix_report reads them)."""
     voice_wav = Path(voice_wav)
     work = Path(ctx.work) / "audio"
     work.mkdir(parents=True, exist_ok=True)
@@ -346,7 +347,10 @@ def build_audio(ctx, voice_wav) -> Path:
                                   default=str).encode()).hexdigest()[:12]
     out = work / f"mix-{sig}.wav"
     rep_path = work / "mix.json"
-    if out.exists() and rep_path.exists():
+    own = out.with_suffix(".json")
+    if out.exists() and own.exists():
+        # mix.json may describe the other mix still kept: point it back at this one
+        rep_path.write_text(own.read_text(encoding="utf-8"), encoding="utf-8")
         return out
     rep = {"duration": round(dur, 3), "music": None}
     mix = voice.copy()
@@ -399,12 +403,23 @@ def build_audio(ctx, voice_wav) -> Path:
     old = sorted((p for p in work.glob("mix-*.wav") if p != out), key=lambda p: p.stat().st_mtime)
     for p in old[:-1]:
         p.unlink(missing_ok=True)
+        p.with_suffix(".json").unlink(missing_ok=True)
     rep["file"] = str(out)
     rep["truePeakDb"] = round(true_peak_db(mix), 2)
     rep["clipped"] = bool(np.abs(mix).max() >= 0.999)
-    rep_path.write_text(json.dumps(rep, indent=1), encoding="utf-8")
+    text = json.dumps(rep, indent=1)
+    own.write_text(text, encoding="utf-8")
+    rep_path.write_text(text, encoding="utf-8")
     report(ctx, "music", 100, "Balancing the sound")
     return out
+
+
+def mix_report(mixed: Path) -> Optional[dict]:
+    """The measured numbers of the mix at `mixed` (a build_audio result), or None when there are none."""
+    try:
+        return json.loads(Path(mixed).with_suffix(".json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
 
 
 # --- track analysis ----------------------------------------------------------------------------

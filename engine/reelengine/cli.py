@@ -73,7 +73,7 @@ def cmd_render(args):
     from . import render
     return render.run(_project(args), draft=args.draft, window=args.window,
                       root=Path(args.root) if args.root else None, verify=not args.no_verify,
-                      first_look=args.first_look, music=args.music, cover=not args.no_cover)
+                      first_look=args.first_look, music=args.music, cover=not args.no_cover, rules=args.rules)
 
 
 def cmd_cover(args):
@@ -333,6 +333,8 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--first-look", action="store_true",
                     help="preview of the deterministic edit (default cut + captions) without saving it")
     sp.add_argument("--music", help="Library/... song for --first-look when the project has none")
+    sp.add_argument("--rules", help="JSON file of checkable My style rules [{id, text, check}]; the result's "
+                                    "`lint` lists the ones this render breaks")
     sp = add("cover-candidates", cmd_cover_candidates, "the best cover frame near each moment, as stills")
     sp.add_argument("--at", required=True, help="raw-take seconds t1,t2,...")
     sp.add_argument("--source")
