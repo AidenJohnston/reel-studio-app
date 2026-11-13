@@ -50,6 +50,12 @@ export const MIRROR_ANSWERS: readonly MirrorAnswer[] = ['mirror-undo', 'mirror-f
 type Source = Sources[number]
 const autoFlipped = (s: Source): boolean => s.mirrorCheck?.verdict === 'mirrored' && s.mirror === true && !s.mirrorCheck.answer
 const askable = (s: Source): boolean => s.mirrorCheck?.verdict === 'maybe-mirrored' && s.mirror !== true && !s.mirrorCheck.answer
+/** the user said "as filmed", and the AI editor later saw backwards writing anyway (it may not flip it itself) */
+const declined = (s: Source): boolean => s.mirror !== true && (s.mirrorCheck?.answer === 'undone' || s.mirrorCheck?.answer === 'kept')
+
+/** The editor's line when it would have flipped a take the user had said is the right way round (the AI's
+ * set_mirror refuses that unless the user's note asks): "Flip it" / "Keep as filmed" answer it. */
+export const STILL_LOOKS_MIRRORED = 'It still looks mirrored to me (some writing behind you seems to read backwards), so I left it the way you chose. Flip it?'
 
 /** "your video" / "your videos" when it is every take, otherwise "take 2" / "take 1 and take 3"; and
  * the pronoun that goes with it. */
@@ -87,7 +93,7 @@ export function mirrorNotices(sources: Sources | undefined): { text: string; act
  * already changed another way (the "Flip picture" switch, or the AI). */
 export function answerMirror(sources: Sources | undefined, a: MirrorAnswer): { sources: Sources; change: string; reply: string | null } {
   const cur = sources ?? []
-  const hit = (s: Source): boolean => (a === 'mirror-undo' ? autoFlipped(s) : askable(s))
+  const hit = (s: Source): boolean => (a === 'mirror-undo' ? autoFlipped(s) : askable(s) || declined(s))
   if (!cur.some(hit)) return { sources: cur, change: '', reply: null }
   const answer = a === 'mirror-undo' ? 'undone' : a === 'mirror-flip' ? 'flipped' : 'kept'
   const next = cur.map((s) => {

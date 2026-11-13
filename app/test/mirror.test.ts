@@ -3,7 +3,7 @@
 import { describe, expect, it } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { answerMirror, isMirrored, mergeSourcesPatch, mirrorNotices, withMirror } from '../src/shared/mirror'
+import { STILL_LOOKS_MIRRORED, answerMirror, isMirrored, mergeSourcesPatch, mirrorNotices, withMirror } from '../src/shared/mirror'
 import { ACTION_LABELS } from '../src/shared/notes'
 import { checklist } from '../src/main/store'
 import { describeChange } from '../src/shared/describe'
@@ -122,6 +122,17 @@ describe('mirrored take found at import', () => {
     expect(answerMirror([take('s1', { mirror: true, mirrorCheck: { verdict: 'maybe-mirrored' } })], 'mirror-flip').reply).toBeNull()
   })
 
+  it('"Flip it" under "It still looks mirrored to me" flips a take the user had kept or undone; Keep keeps it', () => {
+    const undone = take('s1', { mirrorCheck: { verdict: 'mirrored', why: WHY, answer: 'undone' } })
+    const kept = take('s2', { mirrorCheck: { verdict: 'maybe-mirrored', why: MAYBE, answer: 'kept' } })
+    const r = answerMirror([undone, kept, plain('s3')], 'mirror-flip')
+    expect(r.sources.map((s) => [s.mirror ?? null, s.mirrorCheck?.answer ?? null])).toEqual([[true, 'flipped'], [true, 'flipped'], [null, null]])
+    expect(r.change).toBe('flipped the picture')
+    expect(answerMirror([undone], 'mirror-keep').sources[0].mirrorCheck?.answer).toBe('kept')
+    expect(STILL_LOOKS_MIRRORED).toMatch(/Flip it\?$/)
+    expect(STILL_LOOKS_MIRRORED).not.toMatch(/—/)
+  })
+
   it('the "Flip picture" switch and Undo in What I did keep what init saw, and the choice', () => {
     const off = mergeSourcesPatch([flipped('s1'), take('s2', { mirror: true })], [{ id: 's1', mirror: false }, { id: 's2', mirror: false }])
     expect(off).toEqual([take('s1', { mirrorCheck: { verdict: 'mirrored', why: WHY, answer: 'undone' } }), take('s2')])
@@ -146,6 +157,7 @@ describe('mirrored take found at import', () => {
     const main = src('main/index.ts')
     expect(main).toMatch(/for \(const n of mirrorNotices\(made\?\.sources\)\) await addChat\(slug, 'editor', n\.text, undefined, n\.actions\)/)
     expect(main).toMatch(/handle\('mirror:answer'[\s\S]{0,900}answerMirror\(p\.sources, action\)/)
+    expect(main).toMatch(/if \(r\.mirrorDeclined\?\.length\) await addChat\(slug, 'editor', STILL_LOOKS_MIRRORED, undefined, \['mirror-flip', 'mirror-keep'\]\)/)
     // one answer at a time per project, and the message's buttons are disabled while it is answered
     expect(main).toMatch(/handle\('mirror:answer',[\s\S]{0,120}serialized\(`mirror-answer:\$\{slug\}`/)
     expect(src('preload/index.ts')).toMatch(/answer: \(slug, messageId, action\) => call\('mirror:answer', slug, messageId, action\)/)

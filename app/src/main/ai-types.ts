@@ -18,6 +18,8 @@ export interface AgentResult {
   changed: string[]
   /** Rules the AI PROPOSES for My style, not saved (stream quality2). The app asks before saving. */
   styleSuggestions?: string[]
+  /** Takes the AI would have flipped, but the user had said they are the right way round (shared/mirror.ts). */
+  mirrorDeclined?: string[]
   /** Set when the AI stopped early and a simpler edit was made instead. */
   notice?: UserFacingError
 }

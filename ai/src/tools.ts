@@ -35,6 +35,8 @@ export interface ToolState {
   previewSkipped?: boolean;
   /** raw-take times of the cover stills the model was shown (set_cover on one of them is exact) */
   coverCandidates?: number[];
+  /** takes set_mirror would have flipped, but the user had said they are the right way round: the app asks */
+  mirrorDeclined?: string[];
 }
 
 export interface ToolContext {
@@ -94,8 +96,8 @@ async function mutate(ctx: ToolContext, field: string, fn: (p: Project, t: Trans
 }
 
 /** A note that asks to flip the picture ("it's mirrored", "unmirror it", "flip it", "the writing is backwards",
- * "swap left and right", "it's the wrong way round"). */
-const MIRROR_REQUEST = /mirror|flip|backwards?|revers|left[ -](and|to)[ -]right|right[ -](and|to)[ -]left|wrong way/i;
+ * "swap left and right", "switch the sides", "it's the wrong way round", "it's inverted"). */
+const MIRROR_REQUEST = /mirror|flip|backward|revers|invert|wrong way|other way|(swap|switch)\w*\W+(\w+\W+){0,3}(left|right|sides?)\b|left[ -](and|to)[ -]right|right[ -](and|to)[ -]left/i;
 
 export class ToolInputError extends Error {
   constructor(message: string) { super(message); this.name = 'ToolInputError'; }
@@ -1110,6 +1112,8 @@ const tools: ToolDef[] = [
         if (!all && !p.sources.some((s) => s.id === args.source)) return `unknown source ${args.source}`;
         const kept = (s: Project['sources'][number]) => on && !userAsked && (s.mirrorCheck?.answer === 'undone' || s.mirrorCheck?.answer === 'kept');
         const targets = p.sources.filter((s) => all || s.id === args.source);
+        const declined = targets.filter(kept).map((s) => s.id);
+        if (declined.length) ctx.state.mirrorDeclined = [...new Set([...(ctx.state.mirrorDeclined ?? []), ...declined])];
         if (targets.every(kept)) return 'the user already said this video is the right way round (userSaidAsFilmed): leave it as filmed unless their note asks you to flip it';
         for (const s of p.sources) {
           if ((!all && s.id !== args.source) || kept(s)) continue;

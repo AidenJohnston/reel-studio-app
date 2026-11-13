@@ -19,6 +19,8 @@ export interface AgentResult {
   /** rules the AI only PROPOSES: show "Remember this for next time?" Yes / No; Yes = addStyleRule(text) */
   styleSuggestions: string[];
   changed: string[];
+  /** takes the editor would have flipped, but the user had said they are the right way round: the app asks "Flip it?" */
+  mirrorDeclined?: string[];
 }
 export interface ScriptResult { hook: string; script: string; onScreenText: string[] }
 

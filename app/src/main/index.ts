@@ -54,7 +54,7 @@ import { aiChoiceSaved, carryOverDecision } from './ai-carryover'
 import type { AppInfo, DropResult, ExportResult, JobEvent, ProjectJson } from '../shared/api'
 import { noAiReply } from '../shared/notes'
 import { versionMessage } from '../shared/describe'
-import { MIRROR_ANSWERS, answerMirror, mergeSourcesPatch, mirrorNotices, type MirrorAnswer } from '../shared/mirror'
+import { MIRROR_ANSWERS, STILL_LOOKS_MIRRORED, answerMirror, mergeSourcesPatch, mirrorNotices, type MirrorAnswer } from '../shared/mirror'
 import { displayPath } from '../shared/display-path'
 import { registerPhoneIpc, stopPhoneShare } from './phone-ipc'
 import { checkNoteAttachments, forChat, pickClipboardType, registerAttachmentIpc } from './attachments'
@@ -330,6 +330,8 @@ async function replyAskingAboutStyle(slug: string, r: AgentResult, summary: stri
   }
   await addChat(slug, 'editor', c.summary, r.version)
   for (const rule of c.suggestions) await addChat(slug, 'editor', rememberQuestion(rule), undefined, ['remember-yes', 'remember-no'], rule)
+  // the editor saw backwards writing in a take the user had said is the right way round: one tap to flip it
+  if (r.mirrorDeclined?.length) await addChat(slug, 'editor', STILL_LOOKS_MIRRORED, undefined, ['mirror-flip', 'mirror-keep'])
   return { summary: c.summary, version: r.version, quiet: true }
 }
 

@@ -52,6 +52,11 @@ function mediaSeconds(p: Project): number {
 
 /** Runs transcribe + analyze if the project has no transcript yet. The face track needs no words,
  * so it is found WHILE the speech model listens (`analyze --faces-only`); `analyze` then reuses it. */
+/** set_mirror's refusals, for the app's "It still looks mirrored to me. Flip it?" (none: no field). */
+function declinedFlips(state: ToolState): { mirrorDeclined?: string[] } {
+  return state.mirrorDeclined?.length ? { mirrorDeclined: state.mirrorDeclined } : {};
+}
+
 export async function ensureAnalyzed(deps: EditorDeps, projectDir: string, onEvent: (e: AgentEvent) => void, signal?: AbortSignal): Promise<void> {
   const p = await loadProject(projectDir);
   const mediaSec = mediaSeconds(p);
@@ -273,7 +278,7 @@ First edit (stopped early).
 
 ${summary}
 `);
-      return { summary, version, styleRulesAdded: ctx.state.styleRulesAdded, styleSuggestions: ctx.state.styleSuggestions, changed: [...ctx.state.changed], notice: e.toJSON() };
+      return { summary, version, styleRulesAdded: ctx.state.styleRulesAdded, styleSuggestions: ctx.state.styleSuggestions, changed: [...ctx.state.changed], ...declinedFlips(ctx.state), notice: e.toJSON() };
     }
     throw e;
   }
@@ -285,7 +290,7 @@ ${summary}
     ?? 'I could not finish your first edit this time, so this version is mostly your video as it was. Try again, or tell me what to change.', ctx.state);
   await snapshotVersion(projectDir, await loadProject(projectDir), version, `# v${version}\n\nFirst edit.\n\n${summary}\n`);
   onEvent({ type: 'status', message: 'Done', pct: 100 });
-  return { summary, version, styleRulesAdded: ctx.state.styleRulesAdded, styleSuggestions: ctx.state.styleSuggestions, changed: [...ctx.state.changed] };
+  return { summary, version, styleRulesAdded: ctx.state.styleRulesAdded, styleSuggestions: ctx.state.styleSuggestions, changed: [...ctx.state.changed], ...declinedFlips(ctx.state) };
 }
 
 // ---------------------------------------------------------------- apply a note
@@ -357,10 +362,11 @@ export async function applyNote(deps: EditorDeps, provider: ModelProvider | null
   try {
     const r = await runAgent({ provider, system: await systemPrompt(deps), task, taskImages: images, ctx, onEvent, signal, maxSteps: deps.maxSteps ?? 25, tokenBudget: deps.tokenBudget, preload: ['get_project', 'get_transcript'] });
     if (!ctx.state.changed.size && !ctx.state.styleRulesAdded.length) {
-      // nothing to render: a proposed rule still goes back to the app to ask about
+      // nothing to render: a proposed rule, or a flip the editor may not make, still goes back to the app to ask about
       return {
         summary: r.finished || 'I looked, but I was not sure what to change. Could you say it another way?',
         version: (await loadProject(projectDir)).version, styleRulesAdded: [], styleSuggestions: ctx.state.styleSuggestions, changed: [],
+        ...declinedFlips(ctx.state),
       };
     }
     onEvent({ type: 'status', message: 'Making the new version', pct: 90, phase: 'final' });
@@ -374,7 +380,7 @@ export async function applyNote(deps: EditorDeps, provider: ModelProvider | null
     await saveProject(projectDir, p);
     await snapshotVersion(projectDir, p, version, `# v${version}\n\nNote: ${label}\n\n${summary}\n`);
     onEvent({ type: 'status', message: 'Done', pct: 100 });
-    return { summary, version, styleRulesAdded: ctx.state.styleRulesAdded, styleSuggestions: ctx.state.styleSuggestions, changed: [...ctx.state.changed] };
+    return { summary, version, styleRulesAdded: ctx.state.styleRulesAdded, styleSuggestions: ctx.state.styleSuggestions, changed: [...ctx.state.changed], ...declinedFlips(ctx.state) };
   } catch (e) {
     await rollbackNote(deps, projectDir, before, creditsBefore, assetsBefore, ctx.state);
     throw e;
