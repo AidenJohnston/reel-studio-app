@@ -95,8 +95,8 @@ describe('asking again for a rule paused in My style turns it back on', () => {
     expect((await executeTool(ctx, 'add_style_rule', { rule: 'Put a yellow box behind the captions.' })).isError).toBe(false);
     expect((await style.list())[0].paused).toBeUndefined();
     expect(await style.asPromptText()).toBe('- Put a yellow box behind the captions.');
-    // the rule was there before this note, so undoing the note must not delete it
-    expect(ctx.state.styleRuleIds).toEqual([]);
+    // the rule was there before this note, so undoing the note pauses it again and never deletes it
+    expect(ctx.state.styleChanges).toEqual([expect.objectContaining({ id: rule.id, was: 'paused' })]);
   });
 
   it('and a note that turned it back on, then failed, leaves it paused', async () => {
