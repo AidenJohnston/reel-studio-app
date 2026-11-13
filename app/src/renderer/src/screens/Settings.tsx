@@ -1,23 +1,18 @@
 import { useEffect, useState } from 'react'
 import type { AppInfo, UpdateKeyStatus } from '../../../shared/api'
-import { UPDATE_PAGE_URL } from '../../../shared/config'
 import { reel, userMessage } from '../api'
 import type { Go } from '../nav'
 import { ConnectAI, DevProviders, ModelDownload, usingLine } from '../components/connect'
 import { FOLDER_APP } from '../components/ui'
 import { PostingSettings } from '../components/PostingSettings'
 import { Icon } from '../components/icons'
+import { useUpdateState } from '../components/update'
+import { UpdateSettingsRow } from '../components/UpdateSettings'
 import { useNotify } from '../App'
 
 export function Settings({ info, onInfo }: { info: AppInfo; onInfo: (i: AppInfo) => void; go?: Go }) {
   const notify = useNotify()
-  const [checkUpdates, setCheckUpdates] = useState<boolean | null>(null)
-  useEffect(() => {
-    reel.update
-      .status()
-      .then((st) => setCheckUpdates(st.enabled))
-      .catch(() => {})
-  }, [])
+  const update = useUpdateState()
   const [autoUpdates, setAutoUpdates] = useState<UpdateKeyStatus | null>(null)
   useEffect(() => {
     reel.updateKey
@@ -42,11 +37,9 @@ export function Settings({ info, onInfo }: { info: AppInfo; onInfo: (i: AppInfo)
     }
   }
   const toggleUpdates = async (on: boolean) => {
-    setCheckUpdates(on)
     try {
-      setCheckUpdates((await reel.update.setEnabled(on)).enabled)
+      await reel.update.setEnabled(on)
     } catch (e) {
-      setCheckUpdates(!on)
       notify(userMessage(e), 'error')
     }
   }
@@ -142,10 +135,10 @@ export function Settings({ info, onInfo }: { info: AppInfo; onInfo: (i: AppInfo)
             </div>
           </div>
         )}
-        {checkUpdates !== null && (
+        {update !== null && (
           <>
             <label className="toggle" style={{ marginTop: 12 }}>
-              <input type="checkbox" checked={checkUpdates} onChange={(e) => void toggleUpdates(e.target.checked)} data-testid="check-updates" />
+              <input type="checkbox" checked={update.autoCheck} onChange={(e) => void toggleUpdates(e.target.checked)} data-testid="check-updates" />
               Check for updates
             </label>
             <p className="muted-sm" style={{ margin: '2px 0 0 30px' }}>
@@ -153,12 +146,7 @@ export function Settings({ info, onInfo }: { info: AppInfo; onInfo: (i: AppInfo)
             </p>
           </>
         )}
-        <div className="row" style={{ marginTop: 12 }}>
-          {/* Opens the site's download page in the browser (window open handler). The automatic check is main/update-check.ts. */}
-          <a className="btn ghost" href={UPDATE_PAGE_URL} target="_blank" rel="noreferrer">
-            <Icon name="external" size={16} /> Check for a newer version
-          </a>
-        </div>
+        <UpdateSettingsRow />
         {info.engine.mode === 'fake' && (
           <p className="muted-sm" style={{ marginTop: 6 }}>
             Test engine in use.
