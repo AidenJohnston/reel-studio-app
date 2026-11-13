@@ -26,6 +26,16 @@ All additive (optional fields only), per docs/architecture.md section 3. Schema:
   `duration`, `hasAudio`, `fromGif`, `thumb`, `createdAt`). The sidecar is not part of project.json. A note
   may have empty `text` when it has attachments.
 
+## 2026-10-21 (all-or-nothing notes)
+
+- `notes[].id` (string): the app's job id for the note. `notes[].reply` (string): what the editor told the
+  user. `notes[].styleRulesAdded`, `notes[].styleSuggestions` (string arrays, only when non-empty): My style
+  rules the note asked to remember or the AI proposed. They are saved with the note so that, if the app
+  closes right after a note is saved, the next start posts the reply and asks about the rules once
+  (`app/src/main/store.ts` `recoverInterrupted`).
+- `version` is also what makes a `versions/vN` folder count: a folder above it is a note that was never
+  saved (docs/versions.md).
+
 ## 2026-10-20 (mirror)
 
 - `sources[].mirror` (boolean, absent = false): the take is mirrored (a front-camera selfie: posters, shirts and
@@ -50,3 +60,14 @@ All additive (optional fields only), per docs/architecture.md section 3. Schema:
   grouped as before. Anchored on word ids, so a recut keeps them.
 - `work/captions.json` cues gain `tokens` (each word as drawn, before upper-casing, with the transcript word ids
   it came from; a word taken off the captions is `""`) and `run` (lines with different runs can't be joined).
+
+## 2026-11-12 (the Plan document)
+
+- `plan` (object, optional): the Plan document ([plan.md](plan.md)). `script` {`draft`, `rewrite` (text or null),
+  `locked`, `lockedAt`, `hook`, `onScreenText`}, `beats[]` {`line`, `visual`, `sound`}, `broll[]` {`id` (`p1`...),
+  `words`, `anchor` (word range), `visual`, `source` (own-file | library | fetched | card | animation |
+  screen-recording), `asset`, `treatment`, `status` (proposed | approved | rejected), `hold` (seconds, a hint),
+  `note`, `broll` (the b-roll item it built), `look` ({`leadIn`, `params`}: its picture's look while it is out of
+  the video)}, `music`, `cover` (one line each), `buildProposed` (build proposed
+  rows as if approved). The engine renders only `broll`, which the AI layer derives from the rows; its edit
+  signature counts only `plan.script`.

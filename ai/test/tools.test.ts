@@ -8,7 +8,8 @@ import { FakeHost, makeProject, tinyPng } from './helpers';
 
 const SPEC_TOOLS = ['get_project', 'get_transcript', 'set_cut', 'set_gap_cap', 'set_caption_style', 'add_caption_correction', 'remove_caption_correction',
   'list_library', 'choose_music', 'set_music_automation', 'add_broll', 'update_broll', 'remove_broll', 'search_images',
-  'fetch_image', 'capture_website', 'make_animation', 'set_zoom', 'set_mirror', 'cover_candidates', 'set_cover', 'write_post', 'add_style_rule', 'render_draft', 'look_at_frames', 'finish'];
+  'fetch_image', 'capture_website', 'make_animation', 'set_zoom', 'set_mirror', 'cover_candidates', 'set_cover', 'write_post', 'add_style_rule', 'render_draft', 'look_at_frames', 'finish',
+  'propose_plan', 'update_plan_row'];
 
 async function ctxFor(): Promise<{ ctx: ToolContext; host: FakeHost; dir: string; root: string; events: AgentEvent[] }> {
   const { root, dir } = await makeProject();
@@ -210,7 +211,7 @@ describe('tool implementations', () => {
     await executeTool(ctx, 'set_cut', { keep: [{ from: 'w16', to: 'w56' }] });
     const rd = JSON.parse((await executeTool(ctx, 'render_draft', {})).content);
     expect(rd.version).toBe(1);
-    expect(events).toContainEqual({ type: 'render', version: 1, draft: true });
+    expect(events).toContainEqual(expect.objectContaining({ type: 'render', version: 1, draft: true }));
     const f = await executeTool(ctx, 'look_at_frames', { times: [1.0], words: ['w29'] });
     expect(f.images).toHaveLength(2);
     expect(f.images![0].mime).toBe('image/png');

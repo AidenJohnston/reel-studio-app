@@ -1,6 +1,7 @@
 // Types shared by the main process, the preload bridge and the renderer.
 // Keep this file free of Node and DOM imports.
 import type { ChatAction } from './notes'
+import type { Plan, PlanBeat, PlanView, RowFields, RowStatus } from './plan'
 export type { ChatAction } from './notes'
 
 export type AppCommand = { type: 'new-video' | 'settings' | 'export' | 'library' } | { type: 'open-reel'; slug: string }
@@ -97,7 +98,7 @@ export interface ProjectDetail extends ProjectSummary {
   versions: VersionInfo[]
   words: Word[]
   keptIds: string[]
-  /** The caption lines of the last full render, word by word (engine work/captions.json). */
+  /** The caption lines of the saved version (or the preview before one), word by word: its captions.json. */
   captionLines: CaptionToken[][]
   checklist: ChecklistItem[]
   chat: ChatMessage[]
@@ -153,10 +154,12 @@ export interface ProjectJson {
   cover?: { atSourceTime: number; source: string; text: string | null }
   post?: { caption: string; hashtags: string[]; keywords: string[] }
   notes?: { version: number; text: string; applied: string[]; at: string }[]
+  /** the Plan document (shared/plan.ts): its rows are the b-roll, so an edit of `broll` or `cut` goes through it */
+  plan?: Plan
   [k: string]: unknown
 }
 
-export type JobKind = 'first-edit' | 'note' | 'rerender' | 'export' | 'script'
+export type JobKind = 'first-edit' | 'note' | 'rerender' | 'export' | 'script' | 'plan'
 
 /** The steps of a job, tagged by the ai package on its status events (main/progress.ts times them). */
 export type Phase = 'listen' | 'analyze' | 'firstLook' | 'edit' | 'final'
@@ -481,6 +484,25 @@ export interface ReelApi {
   }
   script: {
     write(idea: string): Promise<ScriptResult>
+  }
+  /** The Plan document (shared/plan.ts, docs/plan.md). Each change resolves to the saved plan, with the
+   * approved rows not in the video yet; a refused one rejects with a message for the creator. */
+  plan: {
+    get(slug: string): Promise<PlanView>
+    /** The AI's draft (script.write's result as it is) and/or the creator's rewrite. Refused while locked. */
+    updateScript(slug: string, script: { draft?: ScriptResult | string | null; rewrite?: string | null }): Promise<PlanView>
+    /** Locked to shoot. Locking splits the script into beats again, keeping each unchanged line's visual and sound. */
+    lock(slug: string, locked: boolean): Promise<PlanView>
+    /** Approve or reject one b-roll row; an approved row with its words and file goes into the video's b-roll at once. */
+    setRowStatus(slug: string, id: string, status: RowStatus): Promise<PlanView>
+    /** Edit a row, or add one (id null: approved unless `status` says otherwise). */
+    editRow(slug: string, id: string | null, row: RowFields, status?: RowStatus): Promise<PlanView>
+    /** The beats, the music choice, the cover idea; buildProposed builds proposed rows as if approved. */
+    update(slug: string, details: { beats?: PlanBeat[]; music?: string | null; cover?: string | null; buildProposed?: boolean }): Promise<PlanView>
+    exportMarkdown(slug: string): Promise<string>
+    importMarkdown(slug: string, markdown: string): Promise<PlanView>
+    /** The AI proposes the plan: a job like a note (its events carry this jobId). */
+    propose(slug: string): Promise<{ jobId: string }>
   }
   dev: {
     /** Test builds only. `template` defaults to the bundled self-test template. */

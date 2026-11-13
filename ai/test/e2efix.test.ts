@@ -104,8 +104,8 @@ describe('e2e: frames of an animation are sampled at its settled end', () => {
   it('a time inside an animation window moves to its end', async () => {
     const { ctx, dir, host } = await ctxFor();
     await executeTool(ctx, 'render_draft', {});
-    await fsp.mkdir(path.join(dir, 'work', 'layers'), { recursive: true });
-    await fsp.writeFile(path.join(dir, 'work', 'layers', 'layers.json'), JSON.stringify({ items: [{ id: 'b1', treatment: 'animation', t0: 4.0, t1: 7.5 }] }));
+    // the engine's report of where each layer was, beside the preview it describes
+    await fsp.writeFile(path.join(dir, 'versions', 'preview', 'layers.json'), JSON.stringify({ items: [{ id: 'b1', treatment: 'animation', t0: 4.0, t1: 7.5 }] }));
     const r = JSON.parse((await executeTool(ctx, 'look_at_frames', { times: [5.0, 9.0], words: null })).content);
     const asked = host.calls.find((c) => c.command === 'frames')!.args;
     expect(asked[asked.indexOf('--times') + 1]).toBe('7.35,9');

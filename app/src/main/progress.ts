@@ -25,6 +25,7 @@ export const DEFAULTS: Record<string, Omit<PhaseModel, 'n'>> = {
 const PLAN: Record<string, Timed[]> = {
   'first-edit': ['listen', 'analyze', 'edit', 'final'],
   note: ['edit', 'final'],
+  plan: ['listen', 'analyze', 'edit'],
   rerender: ['final']
 }
 

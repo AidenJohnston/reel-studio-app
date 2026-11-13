@@ -41,7 +41,8 @@ def slugify(text: str, fallback: str = "video") -> str:
 
 
 def read_json(path: Path):
-    with open(path, "r", encoding="utf-8") as fh:
+    # utf-8-sig: a byte-order mark, which some Windows editors write, is not JSON (the AI's readJson strips it too)
+    with open(path, "r", encoding="utf-8-sig") as fh:
         return json.load(fh)
 
 
@@ -157,8 +158,8 @@ def project_file(project_dir: Path) -> Path:
     return Path(project_dir) / "project.json"
 
 
-def load(project_dir: Path, check: bool = True) -> dict:
-    pf = project_file(project_dir)
+def load(project_dir: Path, check: bool = True, file: Optional[Path] = None) -> dict:
+    pf = Path(file) if file is not None else project_file(project_dir)
     if not pf.exists():
         raise EngineError("NO_PROJECT", f"no project.json in {project_dir}",
                           "I couldn't find this video's project. It may have been moved.")
@@ -175,14 +176,14 @@ def load(project_dir: Path, check: bool = True) -> dict:
     return proj
 
 
-def save(project_dir: Path, proj: dict, touch: bool = True) -> None:
+def save(project_dir: Path, proj: dict, touch: bool = True, file: Optional[Path] = None) -> None:
     if touch:
         proj["updatedAt"] = now_iso()
     problems = validate(proj)
     if problems:
         raise EngineError("BAD_PROJECT", "refusing to save an invalid project: " + "; ".join(problems[:8]),
                           "Something went wrong saving your edit. Please try again.")
-    write_json(project_file(project_dir), proj)
+    write_json(Path(file) if file is not None else project_file(project_dir), proj)
 
 
 def edit_signature(proj: dict) -> str:
@@ -190,6 +191,9 @@ def edit_signature(proj: dict) -> str:
     p = copy.deepcopy(proj)
     for key in ("updatedAt", "version", "notes", "post", "createdAt"):
         p.pop(key, None)
+    # the plan reaches the video through `broll` (the AI layer builds it) and its script (captions)
+    if isinstance(p.get("plan"), dict):
+        p["plan"] = {"script": p["plan"].get("script")}
     return json.dumps(p, sort_keys=True, ensure_ascii=False)
 
 
@@ -249,6 +253,11 @@ def _anchor_slots(proj: dict):
         if isinstance(b.get("anchor"), dict):
             yield b["anchor"], "from", "from"
             yield b["anchor"], "to", "to"
+    # the plan's rows move with the b-roll they built (ai/src/plan.ts), or a re-sync would move it back
+    for r in ((proj.get("plan") or {}).get("broll") or []):
+        if isinstance(r.get("anchor"), dict):
+            yield r["anchor"], "from", "from"
+            yield r["anchor"], "to", "to"
     for z in proj.get("zooms") or []:
         if isinstance(z.get("anchor"), dict):
             yield z["anchor"], "from", "from"

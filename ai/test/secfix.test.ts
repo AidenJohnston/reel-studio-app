@@ -9,10 +9,11 @@ import {
   AnthropicProvider,
 } from '../src';
 import { DATA_BOUNDARY } from '../src/editor';
-import { withCacheBreakpoint, toAnthropicMessages } from '../src/providers/anthropic';
 import { withEditLock } from '../src/index';
+import { withCacheBreakpoint, toAnthropicMessages } from '../src/providers/anthropic';
 import { childEnv, devSettingsDir, isBlockedAddress, safeResolve } from '../src/safety';
-import { FakeHost, ScriptedModel, makeProject, call, tmpDir, tinyPng } from './helpers';
+import { FakeHost, ScriptedModel, makeProject, call, tmpDir, tinyPng, firstVersion } from './helpers';
+import { listVersions } from '../src';
 
 const PUBLIC = async () => ['93.184.215.14'];
 const nullP = { side: null, tilt: null, scale: null, text: null };
@@ -201,6 +202,8 @@ describe('finding 13: transcript and web text are data, style rules are visible 
     const before = Buffer.from('{\n  "old.png": { "attribution": "Old credit" }\n}\n');
     await fsp.mkdir(path.dirname(creditsPath), { recursive: true });
     await fsp.writeFile(creditsPath, before);
+    // a note's download carries the note's prefix (tools.ts notePrefix)
+    const downloaded = () => fs.readdirSync(path.join(dir, 'work', 'assets')).filter((f) => f.endsWith('downloaded.png'));
     const runEngine = host.runEngine.bind(host);
     host.runEngine = async (command, args, onProgress) => {
       const result = await runEngine(command, args, onProgress);
@@ -215,7 +218,7 @@ describe('finding 13: transcript and web text are data, style rules are visible 
     const m = new ScriptedModel([
       { toolCalls: [call('fetch_image', { url: 'https://example.com/downloaded.png', name: 'downloaded' })] },
       () => {
-        expect(fs.existsSync(path.join(dir, 'work', 'assets', 'downloaded.png'))).toBe(true);
+        expect(downloaded()).toHaveLength(1);
         expect(JSON.parse(fs.readFileSync(creditsPath, 'utf8'))['downloaded.png'].attribution).toBe('New credit');
         throw new AIError('chatgpt_usage_limit', 'limit');
       },
@@ -223,7 +226,7 @@ describe('finding 13: transcript and web text are data, style rules are visible 
     await expect(createAI({ host, settingsDir, providerOverride: m }).applyNote(dir, 'add a picture', () => undefined))
       .rejects.toMatchObject({ code: 'chatgpt_usage_limit' });
     expect(await fsp.readFile(creditsPath)).toEqual(before);
-    expect(fs.existsSync(path.join(dir, 'work', 'assets', 'downloaded.png'))).toBe(false);
+    expect(downloaded()).toEqual([]);
   });
 
   // chmod 000 cannot stop Windows or the root user from reading the file.
@@ -258,14 +261,15 @@ describe('finding 13: transcript and web text are data, style rules are visible 
 });
 
 describe('finding 14: no "I made that change" when the agent ran out of steps', () => {
-  it('step cap after a change: the summary says so and lists what changed', async () => {
+  it('step cap after a change: nothing is saved, and the reply says so and what it had started', async () => {
     const { dir, host, settingsDir } = await setup();
+    const before = await fsp.readFile(path.join(dir, 'project.json'), 'utf8');
     const loop = Array.from({ length: 10 }, () => ({ toolCalls: [call('get_project')] }));
     const m = new ScriptedModel([{ toolCalls: [call('set_gap_cap', { seconds: 0.4 })] }, ...loop]);
-    const r = await createAI({ host, settingsDir, providerOverride: m, finalRender: false, maxSteps: 4 }).applyNote(dir, 'slower and add music', () => undefined);
-    expect(r.summary).not.toBe('I made that change.');
-    expect(r.summary).toMatch(/ran out of time/);
-    expect(r.summary).toMatch(/pauses/);
+    const err: any = await createAI({ host, settingsDir, providerOverride: m, maxSteps: 4 }).applyNote(dir, 'slower and add music', () => undefined).catch((e) => e);
+    expect(err.userMessage).toMatch(/ran out of time.*did not change your video.*pauses/);
+    expect(await fsp.readFile(path.join(dir, 'project.json'), 'utf8')).toBe(before);
+    expect(host.calls.filter((c) => c.command === 'render')).toEqual([]);
   });
 
   it('firstEdit without finish does not claim a finished edit', async () => {
@@ -360,8 +364,9 @@ describe('finding 34: an already-cancelled engine call never starts', () => {
 // ---------------------------------------------------------------- 35, 36, 37
 
 describe('finding 35: a note is rolled back on ANY failure, including the final render', () => {
-  it('final render fails: project.json, assets and My style are put back', async () => {
+  it('final render fails: project.json and My style stay as they were, no version is left', async () => {
     const { root, dir, host, settingsDir } = await setup();
+    await firstVersion(dir, host);
     host.failRender = true;
     const before = await fsp.readFile(path.join(dir, 'project.json'), 'utf8');
     const fetchImpl = (async () => new Response(tinyPng(), { headers: { 'content-type': 'image/png' } })) as any;
@@ -371,7 +376,7 @@ describe('finding 35: a note is rolled back on ANY failure, including the final 
     ]);
     await expect(createAI({ host, settingsDir, providerOverride: m, fetch: fetchImpl, lookup: PUBLIC }).applyNote(dir, 'slower', () => undefined)).rejects.toBeTruthy();
     expect(await fsp.readFile(path.join(dir, 'project.json'), 'utf8')).toBe(before);
-    expect(await fsp.readdir(path.join(dir, 'work', 'assets')).catch(() => [])).toEqual([]);
+    expect(await listVersions(dir)).toEqual([1]);
     expect(await new StyleStore(() => root).list()).toEqual([]);
   });
 });

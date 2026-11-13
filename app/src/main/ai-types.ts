@@ -1,6 +1,7 @@
 // Mirror of the @reelstudio/ai interface (docs/architecture.md section 8). The real package is loaded at
 // runtime when it exists; until then ai-mock.ts implements the same shape.
-import type { JobUpdate } from '../shared/api'
+import type { JobUpdate, ProjectJson } from '../shared/api'
+import type { Plan, PlanChange, PlanView } from '../shared/plan'
 
 /** What @reelstudio/ai emits: the job contract minus `heard` (main adds that one itself). */
 export type AgentEvent = Exclude<JobUpdate, { type: 'heard' }>
@@ -93,16 +94,28 @@ export interface AI {
   active(): Promise<ProviderStatus>
   setActive(id: ProviderStatus['id'], connectionId?: string): Promise<void>
   setClaudeKey(key: string | null): Promise<ProviderStatus>
-  firstEdit(projectDir: string, onEvent: (e: AgentEvent) => void, signal?: AbortSignal): Promise<AgentResult>
-  /** `opts.attachments`: `work/assets/attach-*` refs main already checked (the AI checks them again). */
+  firstEdit(projectDir: string, onEvent: (e: AgentEvent) => void, signal?: AbortSignal, opts?: { owner?: string }): Promise<AgentResult>
+  /** `opts.attachments`: `work/assets/attach-*` refs main already checked (the AI checks them again).
+   * `opts.id`: the job id the note is saved under. `opts.saveStyleRules: false`: return rules, the app asks.
+   * `opts.owner`: the job's owner token, which the note joins instead of taking the project. */
   applyNote(
     projectDir: string,
     note: string,
     onEvent: (e: AgentEvent) => void,
     signal?: AbortSignal,
-    opts?: { attachments?: string[] }
+    opts?: { attachments?: string[]; id?: string; saveStyleRules?: boolean; owner?: string }
   ): Promise<AgentResult>
   writeScript(idea: string, onEvent: (e: AgentEvent) => void, signal?: AbortSignal): Promise<ScriptResult>
+  /** The AI proposes the Plan document before the first edit (it changes only `plan`). Optional: older packages and the mock lack it. */
+  proposePlan?(projectDir: string, onEvent: (e: AgentEvent) => void, signal?: AbortSignal, opts?: { owner?: string }): Promise<{ summary: string; plan: Plan }>
+  /** The creator's side of the Plan document. `change` writes project.json: main runs it as a held edit. Optional like proposePlan. */
+  plan?: {
+    get(projectDir: string): Promise<PlanView>
+    change(projectDir: string, change: PlanChange): Promise<PlanView>
+    markdown(projectDir: string): Promise<string>
+    /** A hand edit of the b-roll or the cut, before main saves it: returns the project with the plan's rows following it. */
+    followHandEdit(projectDir: string, project: ProjectJson): Promise<ProjectJson>
+  }
   styleRules(): Promise<{ id: string; text: string; createdAt: string }[]>
   removeStyleRule(id: string): Promise<void>
   /** Saves one My style rule (after the user said Yes). Optional: older packages lack it. */
