@@ -155,7 +155,18 @@ export function AttachmentThumb({ a, size = 'chip' }: { a: NoteAttachment; size?
   )
 }
 
-export function AttachmentChips({ chips, busy, onRemove }: { chips: NoteAttachment[]; busy: number; onRemove: (asset: string) => void }) {
+export function AttachmentChips({
+  chips,
+  busy,
+  disabled = false,
+  onRemove
+}: {
+  chips: NoteAttachment[]
+  busy: number
+  /** the note carrying these is being sent: they can't be removed */
+  disabled?: boolean
+  onRemove: (asset: string) => void
+}) {
   if (!chips.length && !busy) return null
   return (
     <div className="att-chips" data-testid="note-attachments">
@@ -163,7 +174,7 @@ export function AttachmentChips({ chips, busy, onRemove }: { chips: NoteAttachme
         <span key={a.asset} className="att-chip" data-testid="note-attachment">
           <AttachmentThumb a={a} />
           <span className="att-name">{a.name}</span>
-          <button className="att-remove" onClick={() => onRemove(a.asset)} aria-label={`Remove ${a.name}`} title="Remove" data-testid="note-attachment-remove">
+          <button className="att-remove" onClick={() => onRemove(a.asset)} disabled={disabled} aria-label={`Remove ${a.name}`} title="Remove" data-testid="note-attachment-remove">
             <Icon name="x" size={14} stroke={2} />
           </button>
         </span>

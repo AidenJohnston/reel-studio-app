@@ -8,6 +8,8 @@ The user left this note on the latest draft:
 
 Call get_project and get_transcript to find the words the note points at. Then make the smallest change that satisfies the note. Do not touch anything else: no re-cutting, no new b-roll, no music change, no caption change unless the note asks for it. If the note is unclear, make the most reasonable reading and say what you did.
 
+A note asked at a moment of the video starts like `At 0:14 (around "you don't need a mixer", words w80, w81, w82): cut this part`. The app read those word ids off the video the user was watching at that moment. "Here", "this part" and "this" mean those words: anchor the change on those ids, never on the time. If the user was watching an older version, some of them may no longer be in the cut: anchor on the ones that still are. If none of them are, do NOT guess: change nothing and call finish with one short question, for example: "That part isn't in your newest version anymore. Which words should I change?"
+
 Common notes and the tool that handles them:
 - "Music is too loud at the start" or "too loud when I say X": set_music_automation on those words, about -4 to -8. "Too loud overall": choose_music with level quiet. "Too quiet": a gentle lift, or level under-voice.
 - "Different music", "more upbeat", "sadder song": list_library with kind music, then choose_music with a track that fits the mood asked for.

@@ -11,8 +11,11 @@ This document describes how the pieces fit together. Section numbers are referen
    user's own files, images found online, or generated animation cards), makes a cover, and writes a post
    caption with 5 hashtags.
 3. The user watches the result and types **notes** in plain English ("music too loud at the start", "put the
-   price on 'twenty bucks'"). Each note makes a new version (v1, v2, v3...). Notes that are lasting
-   preferences are saved to **My style** and apply to every future video.
+   price on 'twenty bucks'") in the note box, or from the button under the player for the moment on screen. A
+   note about that moment names the words on screen then, read from the version being watched (`At 0:14
+   (around "...", words w80, w81): cut this part`), and the AI anchors the change on those word ids. Each note
+   makes a new version (v1, v2, v3...). Notes that are lasting preferences are saved to **My style** and apply
+   to every future video.
 4. **Export** writes the finished mp4, the cover and the caption text to a folder.
 
 The app works with no AI connected: transcription, a deterministic cut, captions, music on a chosen song
