@@ -1369,6 +1369,8 @@ export async function executeTool(ctx: ToolContext, name: string, rawArgs: unkno
     if (ctx.signal?.aborted) throw err;
     if (err instanceof ToolInputError) return { content: JSON.stringify({ error: err.message }), isError: true };
     if (err instanceof AIError) throw err;
+    // part of the engine may still be writing: the job must end and keep the project (index.ts editHost)
+    if (err?.code === 'ENGINE_STUCK') throw err;
     // Engine failures arrive as {code, userMessage}
     const msg = err?.userMessage ?? err?.message ?? String(err);
     return { content: JSON.stringify({ error: `${tool.name} failed: ${msg}`, code: err?.code ?? null }), isError: true };

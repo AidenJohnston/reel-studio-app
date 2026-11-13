@@ -31,6 +31,9 @@ export interface AppState {
   title?: string
   /** An AI editor made the first edit (false/absent = the simple no-AI edit). */
   aiEdited?: boolean
+  /** A job ended without removing its unfinished versions (removal refused, as Windows does while a file
+   * is open): the next start removes them (recoverInterrupted). */
+  cleanupOwed?: boolean
 }
 
 const EMPTY_STATE: AppState = { chat: [], job: null, status: 'new', lastError: null }
@@ -294,12 +297,25 @@ export async function cleanPartialVersions(dir: string): Promise<string[]> {
   return removed
 }
 
+/** Removes what an ended job left (cleanPartialVersions). False when a removal was refused, as Windows
+ * does while a file is open: the caller keeps cleanupOwed for a later try. Any other failure throws. */
+async function removeLeftovers(dir: string): Promise<boolean> {
+  try {
+    await cleanPartialVersions(dir)
+    return true
+  } catch (e) {
+    if ([...WINDOWS_LOCK, 'ENOTEMPTY'].includes((e as NodeJS.ErrnoException).code ?? '')) return false
+    throw e
+  }
+}
+
 /**
  * Called once at startup, before any job can run: a project whose app.json still says a job is
  * running was interrupted (quit, crash, power cut). Clean it up and mark it so the UI can offer
- * to pick up where it left off.
+ * to pick up where it left off. One whose job could not remove its unfinished versions
+ * (cleanupOwed) only gets them removed.
  */
-export async function recoverInterrupted(): Promise<string[]> {
+export async function recoverInterrupted(stillRunning: string[] = []): Promise<string[]> {
   const recovered: string[] = []
   let slugs: string[] = []
   try {
@@ -314,11 +330,18 @@ export async function recoverInterrupted(): Promise<string[]> {
     } catch {
       continue
     }
+    if (stillRunning.includes(slug)) continue // an engine of the last run may still write there
     if (!existsSync(join(dir, 'app.json'))) continue
     const s = await readAppState(slug)
-    if (!s.job) continue
-    await cleanPartialVersions(dir)
+    if (!s.job && !s.cleanupOwed) continue
+    // a removal still refused keeps the mark for the next start; the job is settled all the same, and the
+    // other projects are still recovered
+    const cleaned = await removeLeftovers(dir)
+    if (!s.job && !cleaned) continue
     await updateAppState(slug, (st) => {
+      if (cleaned) delete st.cleanupOwed
+      else st.cleanupOwed = true
+      if (!st.job) return // the job itself ended and said so: only its clean-up was left
       st.status = st.job?.kind === 'first-edit' || !existsSync(join(dir, 'versions')) ? 'interrupted' : 'ready'
       if (st.status === 'ready' && st.job?.kind !== 'export') {
         st.chat.push({

@@ -26,7 +26,6 @@ import {
   readAppState,
   readProject,
   readWords,
-  recoverInterrupted,
   titleFromFile,
   uniqueSlug,
   updateAppState,
@@ -45,6 +44,7 @@ import { captureWebsite } from './capture'
 import { createModelManager } from './models'
 import { loadSettings, saveSettings } from './settings'
 import { createPidRegistry } from './orphans'
+import { settleLastRun } from './last-run'
 import { openSignInWindow, publicInfo } from './claude-signin'
 import { createVendorConnect, type CliStatus, type VendorConnect } from './vendor-connect'
 import { runInstall, runLogin, testVendorEnv, testVendorLoginEnv, type Vendor } from './vendor-setup'
@@ -56,7 +56,8 @@ import { versionMessage } from '../shared/describe'
 import { mergeSourcesPatch } from '../shared/mirror'
 import { displayPath } from '../shared/display-path'
 import { registerPhoneIpc, stopPhoneShare } from './phone-ipc'
-import { checkNoteAttachments, forChat, pickClipboardType, registerAttachmentIpc } from './attachments'
+import { forChat, pickClipboardType, registerAttachmentIpc } from './attachments'
+import { takeNote } from './note-intake'
 import { createUpdateService } from './update-check'
 import { PROTOCOL, createUpdateKeyService } from './update-key'
 import { setupPosting } from './posting-ipc'
@@ -117,7 +118,7 @@ const runEngine: RunEngine = createEngineRunner({
   env: engineEnv,
   cwd: engineDir,
   log,
-  onSpawn: (pid) => pidRegistry?.add(pid),
+  onSpawn: (pid, project) => pidRegistry?.add(pid, project),
   onExit: (pid) => pidRegistry?.remove(pid)
 })
 
@@ -433,7 +434,8 @@ function registerIpc(): void {
     log,
     projectDir,
     readProject,
-    busy: (slug) => !!jobs.forSlug(slug),
+    busy: (slug) => jobs.isClosed(slug),
+    refuse: (slug) => jobs.refuseIfBusy(slug),
     clipboardImage: async () => {
       // Electron's async clipboard: the first item that carries a picture, as bytes
       for (const item of await clipboard.read()) {
@@ -556,12 +558,8 @@ function registerIpc(): void {
     return { jobId: startFirstEdit(slug, null) }
   })
   handle('projects:note', async (_e, slug: string, text: string, attachments?: unknown) => {
-    const note = String(text ?? '').trim()
     const dir = projectDir(slug)
-    // never trust the page: every attached ref is re-read from THIS project's own sidecars
-    const files = await checkNoteAttachments(dir, attachments)
-    if (!note && !files.length) throw { code: 'EMPTY', userMessage: 'Type what you would like changed first.' }
-    if (jobs.forSlug(slug)) throw { code: 'BUSY', userMessage: 'I am still working on this video. Give me a moment, or press Stop.' }
+    const { note, files } = await takeNote(jobs, slug, text, attachments)
     await addChat(slug, 'you', note, undefined, undefined, undefined, files.map(forChat))
     const active = await ai.active().catch(() => null)
     if (!active || !active.connected || active.id === 'none') {
@@ -585,7 +583,7 @@ function registerIpc(): void {
     return { jobId }
   })
   handle('projects:update', async (_e, slug: string, patch: Partial<ProjectJson>) => {
-    if (jobs.forSlug(slug)) throw { code: 'BUSY', userMessage: 'I am still working on this video. Give me a moment, or press Stop.' }
+    jobs.refuseIfBusy(slug)
     const p = await readProject(slug)
     for (const k of Object.keys(patch ?? {}) as (keyof ProjectJson)[]) {
       // the "Flip picture" toggle: only each take's mirror flag, never its path or size
@@ -635,6 +633,8 @@ function registerIpc(): void {
       jobs.cancel(running.id)
       await running.done
     }
+    // a video kept closed stays: part of its engine may still be writing into the folder
+    jobs.refuseIfBusy(slug)
     await fs.rm(projectDir(slug), { recursive: true, force: true })
   })
 
@@ -803,16 +803,7 @@ app.whenReady().then(async () => {
     log('[start] executable is under /AppTranslocation/ on macOS; running from a read-only Gatekeeper translocated copy')
   }
   pidRegistry = createPidRegistry(settingsDir())
-  const reaped = await pidRegistry.reap().catch(() => 0)
-  if (reaped) log(`[start] stopped ${reaped} engine process(es) left over from a crash`)
-  const settings = await loadSettings()
-  if (settings.root) setRootOverride(settings.root)
-  await ensureRoot().catch((e) => log(`[root] ${String(e)}`))
-  const recovered = await recoverInterrupted().catch((e) => {
-    log(`[recover] ${String(e)}`)
-    return []
-  })
-  if (recovered.length) log(`[recover] cleaned up ${recovered.join(', ')}`)
+  const settings = await settleLastRun(pidRegistry, (slug) => jobs.keepClosed(slug), log)
   const loaded = await loadAI(
     {
       host,
@@ -849,18 +840,25 @@ app.whenReady().then(async () => {
 })
 
 let quitting = false
+// killTree sends SIGKILL 1.5 s after SIGTERM (taskkill /F at once on Windows), so 2 s is enough for every
+// leftover engine to be sent it. No measurement chose the number. Without it a kill could hold quit for
+// 6.5 s (5 s on Windows) after the jobs' own 4 s.
+const QUIT_KILL_MS = 2000
 app.on('before-quit', (e) => {
   void stopPhoneShare() // the "Send to my phone" link never outlives the app
   if (quitting || !jobs.runningCount()) {
     void killAllEngines()
     return
   }
-  // Stop running work cleanly so the next start finds a tidy project.
+  // Stop running work cleanly so the next start finds a tidy project. The jobs get their 4 s (cancelAll)
+  // to clean up; one cut short leaves app.json saying it runs, which the next start cleans up
+  // (store.ts recoverInterrupted). Waiting for engines to die is cut short: one that will not stays on
+  // the engine list, and the next start stops it or keeps its video closed (orphans.ts).
   e.preventDefault()
   quitting = true
   void jobs
     .cancelAll()
-    .then(() => killAllEngines())
+    .then(() => Promise.race([killAllEngines(), new Promise((r) => setTimeout(r, QUIT_KILL_MS))]))
     .finally(() => app.quit())
 })
 

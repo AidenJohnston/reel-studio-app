@@ -84,6 +84,8 @@ export class FakeHost implements EngineHost {
   engineAssets = false;
   songInfo: any = { duration: 120, bpm: 92, energy: 'calm', tags: ['calm', 'warm'], suggestedStartAt: 7.5, arrivals: [{ at: 30, riseDb: 6 }], curve: [[0, -20]] };
   renderExtra: any = {};
+  /** runs after a render wrote its files, before it reports (Stop or a crash mid-render) */
+  afterRenderFiles?: (r: { draft: boolean; dir: string }) => Promise<void> | void;
   constructor(private readonly root: string, private readonly lines = SAMPLE_LINES) {}
   reelStudioRoot(): string { return this.root; }
   async renderAnimation(template: string, params: Record<string, unknown>, outPath: string): Promise<string> {
@@ -121,6 +123,7 @@ export class FakeHost implements EngineHost {
         const vd = path.join(dir, 'versions', draft ? 'preview' : `v${v}`);
         await fsp.mkdir(vd, { recursive: true });
         await fsp.writeFile(path.join(vd, draft ? 'draft.mp4' : 'export.mp4'), 'fake');
+        await this.afterRenderFiles?.({ draft, dir: vd });
         return { version: v, preview: draft, draft, duration: 12.3, verify: { ok: true }, ...this.renderExtra };
       }
       case 'frames': {

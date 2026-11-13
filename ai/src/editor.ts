@@ -208,7 +208,8 @@ async function finalize(deps: EditorDeps, ctx: ToolContext, onEvent: (e: AgentEv
   // A full-quality render makes "Export for Instagram" instant; fall back to a draft if it fails.
   if (deps.finalRender !== false) {
     try { return (await doRender(ctx, false)).version; } catch (e) {
-      if (ctx.signal?.aborted) throw e;
+      // a draft in its place would be saved and written into a version folder that engine may still write to
+      if (ctx.signal?.aborted || engineStuck(e)) throw e;
       if (ctx.state.renders.length) return ctx.state.renders.at(-1)!.version;
       throw e;
     }
@@ -337,7 +338,7 @@ export async function applyNote(deps: EditorDeps, provider: ModelProvider | null
         onEvent({ type: 'status', message: 'Done', pct: 100 });
         return { summary: fast.summary, version, styleRulesAdded: [], styleSuggestions: [], changed: [...ctx.state.changed], fast: fast.kind };
       } catch (e) {
-        await rollbackNote(deps, projectDir, before, creditsBefore, assetsBefore, ctx.state);
+        if (!engineStuck(e)) await rollbackNote(deps, projectDir, before, creditsBefore, assetsBefore, ctx.state);
         throw e;
       }
     }
@@ -376,10 +377,14 @@ export async function applyNote(deps: EditorDeps, provider: ModelProvider | null
     onEvent({ type: 'status', message: 'Done', pct: 100 });
     return { summary, version, styleRulesAdded: ctx.state.styleRulesAdded, styleSuggestions: ctx.state.styleSuggestions, changed: [...ctx.state.changed] };
   } catch (e) {
-    await rollbackNote(deps, projectDir, before, creditsBefore, assetsBefore, ctx.state);
+    if (!engineStuck(e)) await rollbackNote(deps, projectDir, before, creditsBefore, assetsBefore, ctx.state);
     throw e;
   }
 }
+
+/** Part of the engine would not stop and may still be writing to the project (index.ts editHost): a
+ * rollback would race it, so the project is left as it is and the app keeps it closed. */
+const engineStuck = (e: unknown): boolean => (e as { code?: unknown } | null)?.code === 'ENGINE_STUCK';
 
 // ---------------------------------------------------------------- idea -> script
 

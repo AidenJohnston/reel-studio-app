@@ -185,8 +185,12 @@ export interface AttachIpcDeps extends AttachDeps {
   handle: Handle
   projectDir: (slug: string) => string
   readProject: (slug: string) => Promise<ProjectJson>
-  /** a job is running on this video (removing a file then could pull it from under the AI) */
+  /** Nothing else may write to this video now (jobs.ts isClosed): a job runs on it (removing a file
+   * then could pull it from under the AI), or part of an engine may still be writing to it. */
   busy: (slug: string) => boolean
+  /** Throws why nothing may write to this video now, in the job lane's words (jobs.ts refuseIfBusy): a
+   * video kept closed says that part of its engine would not stop. */
+  refuse: (slug: string) => void
   /** the picture on the system clipboard (null = none) */
   clipboardImage: () => Promise<{ mime: string; bytes: Uint8Array } | null>
   /** Electron's file dialog (null = cancelled) */
@@ -195,13 +199,16 @@ export interface AttachIpcDeps extends AttachDeps {
 
 const BUSY = { code: 'BUSY', userMessage: 'I am still working on this video. Give me a moment, or press Stop.' }
 
-/** The project folder; refused while a job runs on it (a failed note puts work/assets back as it was,
- * which would take a file attached meanwhile with it). */
+/** The project folder; refused while the video is busy (a failed note puts work/assets back as it was,
+ * which would take a file attached meanwhile with it, and a stuck engine may still be writing). */
 async function projectOf(deps: AttachIpcDeps, slug: unknown): Promise<string> {
   if (typeof slug !== 'string' || !slug) throw { code: 'NOT_FOUND', userMessage: 'I could not find that video.' }
   const dir = deps.projectDir(slug)
   if (!existsSync(join(dir, 'project.json'))) throw { code: 'NOT_FOUND', userMessage: 'I could not find that video. It may have been moved or deleted.' }
-  if (deps.busy(slug)) throw BUSY
+  if (deps.busy(slug)) {
+    deps.refuse(slug)
+    throw BUSY
+  }
   return dir
 }
 

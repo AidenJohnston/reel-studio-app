@@ -420,5 +420,15 @@ def main(argv=None) -> int:
         return 1
 
 
+def run() -> int:
+    """The engine as a process (`python -m reelengine`, the `reelengine` command): on Windows it first
+    joins the Job Object that ends its ffmpeg with it. main() alone does not, because tests call it
+    inside their own process."""
+    if sys.platform == "win32":
+        from .contain import contain_children
+        contain_children()
+    return main()
+
+
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(run())
