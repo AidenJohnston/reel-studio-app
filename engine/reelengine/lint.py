@@ -23,7 +23,7 @@ changing anchors, zooms or caption settings:
   opening.calm        {seconds 1-10} at most one picture or zoom starts in the first `seconds`
   captions.oneLine    {}             no caption wraps onto a second line
   captions.uniformSize {}            every caption is drawn at the same size (none shrunk to fit)
-  broll.unique        {}             no picture or clip is shown twice
+  broll.unique        {}             no picture or clip is shown twice, counting each picture a wall draws
   broll.clipLength    {min, max}     each video clip is on screen `min` to `max` seconds (0.2-5)
   broll.cardHold      {value 1-5}    every other visual (still, card, text, animation) holds `value` s
   broll.faceClear     {}             no card sits on the eyes-to-chin zone; a full-screen cutaway is fine
@@ -239,16 +239,24 @@ def timing_places(check: dict, records: list, assets: dict) -> list:
     return out
 
 
-def unique_places(records: list, assets: dict) -> list:
-    """Each repeat of a picture or clip already shown (text cards have no asset)."""
+def _files(it: dict) -> list:
+    """Every file an item shows: its asset, and for a wall each picture in params.items (text cards have none)."""
+    params = it.get("params") if isinstance(it.get("params"), dict) else {}
+    listed = params.get("items") if isinstance(params.get("items"), list) else []
+    return [a for a in [it.get("asset"), *listed] if isinstance(a, str) and a]
+
+
+def unique_places(records: list, files: dict) -> list:
+    """Each visual that shows a picture or clip already shown, by itself earlier or within the same wall."""
     seen, out = set(), []
     for r in sorted(_shown(records), key=lambda r: r["t0"]):
-        a = assets.get(r.get("id"))
-        if not a:
-            continue
-        if a in seen:
-            out.append(_place(r, asset=a))
-        seen.add(a)
+        again = None
+        for a in files.get(r.get("id"), []):
+            if a in seen and again is None:
+                again = a
+            seen.add(a)
+        if again is not None:
+            out.append(_place(r, asset=again))
     return out
 
 
@@ -285,6 +293,7 @@ def lint(rules: list, *, cues: list, fmt: tuple, mix: Optional[dict], broll: lis
     when the render could not say which mix it used. `zooms` are the built zooms' (t0, t1) and
     `items` the project's b-roll items (which file each record showed)."""
     assets = {it.get("id"): it.get("asset") for it in items}
+    files = {it.get("id"): _files(it) for it in items}
     failures = []
     for r in rules:
         c = r["check"]
@@ -296,7 +305,7 @@ def lint(rules: list, *, cues: list, fmt: tuple, mix: Optional[dict], broll: lis
         elif kind in ("broll.clipLength", "broll.cardHold"):
             places = timing_places(c, broll, assets)
         elif kind == "broll.unique":
-            places = unique_places(broll, assets)
+            places = unique_places(broll, files)
         elif kind == "broll.faceClear":
             places = [p for p in broll_places({"zone": "eyes"}, broll) if not p["hides"]]
         elif kind == "face.maxBare":

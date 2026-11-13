@@ -185,6 +185,18 @@ def test_unique_names_each_repeat_of_an_asset_but_not_text_cards():
     assert f["places"] == [{"t0": 6.0, "t1": 8.0, "item": "b2", "asset": "Library/images/a.png"}]
 
 
+def test_unique_counts_the_pictures_a_wall_draws():
+    items = [{"id": "b1", "treatment": "icon-wall", "params": {"items": ["Library/images/a.png", "Library/images/b.png"]}},
+             {"id": "b2", "asset": "Library/images/b.png"},
+             {"id": "b3", "treatment": "post-wall", "params": {"items": ["Library/images/c.png", "Library/images/c.png"]}},
+             {"id": "b4", "treatment": "post-wall", "params": {"items": "not a list"}}]
+    broll = [shown(1, treatment="icon-wall", t0=1.0, t1=3.0), shown(2, t0=4.0, t1=6.0),
+             shown(3, treatment="post-wall", t0=7.0, t1=9.0), shown(4, treatment="post-wall", t0=10.0, t1=12.0)]
+    [f] = run({"kind": "broll.unique"}, broll=broll, items=items)["failures"]
+    # b2 repeats a picture the wall showed; b3 shows one picture twice; a malformed list is no pictures
+    assert [(p["item"], p["asset"]) for p in f["places"]] == [("b2", "Library/images/b.png"), ("b3", "Library/images/c.png")]
+
+
 def test_face_clear_allows_a_full_screen_cutaway_but_not_a_card_on_the_eyes():
     over_eyes = shown(1, (300, 300, 780, 700))
     cutaway = shown(2, (0, 0, 1080, 1920), hiding=True, treatment="full-frame", t0=6.0, t1=7.0)
