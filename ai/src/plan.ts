@@ -6,8 +6,8 @@
 import * as path from 'node:path';
 import { AIError } from './types';
 import {
-  Broll, Project, Transcript, TREATMENTS, Treatment, WordAnchor, anchorProblem, anchorText, findPhrase,
-  hasTranscript, loadProject, loadTranscript, saveProject, wordIndex,
+  Broll, Project, Transcript, TREATMENTS, Treatment, WordAnchor, anchorProblem, anchorText, anchorWords, findPhrase,
+  hasTranscript, keptWords, loadProject, loadTranscript, saveProject, wordIndex,
 } from './project';
 
 export const PLAN_SOURCES = ['own-file', 'library', 'fetched', 'card', 'animation', 'screen-recording'] as const;
@@ -90,11 +90,6 @@ export function emptyPlan(): Plan {
 /** The script as it will be shot: the rewrite, else the draft. */
 export function scriptText(plan: Plan): string {
   return plan.script.rewrite ?? plan.script.draft ?? '';
-}
-
-/** True when the plan has a b-roll table: then every b-roll in the video is one of its rows. */
-export function plansBroll(p: Project): boolean {
-  return !!p.plan?.broll.length;
 }
 
 // ---------------------------------------------------------------- validation
@@ -262,8 +257,9 @@ export const DEFAULT_TREATMENT: Record<PlanSource, Treatment> = {
   'own-file': 'card-above-head', library: 'card-above-head', fetched: 'card-above-head',
   'screen-recording': 'phone-card', card: 'text-pop', animation: 'animation',
 };
-/** Why an approved row is not in the video yet. */
-export interface Unbuilt { id: string; why: 'needs-file' | 'words-not-found' }
+/** Why a building row is not in the video yet: its words are not in the transcript, or the cut leaves them out,
+ * or it has no file. */
+export interface Unbuilt { id: string; why: 'needs-file' | 'words-not-found' | 'words-cut' }
 
 export function builds(plan: Plan, r: PlanRow): boolean {
   return r.status === 'approved' || (r.status === 'proposed' && plan.buildProposed === true);
@@ -276,26 +272,32 @@ function freeBrollId(p: Project, wanted: string): string {
   return id;
 }
 
+const sameAnchor = (a: WordAnchor | undefined, b: WordAnchor | undefined) => a?.from === b?.from && a?.to === b?.to;
+
 /**
  * Brings project.broll in step with the plan, in place: each row that builds (approved, or proposed with
- * `buildProposed`) and has its words and file is one b-roll item; a row that does not build has none.
- * Rows anchor on transcript word ids the first time their words are found (kept words first). Items no
- * row built are left alone. Deterministic: rows in order, items updated in place or appended. Returns the
- * building rows still missing something.
+ * `buildProposed`) and has its words in the cut and its file is one b-roll item; a row that does not build has
+ * none. A row anchors on transcript word ids where its words are found, in the take the cut keeps: when the cut
+ * leaves its anchor out, the same words are looked for again in the kept ones. Items no row built are left
+ * alone. Deterministic: rows in order, items updated in place or appended. Returns the building rows still
+ * missing something.
  */
 export function syncPlan(p: Project, t: Transcript): Unbuilt[] {
   const plan = p.plan;
   if (!plan) return [];
   const idx = wordIndex(t);
+  // before there is a cut every word counts
+  const kept = p.cut.keep.length ? new Set(keptWords(t, p.cut.keep).map((w) => w.id)) : null;
+  const inCut = (a: WordAnchor) => !kept || anchorWords(t, a).every((w) => kept.has(w.id));
   const unbuilt: Unbuilt[] = [];
   for (const r of plan.broll) {
     if (r.anchor && anchorProblem(idx, r.anchor)) delete r.anchor;
-    if (!r.anchor && r.words) {
+    if (r.words && (!r.anchor || !inCut(r.anchor))) {
       const found = findPhrase(t, r.words, p.cut.keep);
-      if (found) r.anchor = found;
+      if (found && (!r.anchor || inCut(found))) r.anchor = found;
     }
     const at = r.broll ? p.broll.findIndex((b) => b.id === r.broll) : -1;
-    const why: Unbuilt['why'] | null = !r.anchor ? 'words-not-found'
+    const why: Unbuilt['why'] | null = !r.anchor ? 'words-not-found' : !inCut(r.anchor) ? 'words-cut'
       : r.source !== 'card' && !r.asset ? 'needs-file' : null;
     if (!builds(plan, r) || why) {
       if (at >= 0) p.broll.splice(at, 1);
@@ -307,7 +309,7 @@ export function syncPlan(p: Project, t: Transcript): Unbuilt[] {
     const treatment = r.treatment ?? DEFAULT_TREATMENT[r.source];
     const asset = r.asset ?? null;
     if (at >= 0) {
-      // the look a note gave it (side, tilt, size) stays; a card always says the row's visual
+      // the look an edit gave it (side, tilt, size) stays; a card always says the row's visual
       const cur = p.broll[at];
       p.broll[at] = { ...cur, anchor, treatment, asset, ...(r.source === 'card' ? { params: { ...cur.params, text: r.visual } } : {}) };
     } else {
@@ -328,39 +330,91 @@ function sourceOf(b: Broll): PlanSource {
   return 'fetched';
 }
 
+const cardText = (b: Broll): string | null => (typeof b.params?.text === 'string' ? b.params.text : null);
+
+/** A row for a b-roll item no row built, approved: it is in the video. */
+function rowFor(plan: Plan, t: Transcript, b: Broll, note: string): PlanRow {
+  return {
+    id: nextRowId(plan), words: anchorText(t, b.anchor), anchor: { from: b.anchor.from, to: b.anchor.to },
+    visual: cardText(b) ?? (b.asset ? path.basename(b.asset) : b.treatment), source: sourceOf(b), asset: b.asset ?? null,
+    treatment: b.treatment as Treatment, status: 'approved', note, broll: b.id,
+  };
+}
+
 /**
- * After a b-roll tool changed project.broll in a planned project (a note), the plan follows it, in place, so
- * nothing is in the video without a row: an item no row built becomes an approved row (the note asked for
- * it), a row's item that changed carries its words, file and look back to the row, and a row whose item was
- * removed is rejected.
+ * What the AI may not change, outside a note, on a row the creator approved or rejected: what it shows (words,
+ * visual, source) always, and its anchor and file once it has them. Only what it still needs, and its look.
  */
-export function followBroll(p: Project, t: Transcript, note = 'Added for a note.'): void {
+function aiMayNot(r: PlanRow, next: { words?: string; visual?: string; source?: PlanSource; anchor?: WordAnchor; asset?: string | null }): string[] {
+  if (r.status === 'proposed') return [];
+  const out: string[] = [];
+  for (const k of ['words', 'visual', 'source'] as const) if (next[k] !== undefined && next[k] !== r[k]) out.push(k === 'visual' && r.source === 'card' ? 'text' : k);
+  if (next.anchor !== undefined && r.anchor && !sameAnchor(next.anchor, r.anchor)) out.push('anchor');
+  if (next.asset !== undefined && r.asset && next.asset !== r.asset) out.push('file');
+  return out;
+}
+
+/** Who made an edit of the b-roll or the cut: the AI on its own (a first edit), the AI for a note, or the creator by hand. */
+export type EditBy = 'ai' | 'note' | 'hand';
+const ADDED: Record<Exclude<EditBy, 'ai'>, string> = { note: 'Added for a note.', hand: 'Added by hand.' };
+
+/**
+ * After an edit changed project.broll in a planned project, the plan follows it, in place, so the rows stay the
+ * one source of the b-roll and a later sync never undoes the edit. For a note or a hand edit: an item no row
+ * built becomes an approved row, a row's item that changed carries its words, file, look and card text back
+ * to the row, and a row whose item was removed is rejected, so it never comes back. The AI on its own may only
+ * change the look of what the creator decided, and of its own proposed rows anything: anything else throws
+ * PlanError and changes nothing.
+ */
+export function followBroll(p: Project, t: Transcript, by: EditBy): void {
   const plan = p.plan;
   if (!plan?.broll.length) return;
   const items = new Map(p.broll.map((b) => [b.id, b]));
-  const linked = new Set<string>();
+  const linked = new Set(plan.broll.map((r) => r.broll).filter((x): x is string => !!x));
+  if (by === 'ai') {
+    const refused: string[] = [];
+    for (const r of plan.broll) {
+      if (!r.broll) continue;
+      const b = items.get(r.broll);
+      if (!b) { if (r.status !== 'proposed') refused.push(`${r.id} cannot be removed`); continue; }
+      const fixed = aiMayNot(r, { anchor: b.anchor, asset: b.asset ?? null, ...(r.source === 'card' && cardText(b) !== null ? { visual: cardText(b)! } : {}) });
+      if (fixed.length) refused.push(`${r.id}'s ${fixed.join(' and ')} cannot change`);
+    }
+    if (p.broll.some((b) => !linked.has(b.id))) refused.push('b-roll cannot be added outside the plan (propose a row with update_plan_row)');
+    if (refused.length) throw new PlanError(`The creator approved this video's b-roll plan: ${refused.join('; ')}. Only a placed row's look (side, tilt, size, treatment) may change.`);
+  }
   for (const r of plan.broll) {
     if (!r.broll) continue;
     const b = items.get(r.broll);
     if (!b) { r.status = 'rejected'; delete r.broll; continue; }
-    linked.add(b.id);
-    if (!r.anchor || r.anchor.from !== b.anchor.from || r.anchor.to !== b.anchor.to) {
+    if (!sameAnchor(r.anchor, b.anchor)) {
       r.anchor = { from: b.anchor.from, to: b.anchor.to };
       r.words = anchorText(t, b.anchor);
     }
     if ((b.asset ?? null) !== (r.asset ?? null)) r.asset = b.asset ?? null;
     if (b.treatment !== (r.treatment ?? DEFAULT_TREATMENT[r.source])) r.treatment = b.treatment as Treatment;
-    if (r.source === 'card' && typeof b.params?.text === 'string') r.visual = b.params.text;
+    if (r.source === 'card' && cardText(b) !== null) r.visual = cardText(b)!;
   }
-  for (const b of p.broll) {
-    if (linked.has(b.id)) continue;
-    const text = typeof b.params?.text === 'string' ? b.params.text : null;
-    plan.broll.push({
-      id: nextRowId(plan), words: anchorText(t, b.anchor), anchor: { from: b.anchor.from, to: b.anchor.to },
-      visual: text ?? (b.asset ? path.basename(b.asset) : b.treatment), source: sourceOf(b), asset: b.asset ?? null,
-      treatment: b.treatment as Treatment, status: 'approved', note, broll: b.id,
-    });
-  }
+  if (by === 'ai') return;
+  for (const b of p.broll) if (!linked.has(b.id)) plan.broll.push(rowFor(plan, t, b, ADDED[by]));
+}
+
+/**
+ * The one way an edit of the b-roll or the cut reaches the plan, in the same write: the rows follow the edit
+ * (followBroll), then the b-roll is rebuilt from the rows (syncPlan), which keeps the edit and moves rows to
+ * the take the cut keeps. Returns the building rows not in the video.
+ */
+export function afterEdit(p: Project, t: Transcript, by: EditBy): Unbuilt[] {
+  followBroll(p, t, by);
+  return syncPlan(p, t);
+}
+
+/** When the AI first proposes a plan for a video that already has b-roll: each item becomes an approved row. */
+export function adoptBroll(p: Project, t: Transcript): void {
+  const plan = p.plan;
+  if (!plan) return;
+  const linked = new Set(plan.broll.map((r) => r.broll));
+  for (const b of p.broll) if (!linked.has(b.id)) plan.broll.push(rowFor(plan, t, b, 'In the video already.'));
 }
 
 // ---------------------------------------------------------------- the AI's changes
@@ -403,10 +457,8 @@ export function aiUpdateRow(p: Project, id: string | null, f: RowFields): string
     return fresh.id;
   }
   const r = row(plan, id);
-  if (r.status !== 'proposed') {
-    const fixed = (['words', 'visual', 'source'] as const).filter((k) => f[k] !== undefined && f[k] !== r[k]);
-    if (fixed.length) throw new PlanError(`${id} is ${r.status} by the creator as it is: its ${fixed.join(' and ')} cannot change. Give only anchor, asset, treatment or note.`);
-  }
+  const fixed = aiMayNot(r, f);
+  if (fixed.length) throw new PlanError(`${id} is ${r.status} by the creator as it is: its ${fixed.join(' and ')} cannot change. Give only what it still needs (anchor, asset), its treatment or a note.`);
   setFields(r, f);
   p.plan = checked(plan);
   return id;
@@ -448,7 +500,7 @@ export async function prepareFirstEdit(projectDir: string): Promise<PlannedEdit>
   const notFound = unbuilt.filter((u) => u.why === 'words-not-found').map((u) => row(plan, u.id));
   const waiting = plan.broll.filter((r) => !builds(plan, r) && r.status === 'proposed').length;
   lines.unshift(
-    '- The b-roll is planned: only the plan\'s rows go in the video, so skip the hook-title and b-roll steps above except for what is listed here. add_broll and remove_broll are not available; update_broll may still adjust how a placed row looks (a hook-title card: params.style "label").',
+    '- The b-roll is planned: only the plan\'s rows go in the video, so skip the hook-title and b-roll steps above except for what is listed here. add_broll and remove_broll are not available; update_broll may still adjust how a placed row looks (a hook-title card: params.style "label"), never its words, file or text. When the cut keeps another take of a row\'s words, the row moves to it; a row whose words are cut out leaves the video.',
     placed.length ? `- Already placed: ${placed.map(quoteRow).join('; ')}.` : '- No row is placed yet.',
   );
   if (needFile.length) lines.push(`- Rows that still need a file: ${needFile.map(quoteRow).join('; ')}. For each, find a file that shows exactly that (list_library, search_images then fetch_image, capture_website, or make_animation for an animation row), then update_plan_row with its id and the asset. If nothing fits, leave it and say so.`);
@@ -629,4 +681,14 @@ export async function updatePlan(projectDir: string, change: PlanChange, now = n
   const { project, unbuilt } = applyPlanChange(p, t, change, now);
   await saveProject(projectDir, project);
   return { plan: project.plan!, unbuilt };
+}
+
+/** A hand edit (the Pictures tab, the timeline) of the b-roll or the cut: the plan's rows follow it in the same
+ * write (afterEdit). Returns the project to save. Without a transcript there is no b-roll to follow. */
+export async function followHandEdit(projectDir: string, p: Project): Promise<Project> {
+  if (!p.plan?.broll.length || !hasTranscript(projectDir, p)) return p;
+  const project = structuredClone(p);
+  afterEdit(project, await loadTranscript(projectDir, project), 'hand');
+  project.plan = checked(project.plan!);
+  return project;
 }

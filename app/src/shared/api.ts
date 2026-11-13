@@ -1,7 +1,7 @@
 // Types shared by the main process, the preload bridge and the renderer.
 // Keep this file free of Node and DOM imports.
 import type { ChatAction } from './notes'
-import type { PlanBeat, PlanView, RowFields, RowStatus } from './plan'
+import type { Plan, PlanBeat, PlanView, RowFields, RowStatus } from './plan'
 export type { ChatAction } from './notes'
 
 export type AppCommand = { type: 'new-video' | 'settings' | 'export' | 'library' } | { type: 'open-reel'; slug: string }
@@ -154,6 +154,8 @@ export interface ProjectJson {
   cover?: { atSourceTime: number; source: string; text: string | null }
   post?: { caption: string; hashtags: string[]; keywords: string[] }
   notes?: { version: number; text: string; applied: string[]; at: string }[]
+  /** the Plan document (shared/plan.ts): its rows are the b-roll, so an edit of `broll` or `cut` goes through it */
+  plan?: Plan
   [k: string]: unknown
 }
 

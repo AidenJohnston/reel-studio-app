@@ -27,24 +27,31 @@ it. Without a `plan` nothing changes: the first edit picks its own b-roll as it 
 2. **The creator decides** row by row (`plan:change`): approve, reject, edit, add. A row the creator adds is approved.
 3. **The first edit builds only approved rows.** Before the AI starts, each approved row with its words and its file
    becomes a b-roll item (id = the row id). The AI cannot add or remove b-roll in that edit (`add_broll` and
-   `remove_broll` are not offered, and refuse if called). It can only supply what an approved row still needs (the
-   words in the transcript, the file, the look) with `update_plan_row`, and propose a missing visual as a new row,
-   which waits for approval.
+   `remove_broll` are not offered, and refuse if called). On a row the creator approved or rejected it may change
+   only the look (side, tilt, size, treatment), never its words, file or card text, with `update_broll` or
+   anything else. With `update_plan_row` it supplies what an approved row still needs (its words in the transcript,
+   its file), and it proposes a missing visual as a new row, which waits for approval. When its cut keeps another
+   take of a row's words, the row and its picture move to that take.
    - **Nothing approved yet:** the edit gets no b-roll, and its reply asks the creator to approve the rows they want.
      That is the default because it is the one that never puts an unapproved picture in a video. `buildProposed: true`
      is the explicit setting that builds proposed rows as if approved.
 4. **Later, approving a row** that has its words and file puts it in the video's b-roll at once (the next render
    shows it). Rejecting a row takes its b-roll out.
-5. **Notes keep the rows in step.** A note may still add, change or remove b-roll, but in a planned project nothing
-   is in the video without a row: a picture a note adds becomes an approved row ("Added for a note."), a changed one
-   carries its words, file and look back to its row, and a removed one makes its row rejected.
+5. **Notes and hand edits keep the rows in step.** The rows are the one source of the b-roll. A note, or a hand edit
+   (the Pictures tab, "Edit it myself", the timeline: `projects:update`), may add, move, change or remove b-roll, and
+   the rows follow it in the same write: an added picture becomes an approved row ("Added for a note." or "Added by
+   hand."), a changed one carries its words, file, look and card text back to its row, and a removed one makes its
+   row rejected, so no later sync brings it back. Every such edit goes through `afterEdit` (plan.ts): the rows
+   follow the edit, then the b-roll is rebuilt from the rows.
 
 ## Determinism
 
 The plan reaches the video only through project.json `broll`, which `syncPlan` derives from the rows: in row order,
-an item updated in place or appended, anchors found by the same phrase search every time (kept words first). The
-same project.json and transcript always give the same b-roll, and syncing again changes nothing
-(`ai/test/plan.test.ts`). The engine's edit signature counts only `plan.script` (captions may follow the locked
+an item updated in place or appended, anchors found by the same phrase search every time (kept words first). A row
+whose anchor the cut leaves out is looked for again in the kept words; one whose words are not kept at all is not
+built and is reported (`words-cut`) until they are. The same project.json and transcript always give the same
+b-roll, and syncing again changes nothing (`ai/test/plan.test.ts`). A re-transcription moves the rows' anchors with
+the b-roll's (engine `remap_anchors`). The engine's edit signature counts only `plan.script` (captions may follow the locked
 script), so approving a row that builds nothing does not make a new version.
 
 ## Markdown
@@ -95,7 +102,8 @@ id get the next free ones. A locked script cannot be changed by an import.
 ## Surface
 
 - App IPC (`app/src/main/plan-ipc.ts`; `window.api.plan` in the page): `plan:get`, `plan:change` (script, lock, row
-  status, row, details, import; run as a held edit), `plan:markdown`, `plan:propose`.
+  status, row, details, import; run as a held edit), `plan:markdown`, `plan:propose`. `projects:update` (every hand
+  edit of `broll` or `cut`) passes the edited project through `plan.followHandEdit` before saving it.
 - AI tools, offered only to the runs that name them: `propose_plan` (the proposal run) and `update_plan_row`
   (the planned first edit).
 

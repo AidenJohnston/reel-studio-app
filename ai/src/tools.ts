@@ -10,7 +10,7 @@ import {
   nextBrollId, normalizeKeep, saveProject, validateProject, wordIndex, anchorProblem,
 } from './project';
 import { S, JSONSchema, validate, fillNulls } from './schema';
-import { PLAN_SOURCES, PlanError, aiUpdateRow, followBroll, plansBroll, proposeRows, syncPlan, MAX_HOLD } from './plan';
+import { PLAN_SOURCES, PlanError, adoptBroll, afterEdit, aiUpdateRow, proposeRows, syncPlan, MAX_HOLD } from './plan';
 import { ANIMATION_IDS, ENGINE_FED, TimedWord, alignWordTimes, animationParamsSchema, cleanParams, itemTimes, phraseTime, templateSpec } from './animations';
 import { chooseReadableLayout, minHeroPx } from './readable';
 import { AgentEvent, AIError, EngineHost, ImagePart, ToolSchema } from './types';
@@ -93,8 +93,10 @@ async function mutate(ctx: ToolContext, field: string, fn: (p: Project, t: Trans
   const { p, t } = await load(ctx);
   const problem = fn(p, t);
   if (typeof problem === 'string') throw new ToolInputError(problem);
-  // in a planned project nothing is in the video without a row of the plan
-  if (field === 'broll') followBroll(p, t);
+  // in a planned project the rows are the b-roll: they follow this edit in the same write (plan.ts afterEdit)
+  if (field === 'broll' || field === 'cut') {
+    try { afterEdit(p, t, ctx.userNote === undefined ? 'ai' : 'note'); } catch (e) { if (e instanceof PlanError) throw new ToolInputError(e.message); throw e; }
+  }
   const problems = validateProject(p, t);
   if (problems.length) throw new ToolInputError(problems.join('; '));
   await saveProject(ctx.projectDir, p, ctx.note?.file);
@@ -116,11 +118,6 @@ async function mutatePlan(ctx: ToolContext, fn: (p: Project, t: Transcript) => v
     brollChanged = JSON.stringify(p.broll) !== before;
   });
   if (brollChanged) { ctx.state.changed.add('broll'); ctx.state.dirty!.add('broll'); }
-}
-
-/** Outside a note, a planned project's b-roll comes only from its rows (update_plan_row). */
-function refuseUnplanned(ctx: ToolContext, p: Project): void {
-  if (plansBroll(p) && ctx.userNote === undefined) throw new ToolInputError('This video\'s b-roll is planned: only its rows go in. Use update_plan_row.');
 }
 
 function checkAnchor(t: Transcript, a: WordAnchor, what = 'anchor'): void {
@@ -1005,8 +1002,7 @@ const tools: ToolDef[] = [
       params: S.opt(PARAMS),
     }),
     async run(ctx, args) {
-      const { p: cur, t } = await load(ctx);
-      refuseUnplanned(ctx, cur);
+      const { t } = await load(ctx);
       checkAnchor(t, args.anchor);
       let asset: string | null = null;
       if (args.asset) {
@@ -1104,8 +1100,7 @@ const tools: ToolDef[] = [
     description: 'Remove a b-roll by id.',
     parameters: S.obj({ id: S.str() }),
     async run(ctx, args) {
-      const { p: cur, t } = await load(ctx);
-      refuseUnplanned(ctx, cur);
+      const { t } = await load(ctx);
       let says = '';
       await mutate(ctx, 'broll', (p) => {
         const b = p.broll.find((x) => x.id === args.id);
@@ -1435,7 +1430,7 @@ const tools: ToolDef[] = [
       });
       await mutatePlan(ctx, (p, tt) => {
         proposeRows(p, { beats: args.beats.map(stripNulls), broll: rows, music: args.music ?? undefined, cover: args.cover ?? undefined });
-        followBroll(p, tt, 'In the video already.');
+        adoptBroll(p, tt);
       });
       const plan = ctx.project!.plan!;
       return {

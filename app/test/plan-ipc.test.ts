@@ -1,10 +1,11 @@
 // The plan:* channels (main/plan-ipc.ts): a change is a held edit of that project, a proposal is a 'plan' job that
-// joins the job's ownership, a change the page should never send is refused, and an AI package without the
-// Plan document says so plainly.
+// joins the job's ownership, a change the page should never send is refused, an AI package without the Plan
+// document says so plainly, and a hand edit of a planned project's pictures or cut goes through the plan.
 import { describe, expect, it } from 'vitest'
-import { registerPlanIpc, type PlanIpcDeps } from '../src/main/plan-ipc'
+import { registerPlanIpc, withPlanFollowing, type PlanIpcDeps } from '../src/main/plan-ipc'
 import type { AI } from '../src/main/ai-types'
 import type { JobFn } from '../src/main/jobs'
+import type { ProjectJson } from '../src/shared/api'
 import type { PlanChange, PlanView } from '../src/shared/plan'
 
 const VIEW: PlanView = { plan: { script: { draft: null, rewrite: null, locked: false }, beats: [], broll: [] }, unbuilt: [] }
@@ -46,6 +47,7 @@ describe('plan IPC', () => {
       plan: {
         get: async () => VIEW,
         markdown: async () => '# Plan',
+        followHandEdit: async (_dir, p) => p,
         change: async (dir, c) => {
           log.push('change')
           changes.push([dir, c])
@@ -60,7 +62,7 @@ describe('plan IPC', () => {
   })
 
   it('refuses a change of a kind it does not know, without holding the project', async () => {
-    const { invoke, log } = setup({ plan: { get: async () => VIEW, markdown: async () => '', change: async () => VIEW } })
+    const { invoke, log } = setup({ plan: { get: async () => VIEW, markdown: async () => '', change: async () => VIEW, followHandEdit: async (_dir, p) => p } })
     await expect(invoke('plan:change', 'bread', { kind: 'delete-everything' })).rejects.toMatchObject({ code: 'BAD_PLAN_CHANGE' })
     await expect(invoke('plan:change', 'bread', null)).rejects.toMatchObject({ code: 'BAD_PLAN_CHANGE' })
     expect(log).toEqual([])
@@ -86,5 +88,33 @@ describe('plan IPC', () => {
     await expect(invoke('plan:get', 'bread')).rejects.toMatchObject({ code: 'PLAN_UNAVAILABLE' })
     await expect(invoke('plan:propose', 'bread')).rejects.toMatchObject({ code: 'PLAN_UNAVAILABLE' })
     expect(jobs).toEqual([])
+  })
+})
+
+describe('a hand edit of a planned project (projects:update)', () => {
+  const project = (rows: number): ProjectJson => ({
+    schemaVersion: 1, id: 'x', title: 'Bread', slug: 'bread', createdAt: '', updatedAt: '', version: 1, broll: [],
+    plan: { ...VIEW.plan!, broll: Array.from({ length: rows }, (_, i) => ({ id: `p${i + 1}`, visual: 'v', source: 'card' as const, status: 'approved' as const })) }
+  })
+  const followed: [string, ProjectJson][] = []
+  const ai = { plan: { get: async () => VIEW, markdown: async () => '', change: async () => VIEW,
+    followHandEdit: async (dir: string, p: ProjectJson) => { followed.push([dir, p]); return { ...p, title: 'followed' } } } } as unknown as AI
+
+  it('lets the plan follow an edit of the pictures or the cut, before it is saved', async () => {
+    followed.length = 0
+    expect((await withPlanFollowing(ai, '/projects/bread', project(1), ['broll'])).title).toBe('followed')
+    expect((await withPlanFollowing(ai, '/projects/bread', project(1), ['cut'])).title).toBe('followed')
+    expect(followed.map(([d]) => d)).toEqual(['/projects/bread', '/projects/bread'])
+  })
+
+  it('leaves other edits, and projects without b-roll rows, as they are', async () => {
+    followed.length = 0
+    expect((await withPlanFollowing(ai, '/p', project(1), ['title', 'music'])).title).toBe('Bread')
+    expect((await withPlanFollowing(ai, '/p', project(0), ['broll'])).title).toBe('Bread')
+    expect(followed).toEqual([])
+  })
+
+  it('refuses rather than let the rows and the pictures drift apart when the AI package cannot follow the plan', async () => {
+    await expect(withPlanFollowing({} as AI, '/p', project(1), ['broll'])).rejects.toMatchObject({ code: 'PLAN_UNAVAILABLE' })
   })
 })

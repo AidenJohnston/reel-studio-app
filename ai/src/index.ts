@@ -8,7 +8,7 @@ import {
 } from './types';
 import { Prompts, defaultPromptsDir } from './prompts';
 import { StyleStore } from './style';
-import { writeFileAtomic } from './project';
+import { Project, writeFileAtomic } from './project';
 import { AnthropicProvider, DEFAULT_CLAUDE_MODEL } from './providers/anthropic';
 import { ClaudeCliProvider, CodexCliProvider } from './providers/cli';
 import { ReplayProvider } from './providers/replay';
@@ -18,7 +18,7 @@ import { detectLocalClaude, DetectOptions, LocalClaude } from './providers/local
 import { detectCodex, CodexDetectOptions, LocalCodex } from './providers/localCodex';
 import * as editor from './editor';
 import { refuseIfOpen } from './owner';
-import { Plan, PlanChange, PlanView, emptyPlan, readPlan, toMarkdown, updatePlan } from './plan';
+import { Plan, PlanChange, PlanView, emptyPlan, followHandEdit, readPlan, toMarkdown, updatePlan } from './plan';
 import { proposePlan } from './planAgent';
 
 export * from './types';
@@ -41,9 +41,9 @@ export type { LocalCodex, CodexState } from './providers/localCodex';
 export { cliEnv } from './safety';
 export { pickTakes, formatForPicking, deterministicEdit } from './editor';
 export {
-  PLAN_SOURCES, ROW_STATUSES, PlanError, applyPlanChange, changePlan, emptyPlan, fromMarkdown, planProblems, readPlan, syncPlan, toMarkdown, updatePlan,
+  PLAN_SOURCES, ROW_STATUSES, PlanError, afterEdit, applyPlanChange, changePlan, emptyPlan, followHandEdit, fromMarkdown, planProblems, readPlan, syncPlan, toMarkdown, updatePlan,
 } from './plan';
-export type { Plan, PlanBeat, PlanChange, PlanRow, PlanScript, PlanSource, PlanView, RowStatus, Unbuilt } from './plan';
+export type { EditBy, Plan, PlanBeat, PlanChange, PlanRow, PlanScript, PlanSource, PlanView, RowStatus, Unbuilt } from './plan';
 export type { ApplyNoteOptions } from './editor';
 export { ATTACHMENT_REF, MAX_ATTACHMENTS_PER_NOTE, readAttachment, listAttachments, validateAttachments, placedAssets } from './attachments';
 export type { AttachmentInfo } from './attachments';
@@ -541,6 +541,8 @@ export function createAI(opts: CreateAIOptions) {
         const { plan } = await readPlan(projectDir);
         return toMarkdown(plan ?? emptyPlan());
       },
+      /** A hand edit of the b-roll or the cut, before main saves it: the plan's rows follow it in the same write. */
+      followHandEdit: (projectDir: string, project: Project): Promise<Project> => followHandEdit(projectDir, project),
     },
     async styleRules() { return style.list(); },
     async removeStyleRule(id: string) { return style.remove(id); },

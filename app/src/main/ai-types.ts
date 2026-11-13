@@ -1,6 +1,6 @@
 // Mirror of the @reelstudio/ai interface (docs/architecture.md section 8). The real package is loaded at
 // runtime when it exists; until then ai-mock.ts implements the same shape.
-import type { JobUpdate } from '../shared/api'
+import type { JobUpdate, ProjectJson } from '../shared/api'
 import type { Plan, PlanChange, PlanView } from '../shared/plan'
 
 /** What @reelstudio/ai emits: the job contract minus `heard` (main adds that one itself). */
@@ -113,6 +113,8 @@ export interface AI {
     get(projectDir: string): Promise<PlanView>
     change(projectDir: string, change: PlanChange): Promise<PlanView>
     markdown(projectDir: string): Promise<string>
+    /** A hand edit of the b-roll or the cut, before main saves it: returns the project with the plan's rows following it. */
+    followHandEdit(projectDir: string, project: ProjectJson): Promise<ProjectJson>
   }
   styleRules(): Promise<{ id: string; text: string; createdAt: string }[]>
   removeStyleRule(id: string): Promise<void>

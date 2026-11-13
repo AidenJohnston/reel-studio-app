@@ -6,12 +6,12 @@ import type { LookupFn } from './safety';
 import { Prompts } from './prompts';
 import { StyleStore } from './style';
 import { RenderInfo, ToolContext, ToolState, captionWithCredits, captionsForProofread, doRender, unsureWords, executeTool, load, newToolState, resolveAsset, cleanSummary, renderEvent, plannedEditTools } from './tools';
-import { prepareFirstEdit } from './plan';
+import { prepareFirstEdit, syncPlan } from './plan';
 import { planFastNote } from './fastnote';
 import { AttachmentInfo, attachmentStills, attachmentsSection, earlierUnplaced, placedAssets, validateAttachments } from './attachments';
 import {
   Analysis, NoteEntry, PROJECT_FILE, Project, withDefaults, Transcript, WordAnchor, hasTranscript, loadProject, normalizeAnalysis, normalizeKeep, saveProject,
-  snapshotVersion, LIBRARY_FOLDERS, anchorText, writeFileAtomic, keptWords, projectBytes, versionDir,
+  snapshotVersion, LIBRARY_FOLDERS, anchorText, writeFileAtomic, keptWords, projectBytes, versionDir, loadTranscript,
 } from './project';
 import { extractJson } from './providers/cli';
 import * as fsp from 'node:fs/promises';
@@ -535,6 +535,8 @@ export async function deterministicEdit(deps: EditorDeps, projectDir: string, on
   await deps.host.runEngine('autocut', engineArgs(projectDir), progress(onEvent), signal);
   changed.push('cut');
   const p: Project = await loadProject(projectDir);
+  // the engine's cut keeps one take: the plan's rows move to it (plan.ts syncPlan)
+  if (p.plan) syncPlan(p, await loadTranscript(projectDir, p));
   if (!p.captions.enabled) { p.captions.enabled = true; changed.push('captions'); }
   let song: string | null = p.music.track;
   if (!song) {

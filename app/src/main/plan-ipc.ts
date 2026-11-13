@@ -5,6 +5,7 @@
 import type { IpcMainInvokeEvent } from 'electron'
 import type { AI } from './ai-types'
 import type { JobFn } from './jobs'
+import type { ProjectJson } from '../shared/api'
 import { PLAN_CHANGE_KINDS, type PlanChange } from '../shared/plan'
 
 type Handle = (channel: string, fn: (e: IpcMainInvokeEvent, ...args: any[]) => unknown) => void
@@ -23,6 +24,17 @@ function checkedChange(c: unknown): PlanChange {
   const kind = (c as { kind?: unknown } | null)?.kind
   if (!PLAN_CHANGE_KINDS.includes(kind as PlanChange['kind'])) throw { code: 'BAD_PLAN_CHANGE', userMessage: 'Something went wrong saving your plan. Try again.' }
   return c as PlanChange
+}
+
+/**
+ * A hand edit (projects:update from the Pictures tab, "Edit it myself", the timeline) of `broll` or `cut`, before
+ * it is saved: in a planned project the plan's rows follow it in the same write, so an added picture is an
+ * approved row, a moved one keeps its new words, and a removed one is rejected and never comes back.
+ */
+export async function withPlanFollowing(ai: AI, projectDir: string, p: ProjectJson, changed: string[]): Promise<ProjectJson> {
+  if (!p.plan?.broll.length || !changed.some((k) => k === 'broll' || k === 'cut')) return p
+  if (!ai.plan) throw NOT_AVAILABLE
+  return ai.plan.followHandEdit(projectDir, p)
 }
 
 export function registerPlanIpc(d: PlanIpcDeps): void {

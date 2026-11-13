@@ -253,6 +253,11 @@ def _anchor_slots(proj: dict):
         if isinstance(b.get("anchor"), dict):
             yield b["anchor"], "from", "from"
             yield b["anchor"], "to", "to"
+    # the plan's rows move with the b-roll they built (ai/src/plan.ts), or a re-sync would move it back
+    for r in ((proj.get("plan") or {}).get("broll") or []):
+        if isinstance(r.get("anchor"), dict):
+            yield r["anchor"], "from", "from"
+            yield r["anchor"], "to", "to"
     for z in proj.get("zooms") or []:
         if isinstance(z.get("anchor"), dict):
             yield z["anchor"], "from", "from"

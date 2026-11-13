@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest';
 import * as fsp from 'node:fs/promises';
 import * as path from 'node:path';
 import { createAI, Plan, PlanRow, Project, changePlan, emptyPlan, fromMarkdown, planProblems, syncPlan, toMarkdown, updatePlan, withDefaults } from '../src';
-import { followBroll, proposeRows } from '../src/plan';
+import { aiUpdateRow, followBroll, followHandEdit, proposeRows, readPlan } from '../src/plan';
 import { PLAN_TOOLS } from '../src/planAgent';
 import { FakeHost, ScriptedModel, call, firstVersion, makeProject, makeTranscript, SAMPLE_LINES, tinyPng, tmpDir } from './helpers';
 
@@ -126,11 +126,56 @@ describe('the plan builds b-roll deterministically', () => {
     const p = project(withRows([HOURS], { buildProposed: true }));
     syncPlan(p, t);
     p.broll[0] = { ...p.broll[0], anchor: { from: 'w48', to: 'w52' }, params: { text: '18 HRS', tilt: 3 } };
-    followBroll(p, t);
+    followBroll(p, t, 'note');
     expect(p.plan!.broll[0]).toEqual({ ...HOURS, words: 'eighteen hours in the fridge', anchor: { from: 'w48', to: 'w52' }, visual: '18 HRS', broll: 'p2' });
     const once = JSON.stringify(p);
     syncPlan(p, t);
     expect(JSON.stringify(p)).toBe(once);
+  });
+
+  it('a row follows the take the cut keeps, and one whose words are cut out leaves the video', () => {
+    // "baking bread" is said in the hook and again in its retake (w7-w8, w23-w24)
+    const bread = row({ id: 'p1', words: 'baking bread', visual: 'BREAD', status: 'approved' });
+    const retake = row({ id: 'p2', words: 'try that again', visual: 'AGAIN', status: 'approved' });
+    const p = project(withRows([bread, retake]));
+    p.cut.keep = [];
+    syncPlan(p, t);
+    expect(p.broll.map((b) => [b.id, b.anchor])).toEqual([['p1', { from: 'w7', to: 'w8' }], ['p2', { from: 'w13', to: 'w15' }]]);
+    p.cut.keep = [{ from: 'w16', to: 'w56' }];
+    expect(syncPlan(p, t)).toEqual([{ id: 'p2', why: 'words-cut' }]);
+    expect(p.broll.map((b) => [b.id, b.anchor])).toEqual([['p1', { from: 'w23', to: 'w24' }]]);
+    expect(p.plan!.broll.map((r) => [r.anchor, r.broll ?? null])).toEqual([[{ from: 'w23', to: 'w24' }, 'p1'], [{ from: 'w13', to: 'w15' }, null]]);
+    // the take comes back into the cut: so does the picture
+    p.cut.keep = [{ from: 'w9', to: 'w56' }];
+    expect(syncPlan(p, t)).toEqual([]);
+    expect(p.broll.map((b) => b.id)).toEqual(['p1', 'p2']);
+  });
+
+  it('outside a note the AI can change only the look of what the creator decided', () => {
+    const p = project(withRows([{ ...HOURS, status: 'approved' }, row({ id: 'p3', words: 'a brick', visual: 'a brick', source: 'fetched', status: 'approved' })]));
+    syncPlan(p, t);
+    const before = JSON.stringify(p);
+    const refused = (change: (q: Project) => void) => {
+      const q = structuredClone(p);
+      change(q);
+      expect(() => followBroll(q, t, 'ai')).toThrow(/approved this video's b-roll plan/);
+    };
+    refused((q) => { q.broll[0].params = { ...q.broll[0].params, text: '20 HOURS' }; });
+    refused((q) => { q.broll[0].anchor = { from: 'w48', to: 'w52' }; });
+    refused((q) => { q.broll = []; });
+    refused((q) => { q.broll.push({ id: 'b9', anchor: { from: 'w40', to: 'w41' }, treatment: 'text-pop', asset: null, params: { text: 'BRICK' } }); });
+    const q = structuredClone(p);
+    q.broll[0].params = { ...q.broll[0].params, tilt: 3 };
+    q.broll[0].treatment = 'side-card';
+    followBroll(q, t, 'ai');
+    expect(q.plan!.broll[0]).toMatchObject({ visual: '18 HOURS', treatment: 'side-card' });
+    expect(JSON.stringify(p)).toBe(before);
+    // update_plan_row: an approved row's anchor and file are fixed once it has them; missing ones may be filled
+    expect(() => aiUpdateRow(structuredClone(p), 'p2', { anchor: { from: 'w48', to: 'w52' } })).toThrow(/anchor cannot change/);
+    const r = structuredClone(p);
+    aiUpdateRow(r, 'p3', { asset: 'work/assets/brick.png' });
+    expect(r.plan!.broll[1].asset).toBe('work/assets/brick.png');
+    expect(() => aiUpdateRow(r, 'p3', { asset: 'work/assets/other.png' })).toThrow(/file cannot change/);
   });
 
   it('a new proposal without beats keeps the beats there are', () => {
@@ -190,7 +235,7 @@ describe('the flow', () => {
     expect(task).toContain('## The creator\'s plan');
     expect(task).toContain('p1 "fancy flour"');
     expect(toolResult(model, 'add_broll')).toMatchObject({ isError: true });
-    expect(toolResult(model, 'add_broll').content).toContain('planned');
+    expect(toolResult(model, 'add_broll').content).toContain('cannot be added outside the plan');
     const p = await read();
     expect(p.broll.map((b) => [b.id, b.asset])).toEqual([['p1', 'Library/Images/flour.png']]);
     expect(r.summary).toBe('Done.');
@@ -221,6 +266,82 @@ describe('the flow', () => {
     const p = await read();
     expect(p.broll).toEqual([{ id: 'p1', anchor: { from: 'w40', to: 'w41' }, leadIn: 0.13, treatment: 'card-above-head', asset: 'work/assets/brick.png', params: {} }]);
     expect(p.plan!.broll[0]).toMatchObject({ visual: 'a brick-hard loaf', status: 'approved', broll: 'p1' });
+  });
+
+  it('in the first edit update_broll may change an approved card\'s look, never its text or its words', async () => {
+    const { dir, host, settingsDir, read } = await planned(withRows([{ ...HOURS, status: 'approved' }]));
+    const nulls = { anchor: null, treatment: null, asset: null };
+    const params = { text: null, tilt: null, scale: null, side: null, style: null };
+    const model = new ScriptedModel([
+      { toolCalls: [KEEP, call('update_broll', { ...nulls, id: 'p2', params: { ...params, text: '20 HOURS' } })] },
+      { toolCalls: [call('update_broll', { ...nulls, id: 'p2', anchor: { from: 'w48', to: 'w52' }, params: null })] },
+      { toolCalls: [call('update_broll', { ...nulls, id: 'p2', params: { ...params, tilt: 3 } })] },
+      { toolCalls: [finish()] },
+    ]);
+    await createAI({ host, settingsDir, providerOverride: model }).firstEdit(dir, () => undefined);
+    const results = toolResults(model, 'update_broll');
+    expect(results.map((r) => r.isError)).toEqual([true, true, false]);
+    expect(results[0].content).toContain('text cannot change');
+    expect(results[1].content).toContain('anchor cannot change');
+    const p = await read();
+    expect(p.broll).toEqual([{ id: 'p2', anchor: { from: 'w48', to: 'w49' }, leadIn: 0.13, treatment: 'text-pop', asset: null, params: { text: '18 HOURS', tilt: 3 } }]);
+    expect(p.plan!.broll[0]).toMatchObject({ visual: '18 HOURS', words: 'eighteen hours', status: 'approved' });
+  });
+
+  it('the first edit\'s cut moves a row to the take it keeps', async () => {
+    const { dir, host, settingsDir, read } = await planned(withRows([row({ id: 'p1', words: 'baking bread', visual: 'BREAD', status: 'approved' })]));
+    const model = new ScriptedModel([{ toolCalls: [KEEP] }, { toolCalls: [finish()] }]);
+    await createAI({ host, settingsDir, providerOverride: model }).firstEdit(dir, () => undefined);
+    const p = await read();
+    expect(p.broll.map((b) => [b.id, b.anchor])).toEqual([['p1', { from: 'w23', to: 'w24' }]]);
+    expect(p.plan!.broll[0].anchor).toEqual({ from: 'w23', to: 'w24' });
+  });
+
+  it('the no-AI edit\'s cut moves a row to the take it keeps too', async () => {
+    const { dir, root, settingsDir, read } = await planned(withRows([row({ id: 'p1', words: 'baking bread', visual: 'BREAD', status: 'approved' })]));
+    // the engine's autocut keeps the retake of the hook
+    const host = new (class extends FakeHost {
+      override async runEngine(command: string, args: string[], onProgress?: any): Promise<any> {
+        if (command !== 'autocut') return super.runEngine(command, args, onProgress);
+        const p = await read();
+        await fsp.writeFile(path.join(dir, 'project.json'), JSON.stringify({ ...p, cut: { ...p.cut, keep: [{ from: 'w16', to: 'w56' }] } }, null, 2));
+        return {};
+      }
+    })(root);
+    await createAI({ host, settingsDir }).firstEdit(dir, () => undefined);
+    const p = await read();
+    expect(p.broll.map((b) => [b.id, b.anchor])).toEqual([['p1', { from: 'w23', to: 'w24' }]]);
+    expect(p.plan!.broll[0].anchor).toEqual({ from: 'w23', to: 'w24' });
+  });
+
+  it('a hand edit goes into the plan: a removed picture stays removed, an added or moved one is a row', async () => {
+    const { dir, read } = await planned(withRows([{ ...FLOUR }, { ...HOURS, status: 'approved' }]));
+    await updatePlan(dir, { kind: 'details', music: 'warm' });
+    const save = async (edit: (p: Project) => void) => {
+      const p = await read();
+      edit(p);
+      await fsp.writeFile(path.join(dir, 'project.json'), JSON.stringify(await followHandEdit(dir, p), null, 2));
+    };
+    // the Pictures tab: take the flour out, move the card, add a word card
+    await save((p) => {
+      p.broll = p.broll.filter((b) => b.id !== 'p1');
+      p.broll[0].anchor = { from: 'w48', to: 'w52' };
+      p.broll.push({ id: 'b1', anchor: { from: 'w40', to: 'w41' }, leadIn: 0.13, treatment: 'text-pop', asset: null, params: { text: 'BRICK' } });
+    });
+    const expected = [
+      ['p1', 'rejected', null, undefined],
+      ['p2', 'approved', 'p2', { from: 'w48', to: 'w52' }],
+      ['p3', 'approved', 'b1', { from: 'w40', to: 'w41' }],
+    ];
+    const rows = (p: Project) => p.plan!.broll.map((r) => [r.id, r.status, r.broll ?? null, r.status === 'rejected' ? undefined : r.anchor]);
+    expect(rows(await read())).toEqual(expected);
+    expect((await read()).plan!.broll[2]).toMatchObject({ words: 'a brick', visual: 'BRICK', source: 'card', note: 'Added by hand.' });
+    // an unrelated plan change, and a re-sync, keep every one of those edits
+    await updatePlan(dir, { kind: 'details', music: 'something else' });
+    const p = await read();
+    expect(rows(p)).toEqual(expected);
+    expect(p.broll.map((b) => [b.id, b.anchor])).toEqual([['p2', { from: 'w48', to: 'w52' }], ['b1', { from: 'w40', to: 'w41' }]]);
+    expect((await readPlan(dir)).unbuilt).toEqual([]);
   });
 
   it('a project without a plan gets the first edit it always had', async () => {

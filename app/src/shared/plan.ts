@@ -45,8 +45,8 @@ export interface Plan {
 }
 export interface PlanView {
   plan: Plan | null
-  /** approved rows not in the video yet, and why */
-  unbuilt: { id: string; why: 'needs-file' | 'words-not-found' }[]
+  /** approved rows not in the video yet, and why: their words are not in the transcript or are cut out, or they have no file */
+  unbuilt: { id: string; why: 'needs-file' | 'words-not-found' | 'words-cut' }[]
 }
 
 export type RowFields = Partial<Pick<PlanRow, 'words' | 'anchor' | 'visual' | 'source' | 'asset' | 'treatment' | 'hold' | 'note'>>

@@ -56,7 +56,7 @@ import { versionMessage } from '../shared/describe'
 import { mergeSourcesPatch } from '../shared/mirror'
 import { displayPath } from '../shared/display-path'
 import { registerPhoneIpc, stopPhoneShare } from './phone-ipc'
-import { registerPlanIpc } from './plan-ipc'
+import { registerPlanIpc, withPlanFollowing } from './plan-ipc'
 import { forChat, pickClipboardType, registerAttachmentIpc } from './attachments'
 import { takeNote } from './note-intake'
 import { createUpdateService } from './update-check'
@@ -591,7 +591,7 @@ function registerIpc(): void {
   })
   handle('projects:update', (_e, slug: string, patch: Partial<ProjectJson>) =>
     jobs.hold(slug, async () => {
-      const p = await readProject(slug)
+      let p = await readProject(slug)
       for (const k of Object.keys(patch ?? {}) as (keyof ProjectJson)[]) {
         // the "Flip picture" toggle: only each take's mirror flag, never its path or size
         if (k === 'sources') {
@@ -601,6 +601,8 @@ function registerIpc(): void {
         if (!EDITABLE.includes(k)) continue
         ;(p as any)[k] = (patch as any)[k]
       }
+      // a planned project's rows follow a hand edit of its pictures or cut, in this same write (main/plan-ipc.ts)
+      p = await withPlanFollowing(ai, projectDir(slug), p, Object.keys(patch ?? {}))
       await writeProject(slug, p)
       return detail(slug)
     })

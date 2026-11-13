@@ -1,5 +1,6 @@
 """project.json `plan` (docs/plan.md): the schema accepts the Plan document the AI layer writes and refuses a
-malformed one, and only the plan's script counts as a change to the video."""
+malformed one, only the plan's script counts as a change to the video, and a re-transcription moves the plan's
+rows with the b-roll they built."""
 import copy
 
 from reelengine import project
@@ -73,3 +74,14 @@ def test_only_the_plan_script_changes_the_edit_signature():
     script_changed = copy.deepcopy(base)
     script_changed["plan"]["script"]["rewrite"] = "My own words."
     assert project.edit_signature(script_changed) != sig
+
+
+def test_a_retranscription_moves_plan_rows_with_their_broll():
+    old = [{"id": f"w{i}", "source": "s1", "s": i * 0.5, "e": i * 0.5 + 0.4, "w": "x"} for i in range(6)]
+    new = [dict(w) for w in old if w["id"] != "w3"] + [{"id": "w9", "source": "s1", "s": 1.52, "e": 1.9, "w": "y"}]
+    new.sort(key=lambda w: w["s"])
+    proj = with_plan(**{"broll.0.anchor": {"from": "w3", "to": "w4"}})
+    proj["broll"] = [{"id": "p1", "anchor": {"from": "w3", "to": "w4"}, "treatment": "card-above-head"}]
+    project.remap_anchors(proj, old, new)
+    assert proj["broll"][0]["anchor"] == {"from": "w9", "to": "w4"}
+    assert proj["plan"]["broll"][0]["anchor"] == proj["broll"][0]["anchor"]
