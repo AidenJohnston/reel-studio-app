@@ -114,6 +114,22 @@ function settle(rules: StyleRule[], r: StyleRule): StyleRule[] {
   else delete r.paused
   return rules
 }
+/** As fromConsent in ai/src/style.ts: a file saved before answers were numbered keeps a rule's questions in
+ * `consent`; each becomes a numbered Yes answer, and a paused rule's pause stands. */
+function fromConsent(s: StyleData): void {
+  for (const r of s.rules as (StyleRule & { consent?: any })[]) {
+    const c = r.consent
+    delete r.consent
+    if (!c || typeof c.proposal !== 'string' || r.answers) continue
+    const at = typeof c.at === 'string' ? c.at : r.createdAt
+    const asked: string[] = [c.proposal, ...(Array.isArray(c.also) ? c.also.filter((x: unknown): x is string => typeof x === 'string') : [])]
+    r.answers = Object.fromEntries(asked.map((q) => [q, { yes: true, seq: nextSeq(s), at }]))
+    if (r.paused) {
+      r.held = 'paused'
+      r.seq = nextSeq(s)
+    } else r.held = 'gone'
+  }
+}
 /** A direct change (My style, or a note): the rule holds the state it has, and older answers stop counting. */
 function changedDirectly(s: StyleData, r: StyleRule): void {
   r.seq = nextSeq(s)
@@ -139,7 +155,10 @@ export const createMockAI: CreateAI = ({ host }) => {
     } catch {
       /* damaged: kept below */
     }
-    if (Array.isArray(j?.rules)) return j
+    if (Array.isArray(j?.rules)) {
+      fromConsent(j)
+      return j
+    }
     const fresh: StyleData = { version: 1, rules: [], damaged: basename(await keepDamagedCopy(styleFile())) }
     await writeJson(styleFile(), fresh)
     return fresh

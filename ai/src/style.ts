@@ -66,6 +66,21 @@ function settle(rules: StyleRule[], r: StyleRule): StyleRule[] {
   if (state === 'paused') r.paused = true; else delete r.paused;
   return rules;
 }
+/** A file saved before answers were numbered keeps a rule's questions in `consent` ({proposal, at, also?}): the
+ * question whose Yes saved the rule, then later Yes answers. Each becomes a numbered Yes answer, in that order. A
+ * rule still on is held only by them (the Yes saved it), so a No can still take it back out; a paused one was paused
+ * after them, in My style, so the pause stands. Removing the rule then forgets them like any other answers. */
+function fromConsent(data: StyleFile): void {
+  for (const r of data.rules as (StyleRule & { consent?: any })[]) {
+    const c = r.consent;
+    delete r.consent;
+    if (!c || typeof c.proposal !== 'string' || r.answers) continue;
+    const at = typeof c.at === 'string' ? c.at : r.createdAt;
+    const asked = [c.proposal, ...(Array.isArray(c.also) ? c.also.filter((x: unknown): x is string => typeof x === 'string') : [])];
+    r.answers = Object.fromEntries(asked.map((q) => [q, { yes: true, seq: next(data), at }]));
+    if (r.paused) { r.held = 'paused'; r.seq = next(data); } else r.held = 'gone';
+  }
+}
 /** A direct change to `r` (My style, or a note): it now holds the state it has, and older answers stop counting. */
 function changedDirectly(data: StyleFile, r: StyleRule): number {
   r.seq = next(data);
@@ -151,7 +166,9 @@ export class StyleStore {
     }
     const { forgotten: listed, ...rest } = data;
     const forgotten = Array.isArray(listed) ? listed.filter((x: unknown) => typeof x === 'string') : [];
-    return { ...rest, version: 1, rules: data.rules.filter((r: any) => r && typeof r.text === 'string'), ...(forgotten.length ? { forgotten } : {}) };
+    const out: StyleFile = { ...rest, version: 1, rules: data.rules.filter((r: any) => r && typeof r.text === 'string'), ...(forgotten.length ? { forgotten } : {}) };
+    fromConsent(out);
+    return out;
   }
 
   private async write(data: StyleFile): Promise<void> {

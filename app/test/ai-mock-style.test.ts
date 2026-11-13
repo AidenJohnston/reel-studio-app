@@ -97,6 +97,27 @@ describe('My style in the stand-in AI', () => {
     else expect(rules).toEqual([])
   })
 
+  it('a file saved before answers were numbered (#153 kept them in `consent`) is read in the new form', async () => {
+    const { ai, root } = standIn()
+    const at = '2026-11-10T00:00:00.000Z'
+    writeFileSync(join(root, 'My style.json'), JSON.stringify({ version: 1, rules: [{ id: 'r1', text: 'Use lowercase captions.', createdAt: at,
+      payload: { kind: 'caption-case', case: 'lower' }, consent: { proposal: 'q1', at, also: ['q2'] } }] }))
+    await ai.declineStyleProposal!({ ...proposal, id: 'q1' })
+    expect((await ai.styleRules())[0].paused).toBeUndefined()
+    await ai.declineStyleProposal!({ ...proposal, id: 'q2' })
+    expect(await ai.styleRules()).toEqual([])
+  })
+
+  it('removing a rule from such a file forgets its old questions', async () => {
+    const { ai, root } = standIn()
+    const at = '2026-11-10T00:00:00.000Z'
+    writeFileSync(join(root, 'My style.json'), JSON.stringify({ version: 1, rules: [{ id: 'r1', text: 'Use lowercase captions.', createdAt: at,
+      payload: { kind: 'caption-case', case: 'lower' }, paused: true, consent: { proposal: 'q1', at, also: ['q2'] } }] }))
+    await ai.removeStyleRule('r1')
+    expect(await ai.approveStyleProposal!({ ...proposal, id: 'q2' })).toEqual({ status: 'forgotten' })
+    expect(await ai.styleRules()).toEqual([])
+  })
+
   it('the typed rule edited to the same words, typed loosely, stays a rule the app applies', async () => {
     const { ai } = standIn()
     await ai.approveStyleProposal!(proposal)

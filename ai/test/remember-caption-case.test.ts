@@ -347,3 +347,40 @@ describe('the order of answers (My style, last answer wins)', () => {
     else expect(rules).toEqual([]);
   });
 });
+
+describe('a My style file saved before answers were numbered (#153 kept them in `consent`)', () => {
+  const at = '2026-11-10T00:00:00.000Z';
+  const saved = (rule: Record<string, unknown>) => JSON.stringify({ version: 1, rules: [{
+    id: 'r1', text: 'Use lowercase captions.', createdAt: at, payload: { kind: 'caption-case', case: 'lower' },
+    source: { project: 'p1', title: 'Baking bread', version: 2 }, consent: { proposal: 'q1', at, also: ['q2'] }, ...rule }] });
+  const q = (id: string) => ({ ...captionCaseProposal({ project: 'p1', title: 'Baking bread', version: 2 }), id });
+
+  it('No to every question whose Yes saved the rule takes it back out, and one Yes left keeps it on', async () => {
+    const { ai, styleFile } = await setup();
+    await fsp.writeFile(styleFile, saved({}));
+    await ai().declineStyleProposal(q('q1'));
+    expect(await ai().styleRules()).toEqual([expect.objectContaining({ id: 'r1' })]);
+    expect((await ai().styleRules())[0].paused).toBeUndefined();
+    await ai().declineStyleProposal(q('q2'));
+    expect(await ai().styleRules()).toEqual([]);
+  });
+
+  it('a rule paused since stays paused, and removing it forgets its old questions', async () => {
+    const { ai, styleFile } = await setup();
+    await fsp.writeFile(styleFile, saved({ paused: true }));
+    await ai().declineStyleProposal(q('q1'));
+    expect(await ai().styleRules()).toEqual([expect.objectContaining({ id: 'r1', paused: true })]);
+    await ai().removeStyleRule('r1');
+    expect(await ai().approveStyleProposal(q('q2'))).toEqual({ status: 'forgotten' });
+    expect(await ai().styleRules()).toEqual([]);
+  });
+
+  it('is written back in the new form, without `consent`', async () => {
+    const { ai, styleFile } = await setup();
+    await fsp.writeFile(styleFile, saved({}));
+    await ai().addStyleRule('Keep music quieter under talking.');
+    const [rule] = JSON.parse(await fsp.readFile(styleFile, 'utf8')).rules;
+    expect(rule.consent).toBeUndefined();
+    expect(rule.answers).toEqual({ q1: { yes: true, seq: 1, at }, q2: { yes: true, seq: 2, at } });
+  });
+});
