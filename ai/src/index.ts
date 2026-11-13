@@ -114,6 +114,9 @@ export interface CreateAIOptions {
   providerOverride?: ModelProvider;
   finalRender?: boolean;
   maxSteps?: number;
+  /** draw stills of what each reply of the AI changed, then the 2 s around them, then the draft, while it works
+   * (moments.ts); each arrives as a `moment` event. The app turns it on. */
+  moments?: boolean;
 }
 
 // claude-cli = the person's own Claude Code app, offered to everyone. It is never called "Claude Code" on its own:
@@ -166,7 +169,7 @@ export function createAI(opts: CreateAIOptions) {
     locks.set(key, tail);
     return run;
   }
-  const deps = (): editor.EditorDeps => ({ host: opts.host, prompts, style, fetchImpl: opts.fetch, finalRender: opts.finalRender, maxSteps: opts.maxSteps, tokenBudget: opts.tokenBudget, lookup: opts.lookup });
+  const deps = (): editor.EditorDeps => ({ host: opts.host, prompts, style, fetchImpl: opts.fetch, finalRender: opts.finalRender, maxSteps: opts.maxSteps, tokenBudget: opts.tokenBudget, lookup: opts.lookup, moments: opts.moments });
 
   async function settings(): Promise<AISettings> {
     try { return JSON.parse(await fsp.readFile(settingsFile, 'utf8')); } catch { return {}; }

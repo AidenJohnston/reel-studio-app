@@ -11,6 +11,10 @@ export type AgentEvent =
   | { type: 'render'; version: number; draft: boolean; /** the no-AI first look, shown while the AI edits */ firstLook?: boolean; file?: string }
   /** a note's reply, known before the render that makes it true (fast notes): the app shows it at once */
   | { type: 'reply'; text: string }
+  /** a picture of what the AI just changed, drawn before the draft (moments.ts): a still at output second
+   * `t`, or the 2 s window [from, to] around it. `file` is the engine's file, overwritten by later runs. */
+  | { type: 'moment'; kind: 'still'; t: number; file: string }
+  | { type: 'moment'; kind: 'window'; from: number; to: number; file: string }
 
 export interface AgentResult {
   summary: string; version: number;
@@ -22,7 +26,11 @@ export interface AgentResult {
 }
 export interface ScriptResult { hook: string; script: string; onScreenText: string[] }
 
-export interface EngineProgress { stage: string; pct: number; message: string }
+/** Something finished that the app can show now, carried on an engine progress line (`moments` command). */
+export type MomentReady =
+  | { kind: 'still'; t: number; file: string }
+  | { kind: 'window'; from: number; to: number; file: string };
+export interface EngineProgress { stage: string; pct: number; message: string; ready?: MomentReady }
 export interface EngineHost {
   runEngine(command: string, args: string[], onProgress?: (p: EngineProgress) => void, signal?: AbortSignal): Promise<any>;
   renderAnimation(template: string, params: Record<string, unknown>, outPath: string): Promise<string>;

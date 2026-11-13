@@ -20,6 +20,8 @@ export interface ProgressDeps {
 
 /** Turns a finished render into a playable URL of a copy that is safe to play (index.ts). */
 export type ToVideo = (slug: string, e: Extract<JobUpdate, { type: 'render' }>) => Promise<string | null>
+/** Turns a moment's file into a playable URL of a copy the next moments run cannot overwrite (index.ts). */
+export type ToMoment = (slug: string, e: Extract<JobUpdate, { type: 'moment' }>) => Promise<string | null>
 export type JobFn = (emit: Emit, signal: AbortSignal) => Promise<{ summary: string; version?: number; quiet?: boolean }>
 
 interface Running {
@@ -36,7 +38,7 @@ interface Running {
   done: Promise<void>
 }
 
-export function createJobManager(broadcast: (e: JobEvent) => void, log: (s: string) => void, progress?: ProgressDeps, toVideo?: ToVideo) {
+export function createJobManager(broadcast: (e: JobEvent) => void, log: (s: string) => void, progress?: ProgressDeps, toVideo?: ToVideo, toMoment?: ToMoment) {
   const jobs = new Map<string, Running>()
 
   function forSlug(slug: string): Running | undefined {
@@ -56,6 +58,9 @@ export function createJobManager(broadcast: (e: JobEvent) => void, log: (s: stri
     let mediaSec = 0
     let mediaAsked = false
     const pending: Promise<void>[] = []
+    // moments are copied one after another, so they arrive in the order they were made, and never after the job ended
+    let moments: Promise<void> = Promise.resolve()
+    let ended = false
     const tracker = new ProgressTracker(kind, 0, history)
     let phase: Phase | undefined
     // `thinking` is state, not a one-off: the once-a-second repeats keep saying it until the AI answers
@@ -114,7 +119,17 @@ export function createJobManager(broadcast: (e: JobEvent) => void, log: (s: stri
             const video = slug && toVideo ? toVideo(slug, r).catch(() => null) : Promise.resolve(null)
             pending.push(video.then((v) => send({ jobId: id, slug, type: 'render', version: r.version, draft: r.draft, firstLook: !!r.firstLook, video: v })))
           } else if (e.type === 'reply') send({ jobId: id, slug, type: 'reply', text: e.text })
-          else send({ jobId: id, slug, type: 'heard', words: e.words })
+          else if (e.type === 'moment') {
+            if (!slug || !toMoment) return
+            const m = e
+            moments = moments.then(() => toMoment(slug, m).catch(() => null)).then((url) => {
+              if (!url || ended) return
+              send(m.kind === 'still'
+                ? { jobId: id, slug, type: 'moment', kind: 'still', t: m.t, image: url }
+                : { jobId: id, slug, type: 'moment', kind: 'window', from: m.from, to: m.to, video: url })
+            })
+            pending.push(moments)
+          } else send({ jobId: id, slug, type: 'heard', words: e.words })
         }, abort.signal)
         await Promise.all(pending) // a render's event before `done`, never after
         if (progress && mediaSec > 0) {
@@ -131,6 +146,7 @@ export function createJobManager(broadcast: (e: JobEvent) => void, log: (s: stri
         log(`[job ${kind}] done in ${Math.round((Date.now() - t0) / 1000)} s`)
         send({ jobId: id, slug, type: 'done', summary: res.summary, version: res.version })
       } catch (e) {
+        ended = true
         const err = toUserError(e)
         const cancelled = err.code === 'CANCELLED' || abort.signal.aborted
         if (!cancelled) log(`[job ${kind}] ${err.code}: ${err.message ?? ''}`)

@@ -53,6 +53,20 @@ describe('parseEngineLine', () => {
     const e = parseEngineLine('{"event":"error","code":"BOOM"}')
     expect(e?.event === 'error' && e.userMessage.length > 20).toBe(true)
   })
+  it('hands over a still or window the engine made, and drops a malformed one', () => {
+    const line = (ready: unknown) => JSON.stringify({ event: 'progress', stage: 'moments', pct: 40, message: "Here's your change", ready })
+    expect(parseEngineLine(line({ kind: 'still', t: 2.4, file: 'C:\\p\\still_000072.png' }))).toEqual({
+      event: 'progress', stage: 'moments', pct: 40, message: "Here's your change", ready: { kind: 'still', t: 2.4, file: 'C:\\p\\still_000072.png' }
+    })
+    expect(parseEngineLine(line({ kind: 'window', from: 1.4, to: 3.4, file: '/p/window_1.4-3.4.mp4' }))).toMatchObject({
+      ready: { kind: 'window', from: 1.4, to: 3.4, file: '/p/window_1.4-3.4.mp4' }
+    })
+    for (const bad of [{ kind: 'still', file: '/p/x.png' }, { kind: 'window', from: 1, file: '/p/x.mp4' }, { kind: 'gif', t: 1, file: '/p/x' }, { kind: 'still', t: 1, file: '' }, 'still']) {
+      const ev = parseEngineLine(line(bad))
+      expect(ev).toMatchObject({ event: 'progress', pct: 40 })
+      expect(ev).not.toHaveProperty('ready')
+    }
+  })
   it('ignores non-protocol output', () => {
     expect(parseEngineLine('Downloading...')).toBeNull()
     expect(parseEngineLine('[1,2]')).toBeNull()
@@ -180,7 +194,11 @@ describe('engine runner (against the stand-in engine)', () => {
       grandchild = Number(pr.message)
       ac.abort()
     }, ac.signal)
-    await expect(p).rejects.toMatchObject({ code: 'CANCELLED' })
+    const err: any = await p.catch((e) => e)
+    expect(err).toMatchObject({ code: 'CANCELLED' })
+    // a caller that renders again right away (moments) waits for this: the stopped engine is gone by then
+    await err.exited
+    expect(isAlive(pid)).toBe(false)
     expect(Date.now() - t0).toBeLessThan(15000)
     expect(pid).toBeGreaterThan(0)
     expect(grandchild).toBeGreaterThan(0)
