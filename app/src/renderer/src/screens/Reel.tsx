@@ -14,6 +14,8 @@ import { ShowMeHow, type Tab } from './ShowMeHow'
 import { AttachmentChips, AttachmentThumb, useNoteAttachments } from '../components/NoteAttachments'
 import { PostButton } from '../components/PostButton'
 import { PostSheet } from '../components/PostSheet'
+import { VersionSwitch } from '../components/VersionSwitch'
+import { versionChanges } from '../../../shared/versions'
 
 const ACTION_TAB: Partial<Record<ChatAction, Tab>> = {
   'open-cut': 'cut',
@@ -44,6 +46,12 @@ export function Reel({ slug, go, fresh }: { slug: string; go: Go; fresh?: boolea
   const notify = useNotify()
   const [d, setD] = useState<ProjectDetail | null>(null)
   const [selected, setSelected] = useState<number | null>(null)
+  // A version picked in the switcher plays with sound. The player clears the request once it has
+  // started, so a later remount (a preview that ends, a stopped render) never replays it.
+  const [playRequest, setPlayRequest] = useState<{ n: number; ask: number } | null>(null)
+  const playAsks = useRef(0)
+  // Arriving from Working, the latest version plays muted, until the person picks a version.
+  const [freshPlay, setFreshPlay] = useState(!!fresh)
   const [note, setNote] = useState('')
   // The running job (a note, a re-render), folded from its events (shared/live.ts). null = nothing running.
   const [job, setJob] = useState<LiveState | null>(null)
@@ -58,7 +66,9 @@ export function Reel({ slug, go, fresh }: { slug: string; go: Go; fresh?: boolea
   const [bannerHidden, setBannerHidden] = useState(() => localStorage.getItem(bannerKey(slug)) === '1')
   const [igOverlay, setIgOverlay] = useState(() => localStorage.getItem(IG_KEY) === '1')
   const [holding, setHolding] = useState(false)
-  const [duration, setDuration] = useState<number | null>(null)
+  // Each video's length as the player reported it, by its URL. "What I did" describes the newest version, so
+  // while an older one plays it shows the newest version's length, not the length of the video on screen.
+  const [lengths, setLengths] = useState<Record<string, number>>({})
   // Live subtitle preview from the drawer's Subtitles tab.
   const [preview, setPreview] = useState<{ look: SubtitleLook; text: string; at: number } | null>(null)
   const chatEnd = useRef<HTMLDivElement>(null)
@@ -120,6 +130,8 @@ export function Reel({ slug, go, fresh }: { slug: string; go: Go; fresh?: boolea
   const version = d ? (d.versions.find((v) => v.n === selected) ?? d.versions[d.versions.length - 1]) : undefined
   // while a change is being made: its quick preview (a draft render), until the new version is done
   const changePreview = job?.preview?.video ?? null
+  const latestN = d?.versions[d.versions.length - 1]?.n
+  const older = version && version.n !== latestN ? version : null
 
   // Each switch puts up a new <video>, and its poster fetches and decodes the full-size cover again unless the image
   // is still loaded in the page. Holding every cover shown here keeps it loaded, so switching back does neither.
@@ -156,9 +168,6 @@ export function Reel({ slug, go, fresh }: { slug: string; go: Go; fresh?: boolea
 
   const aiOff = !provider || !provider.connected || provider.id === 'none'
   const connect = () => go({ name: 'connect', back: { name: 'reel', slug } })
-  // What each version changed, from the chat ("Version 3: bigger yellow subtitles."), for the button tooltips.
-  const versionNote = new Map<number, string>()
-  for (const m of d.chat) if (m.from === 'editor' && m.version) versionNote.set(m.version, m.text)
 
   const send = async () => {
     const text = note.trim()
@@ -267,9 +276,11 @@ export function Reel({ slug, go, fresh }: { slug: string; go: Go; fresh?: boolea
         .then(() => load())
         .catch((e) => notify(userMessage(e), 'error'))
     } else if (a === 'connect') connect()
-    else setDrawer(ACTION_TAB[a] ?? 'cut')
+    else onLatest(() => setDrawer(ACTION_TAB[a] ?? 'cut'))()
   }
 
+  const lengthOf = older ? d.versions[d.versions.length - 1]?.video : (changePreview ?? version?.video)
+  const cardLength = lengthOf ? lengths[lengthOf] : undefined
   // "What I did": what is done (filled checks, each with a way to change it), then optional extras
   // as plain links. No empty circles that read like unfinished homework (critique 1.3).
   const doneLine = (c: ChecklistItem): { label: string; detail?: string; act?: { label: string; run: () => void; testid: string } } => {
@@ -277,7 +288,7 @@ export function Reel({ slug, go, fresh }: { slug: string; go: Go; fresh?: boolea
       case 'cut':
         return {
           label: d.aiEdited ? 'Kept your best takes' : 'Cut the pauses and repeated starts',
-          detail: duration ? `${clock(duration)} long` : undefined,
+          detail: cardLength ? `${clock(cardLength)} long` : undefined,
           act: { label: 'See what I cut', run: () => setDrawer('cut'), testid: 'check-cut' }
         }
       case 'captions':
@@ -303,10 +314,17 @@ export function Reel({ slug, go, fresh }: { slug: string; go: Go; fresh?: boolea
     if (c.key === 'captions') extras.push({ key: c.key, label: 'Turn subtitles on', run: () => setDrawer('captions'), testid: 'change-captions' })
   }
   const done = d.checklist.filter((c) => c.done)
+  // The Change links, extras, "Edit it myself" and a reply's buttons change the newest version: with an
+  // older one on screen, switch to the newest first, so what changes is what is shown.
+  const onLatest = (run: () => void) => () => {
+    if (older && latestN !== undefined) setSelected(latestN)
+    run()
+  }
 
   const many = d.versions.length > 1
   const exportLabel = version && many ? `Export Version ${version.n}` : 'Export for Instagram'
-  const postAbout = { slug, version: version?.n ?? 0, title: d.title, durationSec: duration } // for "Post to YouTube"
+  // for "Post to YouTube": the length of the version it posts, the one on screen
+  const postAbout = { slug, version: version?.n ?? 0, title: d.title, durationSec: (version && lengths[version.video]) || null }
 
   return (
     <div className={`page reel-page${fresh ? ' fresh' : ''}`}>
@@ -316,7 +334,9 @@ export function Reel({ slug, go, fresh }: { slug: string; go: Go; fresh?: boolea
             key={changePreview ?? version?.video ?? 'none'}
             src={changePreview ?? version?.video ?? null}
             poster={version?.cover}
-            autoPlayMuted={!!changePreview || (fresh && version?.n === d.versions[d.versions.length - 1]?.n)}
+            autoPlayMuted={!!changePreview || (freshPlay && version?.n === d.versions[d.versions.length - 1]?.n)}
+            playRequest={!changePreview && playRequest?.n === version?.n ? playRequest?.ask : undefined}
+            onPlayRequestHandled={() => setPlayRequest(null)}
             subtitle={drawer === 'captions' && preview ? preview : null}
             still={drawer === 'captions' && preview && d.sourceVideo ? `${d.sourceVideo}#t=${preview.at.toFixed(2)}` : null}
             stillMirrored={d.project.sources?.[0]?.mirror === true}
@@ -324,7 +344,10 @@ export function Reel({ slug, go, fresh }: { slug: string; go: Go; fresh?: boolea
             caption={d.project.post?.caption}
             original={d.sourceVideo}
             holdingOriginal={holding}
-            onDuration={setDuration}
+            onDuration={(s) => {
+              const src = changePreview ?? version?.video
+              if (src) setLengths((m) => ({ ...m, [src]: s }))
+            }}
             dragFile={version && !version.draft ? version.videoPath : null}
           />
           {changePreview && (
@@ -358,22 +381,6 @@ export function Reel({ slug, go, fresh }: { slug: string; go: Go; fresh?: boolea
               </button>
             )}
           </div>
-          {d.versions.length > 0 && (
-            <div className="chips" data-testid="versions" role="radiogroup" aria-label="Versions">
-              {d.versions.map((v) => (
-                <button
-                  key={v.n}
-                  role="radio"
-                  aria-checked={v.n === version?.n}
-                  className={`chip${v.n === version?.n ? ' active' : ''}`}
-                  onClick={() => setSelected(v.n)}
-                  title={versionNote.get(v.n)}
-                >
-                  {v.n === 0 ? 'Preview' : `Version ${v.n}`}
-                </button>
-              ))}
-            </div>
-          )}
           {job && (
             // Right above the greyed buttons, so the reason is next to what it explains (grandma3 #10).
             <p className="export-wait" data-testid="export-wait">
@@ -396,12 +403,12 @@ export function Reel({ slug, go, fresh }: { slug: string; go: Go; fresh?: boolea
                 <Icon name="back" size={16} /> My videos
               </button>
               {renaming === null ? (
-                <div className="row" style={{ gap: 4 }}>
+                <div className="row" style={{ gap: 2 }}>
                   <h1 className="reel-title" title="Click to rename" onClick={() => setRenaming(d.title)} data-testid="title">
                     {d.title}
                   </h1>
-                  <button className="btn small ghost" onClick={() => setRenaming(d.title)} data-testid="rename">
-                    Rename
+                  <button className="icon-btn rename-btn" onClick={() => setRenaming(d.title)} aria-label="Rename" title="Rename" data-testid="rename">
+                    <Icon name="pencil" size={16} />
                   </button>
                 </div>
               ) : (
@@ -420,8 +427,21 @@ export function Reel({ slug, go, fresh }: { slug: string; go: Go; fresh?: boolea
                   data-testid="title-input"
                 />
               )}
+              {version && (
+                <VersionSwitch
+                  versions={d.versions}
+                  shown={version.n}
+                  changes={versionChanges(d.versions, d.versionsMade)}
+                  onPick={(n) => {
+                    setSelected(n)
+                    setFreshPlay(false)
+                    // while a change's preview is showing, the picked version is not on screen to play
+                    if (!changePreview) setPlayRequest({ n, ask: ++playAsks.current })
+                  }}
+                />
+              )}
             </div>
-            <button className="btn" onClick={() => setDrawer('cut')} data-testid="edit-myself">
+            <button className="btn" onClick={onLatest(() => setDrawer('cut'))} data-testid="edit-myself">
               <Icon name="pencil" size={16} /> Edit it myself
             </button>
             <MoreMenu
@@ -455,7 +475,11 @@ export function Reel({ slug, go, fresh }: { slug: string; go: Go; fresh?: boolea
           )}
 
           <section className="panel did" data-testid="what-i-did">
-            <h2>What I did</h2>
+            <h2>
+              What I did
+              {/* the list describes the project as it is now, which is the newest version */}
+              {older && <span className="muted-sm did-scope"> In the latest version</span>}
+            </h2>
             <ul className="checklist two">
               {done.map((c) => {
                 const line = doneLine(c)
@@ -466,7 +490,7 @@ export function Reel({ slug, go, fresh }: { slug: string; go: Go; fresh?: boolea
                       <span className="did-label">{line.label}</span>
                       {line.detail && <span className="muted-sm"> · {line.detail}</span>}
                       {line.act && !job && (
-                        <button className="item-action" onClick={line.act.run} data-testid={line.act.testid}>
+                        <button className="item-action" onClick={onLatest(line.act.run)} data-testid={line.act.testid}>
                           {line.act.label}
                         </button>
                       )}
@@ -479,7 +503,7 @@ export function Reel({ slug, go, fresh }: { slug: string; go: Go; fresh?: boolea
               <div className="extras" data-testid="extras">
                 <span className="muted-sm">Optional extras:</span>
                 {extras.map((x) => (
-                  <button key={x.key} className="extra" onClick={x.run} data-testid={x.testid}>
+                  <button key={x.key} className="extra" onClick={onLatest(x.run)} data-testid={x.testid}>
                     <Icon name="plus" size={14} stroke={2} /> {x.label}
                   </button>
                 ))}

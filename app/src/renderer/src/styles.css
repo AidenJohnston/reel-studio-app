@@ -264,6 +264,45 @@ a { color: inherit; }
 .reel-right .panel + .panel { margin-top: 0; }
 .reel-head { display: flex; align-items: flex-end; gap: 8px; }
 .reel-title { font-size: 24px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: text; }
+.rename-btn { width: 32px; height: 32px; color: var(--ink-3); }
+
+/* The version line under the title (components/VersionSwitch.tsx): quiet while it shows the latest,
+   amber while it shows an older one. Arrow keys switch versions, so the state change is instant. The menu
+   grows out of the indicator; opened from the keyboard it appears at once. */
+.vswitch { position: relative; display: flex; flex-wrap: wrap; align-items: center; gap: 2px; margin: 2px 0 0 -10px; font-size: 13.5px; color: var(--ink-2); }
+.vswitch-steps { display: flex; align-items: center; gap: 2px; white-space: nowrap; }
+.vswitch-solo { display: flex; align-items: center; min-height: 32px; padding-left: 10px; font-weight: 600; color: var(--ink-3); }
+.vswitch-step, .vswitch-current { min-height: 32px; border: 0; border-radius: 8px; background: transparent; font: inherit; color: inherit; cursor: pointer; }
+.vswitch-step { width: 32px; display: inline-grid; place-items: center; color: var(--ink-3); }
+.vswitch-step:hover:not(:disabled), .vswitch-current:hover { background: var(--soft); color: var(--ink); }
+.vswitch-step:disabled { opacity: .35; cursor: default; }
+.vswitch-current { display: inline-flex; align-items: center; gap: 6px; padding: 0 8px; }
+.vswitch-name { font-weight: 650; color: var(--ink); }
+.vswitch-state, .vswitch-current .icon { color: var(--ink-3); }
+.vswitch.older .vswitch-current { background: var(--amber-soft); color: var(--amber-ink); }
+.vswitch.older .vswitch-current :is(.vswitch-name, .vswitch-state, .icon) { color: inherit; }
+.vswitch-back { font-size: 13.5px; padding: 0 4px; margin-left: 4px; }
+/* Under ~1080 px the title column is too narrow for the step arrows beside "Edit it myself"; the menu and the
+   arrow keys still switch versions. */
+@media (max-width: 1080px) { .vswitch-step { display: none; } .vswitch { margin-left: 0; } }
+.did-scope { font-weight: 500; letter-spacing: 0; }
+.vswitch-live { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+.vmenu {
+  position: absolute; left: 0; top: calc(100% + 6px); z-index: 30; width: 340px; max-height: min(420px, 60vh); overflow-y: auto;
+  background: var(--panel); border: 1px solid var(--line); border-radius: 12px; box-shadow: 0 12px 32px rgba(0,0,0,.12); padding: 6px;
+  display: flex; flex-direction: column; gap: 2px; transform-origin: top left; transition: opacity .16s var(--ease), transform .16s var(--ease);
+}
+@starting-style { .vmenu { opacity: 0; transform: translateY(-4px) scale(.98); } }
+.vmenu[data-instant] { transition: none; }
+.vmenu-item { display: flex; flex-direction: column; gap: 2px; width: 100%; border: 0; border-radius: 8px; background: none; font: inherit; color: var(--ink); text-align: left; padding: 9px 10px 10px 12px; cursor: pointer; }
+.vmenu-item:hover, .vmenu-item:focus-visible { background: var(--soft); }
+.vmenu-item:focus-visible { outline-offset: -2px; }
+.vmenu-top { display: flex; align-items: baseline; gap: 8px; }
+.vmenu-name { font-weight: 650; }
+.vmenu-tag, .vmenu-when { font-size: 12.5px; font-weight: 600; color: var(--ink-3); }
+.vmenu-when { margin-left: auto; font-weight: 500; font-variant-numeric: tabular-nums; }
+.vmenu-check { width: 16px; align-self: center; }
+.vmenu-what { font-size: 13.5px; color: var(--ink-2); padding-right: 24px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 .notes-panel { flex: 1; min-height: 300px; display: flex; flex-direction: column; }
 /* Grows with the window; never the old ~130 px slot that clipped a reply with buttons (critique 1.7). */
 .notes-panel .chat { flex: 1; min-height: 150px; max-height: max(260px, calc(100vh - 560px)); }
