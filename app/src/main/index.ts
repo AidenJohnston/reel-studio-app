@@ -720,7 +720,12 @@ function registerIpc(): void {
     }
     // a video kept closed stays: part of its engine may still be writing into the folder
     jobs.refuseIfBusy(slug)
-    await proxies.stop(slug)
+    // The folder goes only once the preview copy build's engine has exited. One that would not stop
+    // (ENGINE_STUCK) keeps the video closed until Reel Studio restarts and reaps it, like a job's.
+    await proxies.stop(slug).catch((e) => {
+      if ((e as { code?: string })?.code === 'ENGINE_STUCK') jobs.keepClosed(slug, e as { code: string; userMessage: string })
+      throw e
+    })
     // A cancelled engine's FFmpeg can hold its files for a moment after the cancel returns, and
     // Windows refuses to delete an open file (EBUSY/EPERM): retry for a few seconds.
     await fs.rm(projectDir(slug), { recursive: true, force: true, maxRetries: 8, retryDelay: 250 })

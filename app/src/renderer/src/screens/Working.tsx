@@ -112,7 +112,8 @@ export function Working({ slug, go }: { slug: string; go: Go }) {
   }
 
   const remove = async () => {
-    await reel.projects.remove(slug).catch(() => {})
+    // a refusal (still stopping a background job) says so; the video stays in the list to delete again
+    await reel.projects.remove(slug).catch((e) => notify(userMessage(e), 'error'))
     go({ name: 'home' })
   }
 
