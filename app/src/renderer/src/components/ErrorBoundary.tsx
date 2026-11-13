@@ -1,4 +1,5 @@
 import { Component, type ReactNode } from 'react'
+import { openReportProblem } from './ReportProblem'
 
 /** A bug on one screen must never leave the whole window blank. */
 export class ErrorBoundary extends Component<{ children: ReactNode; onReset: () => void; resetKey: string }, { error: Error | null }> {
@@ -26,6 +27,9 @@ export class ErrorBoundary extends Component<{ children: ReactNode; onReset: () 
           <div className="row">
             <button className="btn primary" onClick={() => { this.setState({ error: null }); this.props.onReset() }}>
               Back to My videos
+            </button>
+            <button className="btn ghost" onClick={() => openReportProblem(`This screen hit a problem (${String(this.state.error?.message ?? '').slice(0, 200)})`)} data-testid="screen-error-report">
+              Report a problem
             </button>
           </div>
         </div>

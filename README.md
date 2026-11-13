@@ -115,8 +115,10 @@ Nothing else is sent. With no AI connected, nothing is sent at all.
 
 Reel Studio itself makes only these other network requests, and only when you use the feature: the one-time
 speech model download from Hugging Face, image search (Openverse and Wikimedia Commons) and brand logos
-(Simple Icons) with the words the AI chose, a screenshot of a website or app page the AI names in your reel, and downloads of pictures, videos or songs from links you paste. There is no analytics and no
-crash reporting.
+(Simple Icons) with the words the AI chose, a screenshot of a website or app page the AI names in your reel, and downloads of pictures, videos or songs from links you paste, and a problem report when you send one
+(Settings › About › Report a problem: it shows you exactly what goes to `dl.getreelstudio.com` first, and attaches
+diagnostics, a screenshot of the Reel Studio window or your download key only if you tick them). There is no
+analytics and no automatic crash reporting.
 
 One request happens without you asking: at most once a day it asks `dl.getreelstudio.com/latest.json` whether a
 newer version is out, sending only a generic

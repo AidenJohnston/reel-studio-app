@@ -102,7 +102,7 @@ export function createMainWindow(opts: { preload: string; stateFile: string; tes
  * (pasting a key fails). Windows gets no menu bar: Ctrl+C/V work natively there and the renderer
  * handles the app shortcuts itself.
  */
-export function installMenu(send: (c: AppCommand) => void, dev: boolean): void {
+export function installMenu(send: (c: AppCommand) => void, dev: boolean, copyDiagnostics?: () => void): void {
   if (process.platform !== 'darwin') {
     Menu.setApplicationMenu(null)
     return
@@ -164,7 +164,11 @@ export function installMenu(send: (c: AppCommand) => void, dev: boolean): void {
     { role: 'windowMenu' },
     {
       role: 'help',
-      submenu: [{ label: 'Reel Studio website', click: () => void shell.openExternal(SITE_URL) }]
+      submenu: [
+        { label: 'Reel Studio website', click: () => void shell.openExternal(SITE_URL) },
+        { label: 'Report a Problem…', click: () => send({ type: 'report-problem' }) },
+        ...(copyDiagnostics ? ([{ label: 'Copy Diagnostics', click: () => copyDiagnostics() }] as MenuItemConstructorOptions[]) : [])
+      ]
     }
   ]
   Menu.setApplicationMenu(Menu.buildFromTemplate(template))
