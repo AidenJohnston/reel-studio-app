@@ -37,7 +37,7 @@ describe('answering a typed My style question (lowercase captions)', () => {
     payload: { kind: 'caption-case', case: 'lower' },
     source: { project: 'p1', title: 'Baking bread', version: 3 }
   }
-  function app(approve: (p: StyleProposal) => Promise<{ status: 'saved' | 'exists' | 'forgotten' }>) {
+  function app(approve: (p: StyleProposal) => Promise<{ status: 'saved' | 'exists' | 'paused' | 'forgotten' }>) {
     const chat: ChatMessage[] = [
       { id: 'm1', from: 'editor', text: rememberQuestion(proposal.text), at: '', actions: ['remember-yes', 'remember-no'], proposal }
     ]
@@ -59,6 +59,12 @@ describe('answering a typed My style question (lowercase captions)', () => {
     const c = styleConsent('I made the captions lowercase.', ['Use lowercase captions.', 'Keep hashtags lowercase in the post.'], undefined, proposal)
     expect(c.suggestions).toEqual(['Keep hashtags lowercase in the post.'])
     expect(c.undo).toEqual(['Use lowercase captions.', 'Keep hashtags lowercase in the post.'])
+  })
+
+  it('Yes on a rule paused in My style says it stays paused there', async () => {
+    const { chat, answer } = app(async () => ({ status: 'paused' }))
+    await answer()
+    expect(chat.at(-1)?.text).toBe('That is in My style, but paused. Turn it back on in My style to use it in your next videos.')
   })
 
   it('a double click on Yes saves and replies once', async () => {

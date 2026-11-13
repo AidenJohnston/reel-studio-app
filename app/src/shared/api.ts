@@ -340,11 +340,11 @@ export interface StyleRule {
   /** Set: the app measures this on every render, and a note can't finish while it fails. */
   check?: RuleCheck
   source?: { project: string; title: string; version: number }
-  /** How the rule's state is decided (settle in ai/src/style.ts): each "Remember this?" answer, the number of the last
-   * direct change, and the state that change left. */
+  /** How answers decide the rule's state (settle in ai/src/style.ts): each "Remember this?" answer, the number of
+   * the last direct change, and, while the rule is on because of answers, what it falls back to. */
   answers?: Record<string, { yes: boolean; seq: number; at: string }>
   seq?: number
-  held?: 'on' | 'paused' | 'gone'
+  held?: 'paused' | 'gone'
 }
 
 /** A checked My style rule's machine form (ai/src/rules.ts is the one that validates it). */

@@ -68,8 +68,8 @@ describe('My style in the stand-in AI', () => {
   })
 
   // The same table as ai/test/remember-caption-case.test.ts "the order of answers": every order of two questions'
-  // answers, from no rule and from a paused one. The rule is on when some question's last answer is Yes, and
-  // otherwise as it started.
+  // answers, from no rule and from a paused one. A paused rule stays paused whatever the answers; with no rule, it is
+  // on when some question's last answer is Yes.
   const WAYS = [['yes'], ['no'], ['yes', 'no'], ['no', 'yes']]
   const interleave = (a: string[], b: string[]): string[][] =>
     !a.length ? [b] : !b.length ? [a] : [...interleave(a.slice(1), b).map((r) => [a[0], ...r]), ...interleave(a, b.slice(1)).map((r) => [b[0], ...r])]
@@ -90,7 +90,7 @@ describe('My style in the stand-in AI', () => {
     }
     const last = (w: 'A' | 'B'): string | undefined => order.filter((x) => x.endsWith(w)).at(-1)?.split(' ')[0]
     const rules = await ai.styleRules()
-    if (last('A') === 'yes' || last('B') === 'yes') {
+    if (start === 'none' && (last('A') === 'yes' || last('B') === 'yes')) {
       expect(rules).toEqual([expect.objectContaining({ text: 'Use lowercase captions.' })])
       expect(rules[0].paused).toBeUndefined()
     } else if (start === 'paused') expect(rules).toEqual([expect.objectContaining({ paused: true })])
@@ -106,6 +106,15 @@ describe('My style in the stand-in AI', () => {
     expect((await ai.styleRules())[0].paused).toBeUndefined()
     await ai.declineStyleProposal!({ ...proposal, id: 'q2' })
     expect(await ai.styleRules()).toEqual([])
+  })
+
+  it('in such a file, a Yes that turned the paused rule back on keeps that link: its No pauses the rule again', async () => {
+    const { ai, root } = standIn()
+    const at = '2026-11-10T00:00:00.000Z'
+    writeFileSync(join(root, 'My style.json'), JSON.stringify({ version: 1, rules: [{ id: 'r1', text: 'Use lowercase captions.', createdAt: at,
+      payload: { kind: 'caption-case', case: 'lower' }, consent: { proposal: 'q1', at, also: ['q2'], resumed: ['q2'] } }] }))
+    await ai.declineStyleProposal!({ ...proposal, id: 'q2' })
+    expect(await ai.styleRules()).toEqual([expect.objectContaining({ id: 'r1', paused: true })])
   })
 
   it('removing a rule from such a file forgets its old questions', async () => {
@@ -137,13 +146,14 @@ describe('My style in the stand-in AI', () => {
     expect(await ai.styleRules()).toEqual([expect.not.objectContaining({ payload: expect.anything() })])
   })
 
-  it('Yes again to a paused rule\'s question turns it back on, and a second question removed with the rule stays removed', async () => {
+  it("Yes again to a paused rule's question leaves it paused (only My style turns it back on), and a second question removed with the rule stays removed", async () => {
     const { ai } = standIn()
     await ai.approveStyleProposal!(proposal)
     const [rule] = await ai.styleRules()
     await ai.updateStyleRule!(rule.id, { paused: true })
-    expect(await ai.approveStyleProposal!(proposal)).toEqual({ status: 'saved' })
-    expect(await ai.styleRules()).toEqual([expect.not.objectContaining({ paused: true })])
+    expect(await ai.approveStyleProposal!(proposal)).toEqual({ status: 'paused' })
+    expect(await ai.styleRules()).toEqual([expect.objectContaining({ paused: true })])
+    await ai.updateStyleRule!(rule.id, { paused: false })
 
     const second = { ...proposal, id: 'q2' }
     expect(await ai.approveStyleProposal!(second)).toEqual({ status: 'exists' })

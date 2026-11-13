@@ -117,7 +117,7 @@ export interface AI {
   /** My style started over because its file was damaged; the damaged copy is kept next to it. Optional: older packages lack it. */
   styleWasDamaged?(): Promise<boolean>
   /** Saves a typed rule the user said Yes to. `exists`: already in My style; `forgotten`: they removed it since. */
-  approveStyleProposal?(p: StyleProposal): Promise<{ status: 'saved' | 'exists' | 'forgotten' }>
+  approveStyleProposal?(p: StyleProposal): Promise<{ status: 'saved' | 'exists' | 'paused' | 'forgotten' }>
   declineStyleProposal?(p: StyleProposal): Promise<void>
   /** My style: change a rule's words, or pause or resume it. Optional: older packages lack it. */
   updateStyleRule?(id: string, patch: { text?: string; paused?: boolean }): Promise<StyleRule>

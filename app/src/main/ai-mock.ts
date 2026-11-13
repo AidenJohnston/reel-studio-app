@@ -103,37 +103,47 @@ const answersOf = (r: StyleRule): [string, Answer][] =>
   )
 const answered = (r: StyleRule): string[] => answersOf(r).map(([q]) => q)
 const nextSeq = (s: StyleData): number => (s.seq = (typeof s.seq === 'number' ? s.seq : 0) + 1)
-const stateOf = (r: StyleRule): 'on' | 'paused' => (r.paused ? 'paused' : 'on')
-/** As settle in ai/src/style.ts: on while some answer newer than the last direct change is a Yes, else what that
- * change left. */
+/** As settle in ai/src/style.ts: answers matter only to a rule that is on because of them (`held`). It stays on while
+ * some question's latest answer is a Yes newer than the last direct change, and otherwise falls back to `held`. */
 function settle(rules: StyleRule[], r: StyleRule): StyleRule[] {
+  if (!r.held) return rules
   const since = typeof r.seq === 'number' ? r.seq : 0
-  const state = answersOf(r).some(([, a]) => a.yes && a.seq > since) ? 'on' : (r.held ?? stateOf(r))
-  if (state === 'gone') return rules.filter((x) => x !== r)
-  if (state === 'paused') r.paused = true
-  else delete r.paused
+  if (answersOf(r).some(([, a]) => a.yes && a.seq > since)) {
+    delete r.paused
+    return rules
+  }
+  if (r.held === 'gone') return rules.filter((x) => x !== r)
+  r.paused = true
+  delete r.held
   return rules
 }
 /** As fromConsent in ai/src/style.ts: a file saved before answers were numbered keeps a rule's questions in
- * `consent`; each becomes a numbered Yes answer, and a paused rule's pause stands. */
+ * `consent`; each becomes a numbered Yes answer. A paused rule is simply paused; one still on is held by them, or,
+ * when a Yes turned it back on (`resumed`), by that Yes and later ones, falling back to paused. */
 function fromConsent(s: StyleData): void {
+  const ids = (x: unknown): string[] => (Array.isArray(x) ? x.filter((y): y is string => typeof y === 'string') : [])
   for (const r of s.rules as (StyleRule & { consent?: any })[]) {
     const c = r.consent
     delete r.consent
     if (!c || typeof c.proposal !== 'string' || r.answers) continue
     const at = typeof c.at === 'string' ? c.at : r.createdAt
-    const asked: string[] = [c.proposal, ...(Array.isArray(c.also) ? c.also.filter((x: unknown): x is string => typeof x === 'string') : [])]
-    r.answers = Object.fromEntries(asked.map((q) => [q, { yes: true, seq: nextSeq(s), at }]))
-    if (r.paused) {
-      r.held = 'paused'
-      r.seq = nextSeq(s)
-    } else r.held = 'gone'
+    const resumed = new Set(ids(c.resumed))
+    const answers: Record<string, Answer> = {}
+    for (const q of [c.proposal, ...ids(c.also)]) {
+      if (!r.paused && resumed.has(q) && r.held !== 'paused') {
+        r.seq = nextSeq(s)
+        r.held = 'paused'
+      }
+      answers[q] = { yes: true, seq: nextSeq(s), at }
+    }
+    r.answers = answers
+    if (!r.paused) r.held ??= 'gone'
   }
 }
-/** A direct change (My style, or a note): the rule holds the state it has, and older answers stop counting. */
+/** A direct change (My style, or a note): the rule simply is as it was left, and older answers stop counting. */
 function changedDirectly(s: StyleData, r: StyleRule): void {
   r.seq = nextSeq(s)
-  r.held = stateOf(r)
+  delete r.held
 }
 
 export const createMockAI: CreateAI = ({ host }) => {
@@ -419,14 +429,23 @@ export const createMockAI: CreateAI = ({ host }) => {
         if (same && !isCaptionCase(same.payload)) return { status: 'exists' as const }
         let rules = s.rules
         let rule = same ?? rules.find((r) => isCaptionCase(r.payload))
-        const wasOn = !!rule && !rule.paused
+        const answer = (r: StyleRule): void => {
+          r.answers = { ...r.answers, [proposal.id]: { yes: true, seq: nextSeq(s), at } }
+        }
+        // as the real store: a paused rule comes back only through My style
+        if (rule?.paused) {
+          answer(rule)
+          delete rule.held
+          await saveRules(s, s.rules)
+          return { status: 'paused' as const }
+        }
+        const wasOn = !!rule
         if (!rule) {
           const source = { project: String(proposal.source?.project ?? ''), title: String(proposal.source?.title ?? '').slice(0, 120), version: Number(proposal.source?.version) || 0 }
           rule = { id: randomUUID(), text: LOWERCASE_CAPTIONS, createdAt: at, payload: { kind: 'caption-case', case: 'lower' }, source, held: 'gone' }
           rules = [...rules.filter((r) => sameRule(r.text) !== sameRule(LOWERCASE_CAPTIONS)), rule]
         }
-        rule.held ??= stateOf(rule)
-        rule.answers = { ...rule.answers, [proposal.id]: { yes: true, seq: nextSeq(s), at } }
+        answer(rule)
         await saveRules(s, settle(rules, rule))
         return { status: same || !wasOn ? ('saved' as const) : ('exists' as const) }
       })

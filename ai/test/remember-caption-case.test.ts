@@ -249,16 +249,24 @@ describe('answering the question', () => {
     expect(await ai().styleRules()).toEqual([]);
   });
 
-  it('Yes again to the question of a rule paused since turns it back on, so "saved" is true for the next video', async () => {
+  it('Yes to a question about a rule paused since leaves it paused: it comes back only through My style', async () => {
     const { dir, ai, newVideo } = await setup();
     const r = await ai(new ScriptedModel([{ toolCalls: [lowercase()] }, finish()])).applyNote(dir, 'make the captions lowercase', () => undefined);
     await ai().approveStyleProposal(r.styleProposal!);
-    await ai().updateStyleRule((await ai().styleRules())[0].id, { paused: true });
+    const [rule] = await ai().styleRules();
+    await ai().updateStyleRule(rule.id, { paused: true });
 
-    expect(await ai().approveStyleProposal(r.styleProposal!)).toMatchObject({ status: 'saved' });
+    expect(await ai().approveStyleProposal(r.styleProposal!)).toMatchObject({ status: 'paused' });
+    const other = captionCaseProposal({ project: 'p2', title: 'Another video', version: 1 });
+    expect(await ai().approveStyleProposal(other)).toMatchObject({ status: 'paused' });
     const next = await newVideo(dir);
     await ai().firstEdit(next, () => undefined);
-    expect(await caseOf(next)).toBe('lower');
+    expect(await caseOf(next)).not.toBe('lower');
+    // turned back on in My style, the next video is lowercase again
+    await ai().updateStyleRule(rule.id, { paused: false });
+    const after = await newVideo(next);
+    await ai().firstEdit(after, () => undefined);
+    expect(await caseOf(after)).toBe('lower');
   });
 
   /** A saved lowercase rule the person has since paused, and a question about it from another video. */
@@ -287,8 +295,9 @@ describe('answering the question', () => {
     expect((await ai().styleRules())[0].paused).toBe(true);
   });
 
-  it('No to the question that turned the rule back on leaves it as the person reworded it since', async () => {
-    const { ai, b } = await pausedRule();
+  it('No to the question that saved the rule leaves it as the person reworded it since', async () => {
+    const { ai } = await setup();
+    const b = captionCaseProposal({ project: 'p2', title: 'Another video', version: 1 });
     await ai().approveStyleProposal(b);
     const [rule] = await ai().styleRules();
     await ai().updateStyleRule(rule.id, { text: 'Use lowercase captions in tutorials.' });
@@ -317,8 +326,9 @@ describe('the order of answers (My style, last answer wins)', () => {
   it('covers every order', () => expect(ORDERS).toHaveLength(56));
 
   // After the first answer, a note that would turn the rule on fails (and is undone), and the app restarts: every
-  // ai() below is a fresh one reading My style.json. Neither may change the outcome, which depends only on the
-  // answers: the rule is on when some question's last answer is Yes, and otherwise as it started.
+  // ai() below is a fresh one reading My style.json. Neither may change the outcome. A paused rule stays paused
+  // whatever the answers (it comes back only through My style); with no rule, it is on when some question's last
+  // answer is Yes.
   it.each(rows)('$name', async ({ start, order }) => {
     const { dir, host, ai, newVideo } = await setup();
     if (start === 'paused') {
@@ -339,7 +349,7 @@ describe('the order of answers (My style, last answer wins)', () => {
       }
     }
     const last = (w: 'A' | 'B') => order.filter((x) => x.endsWith(w)).at(-1)?.split(' ')[0];
-    const on = last('A') === 'yes' || last('B') === 'yes';
+    const on = start === 'none' && (last('A') === 'yes' || last('B') === 'yes');
     const rules = await ai().styleRules();
     if (on) expect(rules).toEqual([expect.objectContaining({ text: 'Use lowercase captions.', payload: { kind: 'caption-case', case: 'lower' } })]);
     if (on) expect(rules[0].paused).toBeUndefined();
@@ -363,6 +373,20 @@ describe('a My style file saved before answers were numbered (#153 kept them in 
     expect((await ai().styleRules())[0].paused).toBeUndefined();
     await ai().declineStyleProposal(q('q2'));
     expect(await ai().styleRules()).toEqual([]);
+  });
+
+  it('a Yes that turned the paused rule back on keeps that link: its No pauses the rule again', async () => {
+    const { ai, styleFile } = await setup();
+    await fsp.writeFile(styleFile, saved({ consent: { proposal: 'q1', at, also: ['q2'], resumed: ['q2'] } }));
+    await ai().declineStyleProposal(q('q2'));
+    expect(await ai().styleRules()).toEqual([expect.objectContaining({ id: 'r1', paused: true })]);
+  });
+
+  it('No to the question that saved a rule a later Yes turned back on leaves it on', async () => {
+    const { ai, styleFile } = await setup();
+    await fsp.writeFile(styleFile, saved({ consent: { proposal: 'q1', at, also: ['q2'], resumed: ['q2'] } }));
+    await ai().declineStyleProposal(q('q1'));
+    expect((await ai().styleRules())[0].paused).toBeUndefined();
   });
 
   it('a rule paused since stays paused, and removing it forgets its old questions', async () => {

@@ -43,7 +43,7 @@ export const rememberQuestion = (rule: string): string => `Remember this for nex
 export interface AnswerDeps {
   chat(slug: string): Promise<ChatMessage[]>
   addStyleRule?(text: string, check?: ChatMessage['check']): Promise<unknown>
-  approveStyleProposal?(p: StyleProposal): Promise<{ status: 'saved' | 'exists' | 'forgotten' }>
+  approveStyleProposal?(p: StyleProposal): Promise<{ status: 'saved' | 'exists' | 'paused' | 'forgotten' }>
   declineStyleProposal?(p: StyleProposal): Promise<void>
   /** Take the buttons off the question and add the editor's reply. */
   settle(slug: string, messageId: string, reply: string): Promise<void>
@@ -55,6 +55,7 @@ const NOT_SAVED = { code: 'NOT_SAVED', userMessage: 'I could not save that to My
 const TYPED_REPLY = {
   saved: 'Saved. Your next videos will start with lowercase captions. You can change or remove it in My style.',
   exists: 'That is already in My style.',
+  paused: 'That is in My style, but paused. Turn it back on in My style to use it in your next videos.',
   forgotten: 'You removed that from My style, so it stays with this video only.'
 }
 

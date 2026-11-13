@@ -28,9 +28,11 @@ export interface StyleRule {
   /** The number of the last change made to the rule directly: in My style, or by a note. Answers older than it no
    * longer count: the person (or their note) chose after them. */
   seq?: number;
-  /** The state that last direct change left, which the rule falls back to when no newer Yes holds it on. "gone": the
-   * rule exists only because a question was answered Yes. */
-  held?: 'on' | 'paused' | 'gone';
+  /** Set only while the rule is on because of answers: what it falls back to when no Yes newer than `seq` holds it.
+   * "gone": it exists only because a question was answered Yes. "paused": a failed note's change was taken back
+   * while a later Yes held it on (undo()), or a file from before answers were numbered says a Yes turned it back on.
+   * Any direct change clears it: the rule then simply is as the person left it. */
+  held?: 'paused' | 'gone';
 }
 export interface StyleAnswer { yes: boolean; seq: number; at: string }
 /** What a note changed in My style, so a failed note can undo exactly that: StyleStore.undo(). */
@@ -41,7 +43,9 @@ export interface StyleChecks { active: CheckedRule[]; unreadable: StyleRule[] }
 /** `damaged`: the file name of a damaged My style.json kept next to this one when My style started over.
  * `forgotten`: questions whose rule was removed, so answering one again cannot bring it back. IDs only. */
 export interface StyleFile { version: 1; rules: StyleRule[]; damaged?: string; forgotten?: string[]; seq?: number }
-export type Approval = { status: 'saved' | 'exists'; rule: StyleRule } | { status: 'forgotten' };
+/** `paused`: the rule is in My style but paused there. A Yes records the answer and leaves it paused: a paused rule
+ * comes back only through My style. */
+export type Approval = { status: 'saved' | 'exists' | 'paused'; rule: StyleRule } | { status: 'forgotten' };
 
 export const LOWERCASE_CAPTIONS = 'Use lowercase captions.';
 const isCaptionCase = (x: unknown): x is CaptionCaseRule => (x as CaptionCaseRule)?.kind === 'caption-case' && (x as CaptionCaseRule).case === 'lower';
@@ -53,38 +57,49 @@ const answersOf = (r: StyleRule): [string, StyleAnswer][] =>
 const answered = (r: StyleRule): string[] => answersOf(r).map(([q]) => q);
 /** The next number in the file's sequence. Every answer and every direct change takes one. */
 const next = (data: StyleFile): number => (data.seq = (typeof data.seq === 'number' ? data.seq : 0) + 1);
-const stateOf = (r: StyleRule): 'on' | 'paused' => (r.paused ? 'paused' : 'on');
 
-/** The one rule for a rule's state: on while some question's latest answer is a Yes newer than the last direct
- * change, otherwise what that change left. So answers can come in any order, a No only takes back its own Yes, and
- * nothing older than the person's last choice in My style (or their note's) can change the rule. Returns the rules
- * with `r` settled; a rule held only by answers that are now gone is removed. */
+/** The one rule for answers: they matter only to a rule that is on because of them (`held`). It stays on while some
+ * question's latest answer is a Yes newer than the last direct change, and otherwise falls back to `held`. So answers
+ * can come in any order and a No takes back only its own Yes. A rule not held by answers is as the person left it:
+ * no answer turns it on or off. Returns the rules with `r` settled; a rule that existed only because of answers, and
+ * that none holds any more, is removed. */
 function settle(rules: StyleRule[], r: StyleRule): StyleRule[] {
+  if (!r.held) return rules;
   const since = typeof r.seq === 'number' ? r.seq : 0;
-  const state = answersOf(r).some(([, a]) => a.yes && a.seq > since) ? 'on' : (r.held ?? stateOf(r));
-  if (state === 'gone') return rules.filter((x) => x !== r);
-  if (state === 'paused') r.paused = true; else delete r.paused;
+  if (answersOf(r).some(([, a]) => a.yes && a.seq > since)) { delete r.paused; return rules; }
+  if (r.held === 'gone') return rules.filter((x) => x !== r);
+  r.paused = true;
+  delete r.held;
   return rules;
 }
-/** A file saved before answers were numbered keeps a rule's questions in `consent` ({proposal, at, also?}): the
- * question whose Yes saved the rule, then later Yes answers. Each becomes a numbered Yes answer, in that order. A
- * rule still on is held only by them (the Yes saved it), so a No can still take it back out; a paused one was paused
- * after them, in My style, so the pause stands. Removing the rule then forgets them like any other answers. */
+/** A file saved before answers were numbered keeps a rule's questions in `consent` ({proposal, at, also?,
+ * resumed?}): the question whose Yes saved the rule, then later Yes answers, and in `resumed` those whose Yes turned
+ * it back on from paused. Each becomes a numbered Yes answer, in that order. A paused rule was paused after them, in
+ * My style, so it is simply paused. A rule still on is held by them: by all of them ("gone": the Yes saved it), or,
+ * when a Yes turned it back on, by that Yes and later ones, falling back to paused (the pause came between). So a No
+ * still takes back its own Yes, and removing the rule forgets them like any other answers. */
 function fromConsent(data: StyleFile): void {
+  const ids = (x: unknown): string[] => (Array.isArray(x) ? x.filter((y): y is string => typeof y === 'string') : []);
   for (const r of data.rules as (StyleRule & { consent?: any })[]) {
     const c = r.consent;
     delete r.consent;
     if (!c || typeof c.proposal !== 'string' || r.answers) continue;
     const at = typeof c.at === 'string' ? c.at : r.createdAt;
-    const asked = [c.proposal, ...(Array.isArray(c.also) ? c.also.filter((x: unknown): x is string => typeof x === 'string') : [])];
-    r.answers = Object.fromEntries(asked.map((q) => [q, { yes: true, seq: next(data), at }]));
-    if (r.paused) { r.held = 'paused'; r.seq = next(data); } else r.held = 'gone';
+    const resumed = new Set(ids(c.resumed));
+    r.answers = {};
+    for (const q of [c.proposal, ...ids(c.also)]) {
+      // the pause that the first resumed Yes ended came just before it
+      if (!r.paused && resumed.has(q) && r.held !== 'paused') { r.seq = next(data); r.held = 'paused'; }
+      r.answers[q] = { yes: true, seq: next(data), at };
+    }
+    if (!r.paused) r.held ??= 'gone';
   }
 }
-/** A direct change to `r` (My style, or a note): it now holds the state it has, and older answers stop counting. */
+/** A direct change to `r` (My style, or a note): the rule now simply is as it was left, and older answers stop
+ * counting. */
 function changedDirectly(data: StyleFile, r: StyleRule): number {
   r.seq = next(data);
-  r.held = stateOf(r);
+  delete r.held;
   return r.seq;
 }
 
@@ -231,7 +246,8 @@ export class StyleStore {
   }
 
   /** A failed note takes back its own change: the rule falls back to what it was before the note, unless the person
-   * changed it directly since (their choice stands). A Yes given since still holds it on, by settle(). */
+   * changed it directly since (their choice stands). A Yes given since still holds it on, by settle(), until it is
+   * taken back too. */
   async undo(c: StyleChange): Promise<void> {
     return this.serial(async () => {
       const data = await this.read();
@@ -244,8 +260,9 @@ export class StyleStore {
   }
 
   /** The person said Yes to `p`: the answer, and the rule when it is new, are saved in one write. Answering the
-   * same question again returns the same rule, and the question of a rule they removed cannot bring it back. Yes is
-   * the person asking for the rule, so a paused typed rule is turned back on (settle()) before "saved" promises it. */
+   * same question again returns the same rule, and the question of a rule they removed cannot bring it back. A rule
+   * paused in My style stays paused (`paused`): it comes back only through My style, never through a question
+   * asked on some video, so no order of answers can turn a paused rule on. */
   async approve(p: StyleProposal): Promise<Approval> {
     return this.serial(async () => {
       if (!p?.id || p.text !== LOWERCASE_CAPTIONS || !isCaptionCase(p.payload)) throw new Error('the question does not match the rule it would save');
@@ -258,7 +275,14 @@ export class StyleStore {
       if (same && !isCaptionCase(same.payload)) return { status: 'exists', rule: same };
       let rules = data.rules;
       let rule = same ?? rules.find((r) => isCaptionCase(r.payload));
-      const wasOn = !!rule && !rule.paused;
+      const answer = (r: StyleRule) => { r.answers = { ...r.answers, [p.id]: { yes: true, seq: next(data), at } }; };
+      if (rule?.paused) {
+        answer(rule);
+        delete rule.held;
+        await this.write(data);
+        return { status: 'paused', rule };
+      }
+      const wasOn = !!rule;
       if (!rule) {
         // The same words saved as a plain sentence give way to the typed rule. It gets a new ID: a running note
         // that saved that sentence undoes it by ID if the note fails, and must not take the approved rule with it.
@@ -267,8 +291,7 @@ export class StyleStore {
           held: 'gone' };
         rules = [...rules.filter((r) => normalize(r.text) !== normalize(LOWERCASE_CAPTIONS)), rule];
       }
-      rule.held ??= stateOf(rule);
-      rule.answers = { ...rule.answers, [p.id]: { yes: true, seq: next(data), at } };
+      answer(rule);
       await this.write({ ...data, rules: settle(rules, rule) });
       return { status: same || !wasOn ? 'saved' : 'exists', rule };
     });
