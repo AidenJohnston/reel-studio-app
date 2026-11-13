@@ -15,6 +15,7 @@ import uuid
 from pathlib import Path
 from typing import Optional
 
+from . import beats as beatmod
 from . import cut as cutmod
 from . import safepath
 from .proto import EngineError
@@ -226,8 +227,9 @@ def source_path(project_dir: Path, src: dict, root: Optional[Path] = None) -> Pa
     return safepath.safe_resolve(project_dir, src["path"], root=root, what=f"source {src.get('id')}")
 
 
-def timeline(project_dir: Path, proj: dict, words: Optional[list] = None) -> cutmod.Timeline:
-    """The project's cut on the output clock. Every word anchor maps through this."""
+def timeline(project_dir: Path, proj: dict, words: Optional[list] = None, root: Optional[Path] = None) -> cutmod.Timeline:
+    """The project's cut on the output clock. Every word anchor maps through this. `root` (the Reel Studio
+    root, default tools.root_dir()) finds a Library song when its beats land the cuts."""
     if words is None:
         words = load_transcript(project_dir, proj)["words"]
     c = proj.get("cut") or {}
@@ -237,7 +239,17 @@ def timeline(project_dir: Path, proj: dict, words: Optional[list] = None) -> cut
                           "There's nothing in the edit yet. Let me pick your takes first.")
     return cutmod.build_timeline(words, keep, source_meta(proj),
                                  gap_cap=float(c.get("gapCap", cutmod.GAP_CAP)),
-                                 min_saving=float(c.get("minSaving", cutmod.MIN_SAVING)))
+                                 min_saving=float(c.get("minSaving", cutmod.MIN_SAVING)),
+                                 beats=_cut_beats(project_dir, proj, root))
+
+
+def _cut_beats(project_dir: Path, proj: dict, root: Optional[Path]) -> list:
+    if "cuts" not in ((proj.get("music") or {}).get("onBeat") or []):
+        return []
+    if root is None:
+        from . import tools
+        root = tools.root_dir()
+    return beatmod.synced(proj, "cuts", beatmod.song_path(project_dir, proj, root))
 
 
 def _anchor_slots(proj: dict):
@@ -256,9 +268,17 @@ def _anchor_slots(proj: dict):
     for a in ((proj.get("music") or {}).get("automation") or []):
         yield a, "fromWord", "from"
         yield a, "toWord", "to"
+    for d in (proj.get("music") or {}).get("drops") or []:
+        yield d, "from", "from"
+        yield d, "to", "to"
     for h in ((proj.get("captions") or {}).get("hidden") or []):
         yield h, "from", "from"
         yield h, "to", "to"
+    for s in proj.get("sfx") or []:
+        at = s.get("at") or {}
+        for key in ("word", "cut"):
+            if at.get(key):
+                yield at, key, "from"
 
 
 def remap_anchors(proj: dict, old_words: list, new_words: list) -> int:

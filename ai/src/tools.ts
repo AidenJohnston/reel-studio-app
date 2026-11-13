@@ -1,14 +1,17 @@
 // The editor's actions (docs/architecture.md section 6). One provider-neutral tool layer: strict JSON-schema
 // definitions + implementations over the project API and the EngineHost.
+import * as crypto from 'node:crypto';
 import * as fs from 'node:fs';
 import * as fsp from 'node:fs/promises';
 import * as path from 'node:path';
 import {
-  Analysis, Broll, LIBRARY_FOLDERS, LibraryKind, MusicLevel, Project, Transcript, TREATMENTS, Word, WordAnchor,
+  Analysis, BEAT_KINDS, BeatGrid, BeatKind, Broll, LIBRARY_FOLDERS, LibraryKind, Music, MusicDrop, MusicLevel, Project, Sfx,
+  Transcript, TREATMENTS, Word, WordAnchor,
   anchorText, anchorWords, approxDuration, approxOutputTimes, keptWords, loadAnalysis, loadProject, loadTranscript,
   nextBrollId, normalizeKeep, saveProject, validateProject, wordIndex, anchorProblem,
 } from './project';
 import { S, JSONSchema, validate, fillNulls } from './schema';
+import { SFX_SOUNDS } from './sfx.generated';
 import { ANIMATION_IDS, ENGINE_FED, TimedWord, alignWordTimes, animationParamsSchema, cleanParams, itemTimes, phraseTime, templateSpec } from './animations';
 import { chooseReadableLayout, minHeroPx } from './readable';
 import { AgentEvent, AIError, EngineHost, ImagePart, ToolSchema } from './types';
@@ -95,6 +98,17 @@ async function mutate(ctx: ToolContext, field: string, fn: (p: Project, t: Trans
 
 export class ToolInputError extends Error {
   constructor(message: string) { super(message); this.name = 'ToolInputError'; }
+}
+
+/** True when `wid` starts a kept range that the engine plays as a jump, not straight on from the range before
+ * (engine/reelengine/cut.py merge_contiguous joins ranges that sit back to back in the same take). */
+function isCut(p: Project, t: Transcript, wid: string): boolean {
+  const k = p.cut.keep.findIndex((r) => r.from === wid);
+  if (k <= 0) return false;
+  const { words, byId } = wordIndex(t);
+  const prev = byId.get(p.cut.keep[k - 1].to);
+  const here = byId.get(wid);
+  return prev === undefined || here === undefined || here !== prev + 1 || words[here].source !== words[prev].source;
 }
 
 function checkAnchor(t: Transcript, a: WordAnchor, what = 'anchor'): void {
@@ -238,14 +252,52 @@ function projectView(ctx: ToolContext, p: Project, t: Transcript): unknown {
     sources: p.sources.map((s) => ({ id: s.id, duration: s.duration, mirror: s.mirror === true })),
     cut: cutSummary(t, p),
     captions: p.captions,
-    music: p.music,
+    music: musicView(p.music, times),
     broll: p.broll.map((b) => ({ ...b, says: quote(t, b.anchor), approxOutSec: times.get(b.anchor.from)?.s ?? null })),
     zooms: p.zooms.map((z) => ({ ...z, says: quote(t, z.anchor) })),
+    // set_sfx replaces the list: a later note can only keep the effects it can see
+    ...(p.sfx?.length ? { sfx: p.sfx } : {}),
     cover: p.cover,
     post: p.post,
     notes: p.notes,
     lastRender: ctx.state.renders.at(-1)?.version ?? null,
   };
+}
+
+/** Where the song really starts (engine beats.effective_start): a start less than END_MARGIN_S from the
+ * song's end plays it from the top. */
+const END_MARGIN_S = 1.0;
+export const effectiveStart = (startAt: number, seconds: number) =>
+  (startAt || 0) < Math.round(seconds * 100) / 100 - END_MARGIN_S ? Math.max(0, startAt || 0) : 0;
+
+/** The music as the model sees it: the beat grid's frames (hundreds of numbers only the engine reads)
+ * become its tempo and beat count, and each drop says when the music comes back on a beat. */
+export function musicView(m: Music, times: Map<string, { s: number; e: number }>): unknown {
+  const { beats, ...rest } = m;
+  if (!beats) return rest;
+  const f = beats.frames;
+  const steps = f.slice(1).map((x, i) => x - f[i]).sort((a, b) => a - b);
+  const bpm = steps.length ? Math.round((60 * beats.fps) / steps[steps.length >> 1]) : null;
+  const heard = f.map((x) => x / beats.fps - effectiveStart(m.startAt, beats.seconds)).filter((t) => t >= 0);
+  const drops = m.drops?.map((d) => {
+    const end = times.get(d.to)?.e;
+    const back = end === undefined ? undefined : heard.find((t) => t >= end && t - end <= 1);
+    return { ...d, backOnBeatAtSec: back === undefined ? null : Math.round(back * 100) / 100 };
+  });
+  return { ...rest, beats: { bpm, count: f.length }, ...(drops ? { drops } : {}) };
+}
+
+async function fileSha256(file: string): Promise<string> {
+  const h = crypto.createHash('sha256');
+  for await (const chunk of fs.createReadStream(file)) h.update(chunk as Buffer);
+  return h.digest('hex');
+}
+
+/** Whether the stored beat grid was measured on the song file that plays now (a song changed by hand keeps
+ * the old song's grid, which the engine then ignores). */
+async function gridMatches(grid: BeatGrid | undefined, songFile: string | null): Promise<boolean> {
+  if (!grid?.sha256 || !songFile) return false;
+  try { return grid.sha256 === await fileSha256(songFile); } catch { return false; }
 }
 
 async function engine(ctx: ToolContext, command: string, extra: string[] = [], stageMessage?: string): Promise<any> {
@@ -572,14 +624,20 @@ async function librarySongs(ctx: ToolContext): Promise<any[] | null> {
 
 export const MUSIC_TAIL_S = 0.3;
 
-/** Song facts from engine `analyze-music` (tempo, energy, a calm start point). Null if unavailable. */
-async function analyzeMusic(ctx: ToolContext, ref: string): Promise<any | null> {
+/** Song facts from engine `analyze-music` (tempo, energy, the start point on its attack) for the model, and
+ * the beat grid to store in music.beats (never shown to the model). Null if unavailable. */
+async function analyzeMusic(ctx: ToolContext, ref: string, fps: number): Promise<{ song: any; beats: BeatGrid | null } | null> {
   try {
-    const r = await engine(ctx, 'analyze-music', [ref, '--no-beats'], 'Listening to the song');
+    const r = await engine(ctx, 'analyze-music', [ref, '--no-beats', '--fps', String(fps)], 'Listening to the song');
     if (!r || typeof r !== 'object') return null;
+    const grid = r.beatGrid;
     return {
-      duration: r.duration, bpm: r.bpm, energy: r.energy, mood: r.mood, tags: r.tags, suggestedStartAt: r.suggestedStartAt,
-      arrivals: Array.isArray(r.arrivals) ? r.arrivals.map((a: any) => ({ at: a.at, riseDb: a.riseDb })) : undefined,
+      song: {
+        duration: r.duration, bpm: r.bpm, energy: r.energy, mood: r.mood, tags: r.tags, suggestedStartAt: r.suggestedStartAt,
+        arrivals: Array.isArray(r.arrivals) ? r.arrivals.map((a: any) => ({ at: a.at, riseDb: a.riseDb })) : undefined,
+      },
+      beats: grid && Array.isArray(grid.frames) && grid.frames.length && typeof grid.sha256 === 'string'
+        ? { fps: grid.fps, frames: grid.frames, seconds: grid.seconds, sha256: grid.sha256 } : null,
     };
   } catch {
     return null;
@@ -587,6 +645,7 @@ async function analyzeMusic(ctx: ToolContext, ref: string): Promise<any | null> 
 }
 
 const ANIM_PARAMS = animationParamsSchema();
+const sfxIdsWithEnergy = (energy: number) => SFX_SOUNDS.filter((s) => s.energy === energy).map((s) => s.id).join(', ');
 
 interface AnimContext { t0: number; region?: { x: number; y: number; w: number; h: number }; layout?: 'top' | 'full'; words: TimedWord[]; exact: boolean }
 
@@ -828,7 +887,7 @@ const tools: ToolDef[] = [
     description: 'Pick the song (a Library/Music path from list_library) or null for no music. level: under-voice (default) | quiet | loud-intro.',
     parameters: S.obj({
       track: S.opt(S.str('e.g. "Library/Music/song.mp3", or null to remove music')),
-      startAt: S.opt(S.num('seconds into the song to start; leave null and the engine enters on a calm bar before the first big hit', { minimum: 0 })),
+      startAt: S.opt(S.num('seconds into the song to start; leave null and it starts on the first hit of a calm bar before the big build', { minimum: 0 })),
       level: S.opt(S.enum(['under-voice', 'quiet', 'loud-intro'])),
     }),
     async run(ctx, args) {
@@ -852,15 +911,25 @@ const tools: ToolDef[] = [
         ref = r.ref;
         abs = r.abs;
       }
-      const prev = (await loadProject(ctx.projectDir)).music;
-      // a new song with no start point: start where the engine hears a calm bar before the build
-      const song = abs && ref !== prev.track ? await analyzeMusic(ctx, abs) : null;
+      const { p: before } = await load(ctx);
+      const prev = before.music;
+      // the same song name over another file (replaced by hand) is a new song: its grid is stale
+      const newSong = ref !== prev.track || (!!abs && !!prev.beats && !(await gridMatches(prev.beats, abs)));
+      // a new song with no start point: start on the attack the engine hears after a calm bar
+      const heard = abs && newSong ? await analyzeMusic(ctx, abs, before.format.fps) : null;
+      const song = heard?.song ?? null;
       const startAt = args.startAt !== null && args.startAt !== undefined ? args.startAt
-        : (song && typeof song.suggestedStartAt === 'number' ? song.suggestedStartAt : (ref !== prev.track ? 0 : undefined));
-      await mutate(ctx, 'music', (p) => {
+        : (song && typeof song.suggestedStartAt === 'number' ? song.suggestedStartAt : (newSong ? 0 : undefined));
+      // with edits on the beat, another song, no song or another start point moves the picture too
+      const movesBeats = !!prev.onBeat?.length && (newSong || (ref !== null) !== prev.enabled
+        || (startAt !== undefined && startAt !== prev.startAt));
+      await mutate(ctx, movesBeats ? 'beat' : 'music', (p) => {
         p.music.track = ref;
         p.music.enabled = ref !== null;
         if (startAt !== undefined) p.music.startAt = startAt;
+        if (newSong) {                     // another song's beats would put cuts between this one's
+          if (heard?.beats) p.music.beats = heard.beats; else delete p.music.beats;
+        }
         if (args.level) p.music.level = args.level as MusicLevel;
         // hand edits end the song WITH the last word (a ~0.3 s tail), not a long fade under it
         if (ref !== null && ref !== prev.track) p.music.fadeOut = MUSIC_TAIL_S;
@@ -870,7 +939,8 @@ const tools: ToolDef[] = [
       const summary = !name ? 'Took the music out'
         : ref === prev.track && prev.enabled ? (args.level && args.level !== prev.level ? levelWord[args.level] ?? 'Adjusted the music' : 'Adjusted the music')
         : `Added the song "${name}"`;
-      return { content: { ok: true, music: ctx.project!.music, ...(song ? { song } : {}) }, summary };
+      const times = approxOutputTimes(ctx.transcript!, ctx.project!.cut.keep, ctx.project!.cut.gapCap);
+      return { content: { ok: true, music: musicView(ctx.project!.music, times), ...(song ? { song } : {}) }, summary };
     },
   },
   {
@@ -885,6 +955,58 @@ const tools: ToolDef[] = [
       await mutate(ctx, 'music', (p) => { p.music.automation = args.automation; });
       const down = args.automation.some((a: any) => a.gainDb < 0);
       return { content: { ok: true }, summary: args.automation.length ? (down ? 'Turned the music down in places' : 'Lifted the music at the big moment') : 'Evened out the music' };
+    },
+  },
+  {
+    name: 'set_sound_moments',
+    description: 'Only when the note asks; null leaves a field as it is. onBeat: these land on the song\'s beats. '
+      + 'drops: lines the music cuts out for, back on the next beat (one or two at most). reverbThrow: an echo on the last word.',
+    parameters: S.obj({
+      onBeat: S.opt(S.arr(S.enum(BEAT_KINDS))),
+      drops: S.opt(S.arr(S.obj({ from: S.str('first word id'), to: S.str('last word id') }))),
+      reverbThrow: S.opt(S.bool()),
+    }),
+    async run(ctx, args) {
+      const { p, t } = await load(ctx);
+      const onBeat: BeatKind[] | null = args.onBeat ? [...new Set<BeatKind>(args.onBeat)] : null;
+      const drops: MusicDrop[] | null = args.drops;
+      drops?.forEach((d, i) => checkAnchor(t, d, `drops[${i}]`));
+      const music = p.music.enabled && p.music.track;
+      if (!music && (onBeat?.length || drops?.length)) {
+        return {
+          content: { ok: false, note: 'This video has no song, so nothing can land on the beat or drop out. Tell the user plainly and offer to add a song from their Library. Do not say you changed it.' },
+          summary: 'No song to time to',
+        };
+      }
+      let heard: Awaited<ReturnType<typeof analyzeMusic>> = null;
+      // a song chosen before beats were stored: listen to it once now (a drop comes back on the next beat
+      // too, and without one, a moment after its line)
+      // or one changed by hand, whose stored grid belongs to the old song
+      const songFile = music ? resolveAsset(ctx, p.music.track!)?.abs ?? null : null;
+      if ((onBeat?.length || drops?.length) && !(await gridMatches(p.music.beats, songFile))) {
+        heard = songFile ? await analyzeMusic(ctx, songFile, p.format.fps) : null;
+        if (onBeat?.length && !heard?.beats) throw new ToolInputError('no steady beat was found in this song, so there is nothing to land on: tell the user and leave onBeat null');
+      }
+      // landing on beats moves the picture, and so does a grid restored under edits already on the beat;
+      // drops and the echo are only heard
+      const movesBeats = !!onBeat || (!!heard?.beats && !!p.music.onBeat?.length);
+      await mutate(ctx, movesBeats ? 'beat' : 'music', (q) => {
+        if (heard) { if (heard.beats) q.music.beats = heard.beats; else delete q.music.beats; }
+        if (onBeat) { if (onBeat.length) q.music.onBeat = onBeat; else delete q.music.onBeat; }
+        if (drops) { if (drops.length) q.music.drops = drops.map(({ from, to }) => ({ from, to })); else delete q.music.drops; }
+        if (args.reverbThrow === true) q.voice = { ...q.voice, reverbThrow: true };
+        else if (args.reverbThrow === false && q.voice) {
+          delete q.voice.reverbThrow;
+          if (!Object.keys(q.voice).length) delete q.voice;
+        }
+      });
+      const said = [
+        onBeat && (onBeat.length ? `Put the ${onBeat.join(' and ').replace('broll', 'pictures')} on the beat` : 'Took the edits off the beat'),
+        drops && (drops.length ? `Dropped the music for ${drops.length === 1 ? 'a line' : `${drops.length} lines`}` : 'Kept the music playing'),
+        args.reverbThrow === true ? 'Added an echo on the last word' : args.reverbThrow === false ? 'Took the echo off the last word' : null,
+      ].filter(Boolean);
+      return { content: { ok: true, music: { onBeat: ctx.project!.music.onBeat ?? [], drops: ctx.project!.music.drops ?? [] }, voice: ctx.project!.voice ?? {} },
+        summary: said.join('. ') || 'Left the sound as it was' };
     },
   },
   {
@@ -1082,6 +1204,40 @@ const tools: ToolDef[] = [
       args.zooms.forEach((z: any, i: number) => checkAnchor(t, z.anchor, `zooms[${i}]`));
       await mutate(ctx, 'zooms', (p) => { p.zooms = args.zooms.filter((z: any) => z.scale > 1.001).map((z: any) => ({ anchor: z.anchor, scale: z.scale })); });
       return { content: { ok: true, count: ctx.project!.zooms.length }, summary: args.zooms.length ? 'Added a few zoom-ins on the big moments' : 'Took out the zooms' };
+    },
+  },
+  {
+    name: 'set_sfx',
+    description: 'Replace all sound effects. Add them only when the user\'s note asks for sound effects. Most lines get none, and a video with none is fine. Each one hits exactly on its moment, given by one of at.word (that word starts), at.broll (that b-roll appears) or at.cut (the cut into the kept range that starts with that word). Prefer short sounds (energy 1 and 2); a long one (energy 3) at most once. A riser builds for 1.5 to 3 seconds BEFORE its moment. The engine plays one at a time, at most one every 2 seconds, and keeps each one under the voice. Empty list = none.',
+    parameters: S.obj({
+      sfx: S.arr(S.obj({
+        sound: S.enum(SFX_SOUNDS.map((s) => s.id), `Built-in sounds. Energy (how long it carries) is 1, a tap, except 2, a short swell: ${sfxIdsWithEnergy(2)}; and 3, long: ${sfxIdsWithEnergy(3)}`),
+        at: S.obj({
+          word: S.opt(S.str('word id: the sound hits as this word starts (a zoom or caption lands there)')),
+          broll: S.opt(S.str('b-roll id: the sound hits as that b-roll appears')),
+          cut: S.opt(S.str('word id that starts a kept range after the first (cut.keep[].from): the sound hits on that cut')),
+        }),
+        gainDb: S.opt(S.num('null = the normal level under the voice; -6 softer, +6 the loudest it goes', { minimum: -12, maximum: 6 })),
+      })),
+    }),
+    async run(ctx, args) {
+      const { p, t } = await load(ctx);
+      type Entry = { sound: string; at: Record<'word' | 'broll' | 'cut', string | null>; gainDb: number | null };
+      const sfx = args.sfx.map((e: Entry, i: number) => {
+        const given = (['word', 'broll', 'cut'] as const).flatMap((kind) => {
+          const ref = e.at[kind];
+          return ref === null ? [] : [{ kind, ref }];
+        });
+        if (given.length !== 1) throw new ToolInputError(`sfx[${i}].at: give exactly one of word, broll or cut`);
+        const { kind, ref } = given[0];
+        if (kind === 'broll' && !p.broll.some((b) => b.id === ref)) throw new ToolInputError(`sfx[${i}].at.broll: there is no b-roll "${ref}"`);
+        if (kind === 'cut' && !isCut(p, t, ref)) throw new ToolInputError(`sfx[${i}].at.cut: "${ref}" is not a cut: use the first word of a kept range after the first, where the video jumps (cut.keep[].from)`);
+        if (kind !== 'broll') checkAnchor(t, { from: ref, to: ref }, `sfx[${i}].at.${kind}`);
+        const moment: Sfx['at'] = kind === 'word' ? { word: ref } : kind === 'broll' ? { broll: ref } : { cut: ref };
+        return { at: moment, sound: e.sound, ...(e.gainDb ? { gainDb: e.gainDb } : {}) };
+      });
+      await mutate(ctx, 'sfx', (q) => { if (sfx.length) q.sfx = sfx; else delete q.sfx; });
+      return { content: { ok: true, count: sfx.length }, summary: sfx.length ? `Added ${sfx.length === 1 ? 'a sound effect' : `${sfx.length} sound effects`}` : 'Took out the sound effects' };
     },
   },
   {

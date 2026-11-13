@@ -12,6 +12,7 @@ const STAGE: Record<string, { message: string; pct: number }> = {
   list_library: { message: 'Looking through your library', pct: 40 },
   choose_music: { message: 'Adding music', pct: 45 },
   set_music_automation: { message: 'Adding music', pct: 48 },
+  set_sound_moments: { message: 'Timing the music', pct: 49 },
   search_images: { message: 'Adding pictures', pct: 55 },
   fetch_image: { message: 'Adding pictures', pct: 57 },
   make_animation: { message: 'Making an animation', pct: 58 },

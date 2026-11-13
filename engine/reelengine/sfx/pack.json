@@ -1,0 +1,375 @@
+{
+ "version": 1,
+ "sounds": [
+  {
+   "id": "whoosh-quick",
+   "job": "whoosh",
+   "file": "whoosh-quick.opus",
+   "seconds": 0.426,
+   "onsetMs": 41,
+   "loudness": -19.99,
+   "energy": 1,
+   "source": "https://freesound.org/people/qubodup/sounds/60013/"
+  },
+  {
+   "id": "whoosh-snap",
+   "job": "whoosh",
+   "file": "whoosh-snap.opus",
+   "seconds": 0.277,
+   "onsetMs": 49,
+   "loudness": -20.97,
+   "energy": 1,
+   "source": "https://freesound.org/people/qubodup/sounds/59988/"
+  },
+  {
+   "id": "whoosh-soft",
+   "job": "whoosh",
+   "file": "whoosh-soft.opus",
+   "seconds": 0.333,
+   "onsetMs": 40,
+   "loudness": -20.95,
+   "energy": 1,
+   "source": "https://freesound.org/people/lesaucisson/sounds/585257/"
+  },
+  {
+   "id": "whoosh-double",
+   "job": "whoosh",
+   "file": "whoosh-double.opus",
+   "seconds": 0.559,
+   "onsetMs": 73,
+   "loudness": -23.02,
+   "energy": 1,
+   "source": "https://freesound.org/people/martian/sounds/19312/"
+  },
+  {
+   "id": "whoosh-chop",
+   "job": "whoosh",
+   "file": "whoosh-chop.opus",
+   "seconds": 0.495,
+   "onsetMs": 50,
+   "loudness": -19.94,
+   "energy": 1,
+   "source": "https://freesound.org/people/dave.des/sounds/127197/"
+  },
+  {
+   "id": "whoosh-air",
+   "job": "whoosh",
+   "file": "whoosh-air.opus",
+   "seconds": 0.985,
+   "onsetMs": 388,
+   "loudness": -20.03,
+   "energy": 2,
+   "source": "https://freesound.org/people/freakinbehemoth/sounds/243400/"
+  },
+  {
+   "id": "whoosh-wide",
+   "job": "whoosh",
+   "file": "whoosh-wide.opus",
+   "seconds": 1.61,
+   "onsetMs": 670,
+   "loudness": -19.96,
+   "energy": 3,
+   "source": "https://freesound.org/people/florianreichelt/sounds/683096/"
+  },
+  {
+   "id": "whoosh-sweep",
+   "job": "whoosh",
+   "file": "whoosh-sweep.opus",
+   "seconds": 0.445,
+   "onsetMs": 30,
+   "loudness": -19.99,
+   "energy": 1,
+   "source": "https://freesound.org/people/florianreichelt/sounds/683101/"
+  },
+  {
+   "id": "pop-soft",
+   "job": "pop",
+   "file": "pop-soft.opus",
+   "seconds": 0.245,
+   "onsetMs": 3,
+   "loudness": -23.08,
+   "energy": 1,
+   "source": "https://freesound.org/people/deraj/sounds/202230/"
+  },
+  {
+   "id": "pop-cartoon",
+   "job": "pop",
+   "file": "pop-cartoon.opus",
+   "seconds": 0.165,
+   "onsetMs": 0,
+   "loudness": -20.03,
+   "energy": 1,
+   "source": "https://freesound.org/people/unfa/sounds/245646/"
+  },
+  {
+   "id": "pop-plop",
+   "job": "pop",
+   "file": "pop-plop.opus",
+   "seconds": 0.243,
+   "onsetMs": 0,
+   "loudness": -19.98,
+   "energy": 1,
+   "source": "https://freesound.org/people/Breviceps/sounds/447910/"
+  },
+  {
+   "id": "pop-pluck",
+   "job": "pop",
+   "file": "pop-pluck.opus",
+   "seconds": 0.1,
+   "onsetMs": 0,
+   "loudness": -25.8,
+   "energy": 1,
+   "source": "https://kenney.nl/assets/interface-sounds"
+  },
+  {
+   "id": "pop-drop",
+   "job": "pop",
+   "file": "pop-drop.opus",
+   "seconds": 0.188,
+   "onsetMs": 0,
+   "loudness": -23.48,
+   "energy": 1,
+   "source": "https://kenney.nl/assets/interface-sounds"
+  },
+  {
+   "id": "click-mouse",
+   "job": "click",
+   "file": "click-mouse.opus",
+   "seconds": 0.056,
+   "onsetMs": 5,
+   "loudness": -26.87,
+   "energy": 1,
+   "source": "https://kenney.nl/assets/ui-audio"
+  },
+  {
+   "id": "click-soft",
+   "job": "click",
+   "file": "click-soft.opus",
+   "seconds": 0.053,
+   "onsetMs": 2,
+   "loudness": -24.31,
+   "energy": 1,
+   "source": "https://kenney.nl/assets/ui-audio"
+  },
+  {
+   "id": "click-bright",
+   "job": "click",
+   "file": "click-bright.opus",
+   "seconds": 0.038,
+   "onsetMs": 0,
+   "loudness": -24.18,
+   "energy": 1,
+   "source": "https://kenney.nl/assets/ui-audio"
+  },
+  {
+   "id": "click-tick",
+   "job": "click",
+   "file": "click-tick.opus",
+   "seconds": 0.02,
+   "onsetMs": 0,
+   "loudness": -30.03,
+   "energy": 1,
+   "source": "https://kenney.nl/assets/interface-sounds"
+  },
+  {
+   "id": "click-select",
+   "job": "click",
+   "file": "click-select.opus",
+   "seconds": 0.04,
+   "onsetMs": 0,
+   "loudness": -24.64,
+   "energy": 1,
+   "source": "https://kenney.nl/assets/interface-sounds"
+  },
+  {
+   "id": "riser-short",
+   "job": "riser",
+   "file": "riser-short.opus",
+   "seconds": 1.89,
+   "onsetMs": 1717,
+   "loudness": -20.0,
+   "energy": 2,
+   "source": "https://freesound.org/people/Rizzard/sounds/561207/"
+  },
+  {
+   "id": "riser-synth",
+   "job": "riser",
+   "file": "riser-synth.opus",
+   "seconds": 2.787,
+   "onsetMs": 1835,
+   "loudness": -20.02,
+   "energy": 3,
+   "source": "https://freesound.org/people/syntheffects/sounds/685256/"
+  },
+  {
+   "id": "riser-subtle",
+   "job": "riser",
+   "file": "riser-subtle.opus",
+   "seconds": 2.18,
+   "onsetMs": 2008,
+   "loudness": -23.02,
+   "energy": 3,
+   "source": "https://freesound.org/people/BeaconStudio/sounds/859482/"
+  },
+  {
+   "id": "riser-cymbal",
+   "job": "riser",
+   "file": "riser-cymbal.opus",
+   "seconds": 2.902,
+   "onsetMs": 2779,
+   "loudness": -19.99,
+   "energy": 2,
+   "source": "https://freesound.org/people/loganzsound/sounds/774635/"
+  },
+  {
+   "id": "impact-boom",
+   "job": "impact",
+   "file": "impact-boom.opus",
+   "seconds": 2.49,
+   "onsetMs": 4,
+   "loudness": -20.02,
+   "energy": 3,
+   "source": "https://freesound.org/people/AudioPapkin/sounds/430977/"
+  },
+  {
+   "id": "impact-subdrop",
+   "job": "impact",
+   "file": "impact-subdrop.opus",
+   "seconds": 2.155,
+   "onsetMs": 159,
+   "loudness": -23.01,
+   "energy": 3,
+   "source": "https://freesound.org/people/newagesoup/sounds/428073/"
+  },
+  {
+   "id": "impact-hit",
+   "job": "impact",
+   "file": "impact-hit.opus",
+   "seconds": 2.49,
+   "onsetMs": 243,
+   "loudness": -23.05,
+   "energy": 3,
+   "source": "https://freesound.org/people/qubodup/sounds/222517/"
+  },
+  {
+   "id": "impact-punch",
+   "job": "impact",
+   "file": "impact-punch.opus",
+   "seconds": 0.615,
+   "onsetMs": 19,
+   "loudness": -22.94,
+   "energy": 1,
+   "source": "https://kenney.nl/assets/impact-sounds"
+  },
+  {
+   "id": "impact-thud",
+   "job": "impact",
+   "file": "impact-thud.opus",
+   "seconds": 0.515,
+   "onsetMs": 0,
+   "loudness": -22.99,
+   "energy": 1,
+   "source": "https://kenney.nl/assets/impact-sounds"
+  },
+  {
+   "id": "impact-low",
+   "job": "impact",
+   "file": "impact-low.opus",
+   "seconds": 1.0,
+   "onsetMs": 72,
+   "loudness": -22.99,
+   "energy": 2,
+   "source": "https://kenney.nl/assets/sci-fi-sounds"
+  },
+  {
+   "id": "ding-correct",
+   "job": "ding",
+   "file": "ding-correct.opus",
+   "seconds": 0.319,
+   "onsetMs": 59,
+   "loudness": -20.03,
+   "energy": 1,
+   "source": "https://freesound.org/people/ertfelda/sounds/243701/"
+  },
+  {
+   "id": "ding-bright",
+   "job": "ding",
+   "file": "ding-bright.opus",
+   "seconds": 0.963,
+   "onsetMs": 5,
+   "loudness": -20.0,
+   "energy": 1,
+   "source": "https://freesound.org/people/LittleRainySeasons/sounds/335908/"
+  },
+  {
+   "id": "ding-ting",
+   "job": "ding",
+   "file": "ding-ting.opus",
+   "seconds": 1.493,
+   "onsetMs": 1,
+   "loudness": -20.01,
+   "energy": 3,
+   "source": "https://freesound.org/people/robni7/sounds/174027/"
+  },
+  {
+   "id": "ding-idea",
+   "job": "ding",
+   "file": "ding-idea.opus",
+   "seconds": 1.73,
+   "onsetMs": 23,
+   "loudness": -19.98,
+   "energy": 2,
+   "source": "https://freesound.org/people/Saya13/sounds/407258/"
+  },
+  {
+   "id": "ding-glass",
+   "job": "ding",
+   "file": "ding-glass.opus",
+   "seconds": 0.692,
+   "onsetMs": 0,
+   "loudness": -22.99,
+   "energy": 1,
+   "source": "https://kenney.nl/assets/interface-sounds"
+  },
+  {
+   "id": "typing-keys",
+   "job": "typing",
+   "file": "typing-keys.opus",
+   "seconds": 1.6,
+   "onsetMs": 933,
+   "loudness": -21.61,
+   "energy": 2,
+   "source": "https://freesound.org/people/Breviceps/sounds/447909/"
+  },
+  {
+   "id": "typing-mech",
+   "job": "typing",
+   "file": "typing-mech.opus",
+   "seconds": 0.23,
+   "onsetMs": 4,
+   "loudness": -22.31,
+   "energy": 1,
+   "source": "https://freesound.org/people/newagesoup/sounds/348239/"
+  },
+  {
+   "id": "typing-digital",
+   "job": "typing",
+   "file": "typing-digital.opus",
+   "seconds": 1.0,
+   "onsetMs": 0,
+   "loudness": -23.02,
+   "energy": 3,
+   "source": "https://freesound.org/people/Sky_Motion/sounds/416777/"
+  },
+  {
+   "id": "typing-key",
+   "job": "typing",
+   "file": "typing-key.opus",
+   "seconds": 0.4,
+   "onsetMs": 4,
+   "loudness": -25.21,
+   "energy": 1,
+   "source": "https://freesound.org/people/jim-ph/sounds/194799/"
+  }
+ ]
+}
