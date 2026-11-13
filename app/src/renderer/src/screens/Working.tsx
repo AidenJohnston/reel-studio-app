@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { reel, userMessage } from '../api'
 import type { Go } from '../nav'
+import { removeVideo } from './remove'
 import { Confirm, Progress, Spinner, Thinking } from '../components/ui'
 import { Icon } from '../components/icons'
 import { PhonePlayer } from '../components/Player'
@@ -111,11 +112,7 @@ export function Working({ slug, go }: { slug: string; go: Go }) {
     }
   }
 
-  const remove = async () => {
-    // a refusal (still stopping a background job) says so; the video stays in the list to delete again
-    await reel.projects.remove(slug).catch((e) => notify(userMessage(e), 'error'))
-    go({ name: 'home' })
-  }
+  const remove = () => removeVideo(slug, go, notify)
 
   const running = state.kind === 'running' || state.kind === 'loading'
   const bar = live.overall
@@ -267,7 +264,10 @@ export function Working({ slug, go }: { slug: string; go: Go }) {
           no="Keep it"
           danger
           onNo={() => setConfirmDelete(false)}
-          onYes={() => void remove()}
+          onYes={() => {
+            setConfirmDelete(false)
+            void remove()
+          }}
         />
       )}
     </div>

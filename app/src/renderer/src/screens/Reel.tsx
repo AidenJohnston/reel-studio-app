@@ -5,6 +5,7 @@ import { clock } from '../../../shared/progress'
 import { EMPTY_LIVE, liveFromDetail, reduceLive, timeLeftWords, type LiveState } from '../../../shared/live'
 import { errorCode, reel, userMessage } from '../api'
 import type { Go } from '../nav'
+import { removeVideo } from './remove'
 import { Check, Confirm, FOLDER_APP, Modal, MoreMenu, Progress, Spinner, Thinking } from '../components/ui'
 import { SendToPhone } from '../components/SendToPhone'
 import { PlatformExportDialog } from '../components/PlatformExportDialog'
@@ -684,8 +685,8 @@ export function Reel({ slug, go, fresh }: { slug: string; go: Go; fresh?: boolea
           danger
           onNo={() => setConfirmDelete(false)}
           onYes={async () => {
-            await reel.projects.remove(slug).catch((e) => notify(userMessage(e), 'error'))
-            go({ name: 'home' })
+            setConfirmDelete(false)
+            await removeVideo(slug, go, notify)
           }}
         />
       )}
