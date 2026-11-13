@@ -31,6 +31,9 @@ export interface AppState {
   title?: string
   /** An AI editor made the first edit (false/absent = the simple no-AI edit). */
   aiEdited?: boolean
+  /** A job ended without removing its unfinished versions (removal refused, as Windows does while a file
+   * is open): the next start removes them (recoverInterrupted). */
+  cleanupOwed?: boolean
 }
 
 const EMPTY_STATE: AppState = { chat: [], job: null, status: 'new', lastError: null }
@@ -210,13 +213,16 @@ const VIDEO_NAMES = ['export.mp4', 'draft.mp4']
 export async function listVersions(dir: string): Promise<VersionInfo[]> {
   const vdir = join(dir, 'versions')
   let names: string[] = []
+  let saved: number
   try {
     names = await fs.readdir(vdir)
+    saved = Number(JSON.parse(await fs.readFile(join(dir, 'project.json'), 'utf8')).version) || 0
   } catch {
     return []
   }
-  // docs/versions.md: a version is a `vN` folder with `export.mp4`. Drafts live in `versions/preview/`
-  // and are overwritten; they only show (as n = 0, "Preview") when no final version exists yet,
+  // docs/versions.md: a version is a `vN` folder with `export.mp4`, N up to project.json's `version`
+  // (a higher one is a render that was never saved, which the next final render replaces). Drafts
+  // live in `versions/preview/` and are overwritten; they only show (as n = 0, "Preview") when no final version exists yet,
   // e.g. when an AI run's final render failed.
   const out: VersionInfo[] = []
   const push = async (n: number, d: string, video: string): Promise<void> => {
@@ -233,7 +239,7 @@ export async function listVersions(dir: string): Promise<VersionInfo[]> {
   }
   for (const name of names) {
     const m = /^v(\d+)$/.exec(name)
-    if (!m) continue
+    if (!m || Number(m[1]) > saved) continue
     const d = join(vdir, name)
     const video = join(d, 'export.mp4')
     if (!existsSync(video) || existsSync(join(d, '.rendering'))) continue
@@ -262,6 +268,10 @@ export async function cleanPartialVersions(dir: string): Promise<string[]> {
   } catch {
     return removed
   }
+  // a folder up to project.json's version is a saved version, and stays even with a file missing
+  // (render.py never encodes into it); null: project.json can't be read, so only the files decide
+  const p = await readJson<{ version?: unknown } | null>(join(dir, 'project.json'), null)
+  const saved = p ? Number(p.version) || 0 : null
   for (const name of names) {
     // The engine's scratch previews (docs/versions.md) are the engine's to overwrite (review 31).
     if (name === PREVIEW_DIR) continue
@@ -275,10 +285,10 @@ export async function cleanPartialVersions(dir: string): Promise<string[]> {
       }
       continue
     }
+    const n = /^v(\d+)$/.exec(name)
     const finished =
-      /^v\d+$/.test(name) &&
-      VIDEO_NAMES.some((v) => existsSync(join(d, v))) &&
-      !existsSync(join(d, '.rendering'))
+      !!n &&
+      ((saved !== null && Number(n[1]) <= saved) || (VIDEO_NAMES.some((v) => existsSync(join(d, v))) && !existsSync(join(d, '.rendering'))))
     if (!finished) {
       await fs.rm(d, { recursive: true, force: true })
       removed.push(d)
@@ -294,12 +304,25 @@ export async function cleanPartialVersions(dir: string): Promise<string[]> {
   return removed
 }
 
+/** Removes what an ended job left (cleanPartialVersions). False when a removal was refused, as Windows
+ * does while a file is open: the caller keeps cleanupOwed for a later try. Any other failure throws. */
+async function removeLeftovers(dir: string): Promise<boolean> {
+  try {
+    await cleanPartialVersions(dir)
+    return true
+  } catch (e) {
+    if ([...WINDOWS_LOCK, 'ENOTEMPTY'].includes((e as NodeJS.ErrnoException).code ?? '')) return false
+    throw e
+  }
+}
+
 /**
  * Called once at startup, before any job can run: a project whose app.json still says a job is
  * running was interrupted (quit, crash, power cut). Clean it up and mark it so the UI can offer
- * to pick up where it left off.
+ * to pick up where it left off. One whose job could not remove its unfinished versions
+ * (cleanupOwed) only gets them removed.
  */
-export async function recoverInterrupted(): Promise<string[]> {
+export async function recoverInterrupted(stillRunning: string[] = []): Promise<string[]> {
   const recovered: string[] = []
   let slugs: string[] = []
   try {
@@ -314,11 +337,18 @@ export async function recoverInterrupted(): Promise<string[]> {
     } catch {
       continue
     }
+    if (stillRunning.includes(slug)) continue // an engine of the last run may still write there
     if (!existsSync(join(dir, 'app.json'))) continue
     const s = await readAppState(slug)
-    if (!s.job) continue
-    await cleanPartialVersions(dir)
+    if (!s.job && !s.cleanupOwed) continue
+    // a removal still refused keeps the mark for the next start; the job is settled all the same, and the
+    // other projects are still recovered
+    const cleaned = await removeLeftovers(dir)
+    if (!s.job && !cleaned) continue
     await updateAppState(slug, (st) => {
+      if (cleaned) delete st.cleanupOwed
+      else st.cleanupOwed = true
+      if (!st.job) return // the job itself ended and said so: only its clean-up was left
       st.status = st.job?.kind === 'first-edit' || !existsSync(join(dir, 'versions')) ? 'interrupted' : 'ready'
       if (st.status === 'ready' && st.job?.kind !== 'export') {
         st.chat.push({
@@ -493,7 +523,12 @@ export async function detail(slug: string): Promise<ProjectDetail> {
   const words = await readWords(dir, project)
   const kept = keptIds(words, project.cut?.keep)
   const st = await readAppState(slug)
-  const captionLines = readCaptionLines(await readJson<unknown>(join(dir, 'work', 'captions.json'), null))
+  // the lines of the saved version (or of the preview before there is one): each render keeps its
+  // caption report beside its video (docs/versions.md); a version made before that left it in work/
+  const shown = join(dir, 'versions', project.version ? `v${project.version}` : PREVIEW_DIR)
+  const captionLines = readCaptionLines(
+    (await readJson<unknown>(join(shown, 'captions.json'), null)) ?? (await readJson<unknown>(join(dir, 'work', 'captions.json'), null))
+  )
   const brollThumbs: Record<string, string> = {}
   for (const b of project.broll ?? []) {
     const a = typeof b.asset === 'string' ? b.asset : ''

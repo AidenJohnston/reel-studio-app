@@ -252,12 +252,14 @@ def run_ffmpeg(cmd: list[str], total: float, stage: str, message: str, lo: float
         raise Fail("RENDER_FAILED", "I could not finish your video. Please try again.", err[-2000:])
 
 
-def write_captions(proj: Path, data: dict) -> None:
-    """work/captions.json as the real engine writes it, with simpler lines: the kept words three to a line
+def write_captions(proj: Path, vdir: Path, data: dict) -> None:
+    """captions.json beside the render, as the real engine writes it, with simpler lines: the kept words three to a line
     (one speech run), the one-word fixes applied (a word fixed to nothing keeps its place as ""), then the
     subtitle editor's split and join applied as the engine does (captions.edit_lines)."""
     cap = data.get("captions") or {}
     if cap.get("enabled") is False:
+        # no captions: an empty report, as the real engine writes, never an older render's lines
+        (vdir / "captions.json").write_text(json.dumps({"cues": []}), "utf-8")
         return
     words = json.loads((proj / "work" / "transcript.json").read_text("utf-8"))["words"]
     index = {w["id"]: i for i, w in enumerate(words)}
@@ -284,7 +286,7 @@ def write_captions(proj: Path, data: dict) -> None:
                 lines.append([])
             lines[-1].append(t)
     cues = [{"run": 0, "ids": [t["ids"][0] for t in line], "tokens": line} for line in lines if shown(line)]
-    (proj / "work" / "captions.json").write_text(json.dumps({"cues": cues}), "utf-8")
+    (vdir / "captions.json").write_text(json.dumps({"cues": cues}), "utf-8")
 
 
 def cmd_render(args: list[str]) -> dict:
@@ -317,8 +319,8 @@ def cmd_render(args: list[str]) -> dict:
     (vdir / "verify.json").write_text(json.dumps({"ok": True, "duration": dur}), "utf-8")
     (vdir / "project.json").write_text(json.dumps(data, indent=2, ensure_ascii=False), "utf-8")
     (vdir / ".rendering").unlink()
+    write_captions(proj, vdir, data)
     if not draft:
-        write_captions(proj, data)
         data["version"] = n
         save(proj, data)
     progress("render", 100, "Done")
@@ -387,6 +389,7 @@ def main() -> int:
               "userMessage": "Reel Studio asked for something I do not know how to do."})
         return 1
     cmd, args = sys.argv[1], sys.argv[2:]
+    take(args, "--owner")       # the real engine checks it (reelengine/owner.py); the stand-in has no lock
     if os.environ.get("FAKE_ENGINE_FAIL") == cmd:
         emit({"event": "error", "code": "TEST_FAILURE", "message": "forced", "userMessage": "Test failure. Try again."})
         return 1
