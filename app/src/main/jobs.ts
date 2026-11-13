@@ -58,6 +58,8 @@ export function createJobManager(broadcast: (e: JobEvent) => void, log: (s: stri
     const pending: Promise<void>[] = []
     const tracker = new ProgressTracker(kind, 0, history)
     let phase: Phase | undefined
+    let ended = false
+    let failed = false
     // `thinking` is state, not a one-off: the once-a-second repeats keep saying it until the AI answers
     const status = (): void => {
       const snap = tracker.snapshot()
@@ -71,6 +73,10 @@ export function createJobManager(broadcast: (e: JobEvent) => void, log: (s: stri
     // re-broadcast once a second: time moves the bar and the estimate even while the AI thinks
     const tick = setInterval(() => status(), progress?.tickMs ?? 1000)
     tick.unref?.()
+    const end = (): void => {
+      ended = true
+      clearInterval(tick)
+    }
 
     job.done = (async () => {
       try {
@@ -91,6 +97,9 @@ export function createJobManager(broadcast: (e: JobEvent) => void, log: (s: stri
         const t0 = Date.now()
         let logged = ''
         const res = await fn((e) => {
+          // A cancelled engine can still print progress while it dies (Windows: about a second). Anything the
+          // job emits once it has ended would reach the screen after `cancelled` and put the job back there.
+          if (ended) return
           if (e.type === 'status') {
             if (e.message && e.message !== logged) log(`[job ${kind}] ${(logged = e.message)}`)
             job.message = e.message || job.message
@@ -112,10 +121,16 @@ export function createJobManager(broadcast: (e: JobEvent) => void, log: (s: stri
           } else if (e.type === 'render') {
             const r = e
             const video = slug && toVideo ? toVideo(slug, r).catch(() => null) : Promise.resolve(null)
-            pending.push(video.then((v) => send({ jobId: id, slug, type: 'render', version: r.version, draft: r.draft, firstLook: !!r.firstLook, video: v })))
+            // a job that succeeds waits for these before `done`; one that fails or is stopped drops the ones still on their way
+            pending.push(
+              video.then((v) => {
+                if (!failed) send({ jobId: id, slug, type: 'render', version: r.version, draft: r.draft, firstLook: !!r.firstLook, video: v })
+              })
+            )
           } else if (e.type === 'reply') send({ jobId: id, slug, type: 'reply', text: e.text })
           else send({ jobId: id, slug, type: 'heard', words: e.words })
         }, abort.signal)
+        end()
         await Promise.all(pending) // a render's event before `done`, never after
         if (progress && mediaSec > 0) {
           // what each phase really took on this computer: the next estimate starts from it
@@ -131,6 +146,8 @@ export function createJobManager(broadcast: (e: JobEvent) => void, log: (s: stri
         log(`[job ${kind}] done in ${Math.round((Date.now() - t0) / 1000)} s`)
         send({ jobId: id, slug, type: 'done', summary: res.summary, version: res.version })
       } catch (e) {
+        end()
+        failed = true
         const err = toUserError(e)
         const cancelled = err.code === 'CANCELLED' || abort.signal.aborted
         if (!cancelled) log(`[job ${kind}] ${err.code}: ${err.message ?? ''}`)
@@ -139,9 +156,10 @@ export function createJobManager(broadcast: (e: JobEvent) => void, log: (s: stri
           await updateAppState(slug, (s) => {
             s.job = null
             if (kind === 'first-edit') s.status = cancelled ? 'interrupted' : 'failed'
-            if (!cancelled) s.lastError = { code: err.code, userMessage: err.userMessage }
+            // An export failure is shown in the export dialog; the video itself is fine.
+            if (!cancelled && kind !== 'export') s.lastError = { code: err.code, userMessage: err.userMessage }
           }).catch(() => {})
-          if (!cancelled && kind !== 'first-edit') await addChat(slug, 'editor', err.userMessage).catch(() => {})
+          if (!cancelled && kind !== 'first-edit' && kind !== 'export') await addChat(slug, 'editor', err.userMessage).catch(() => {})
         }
         send(cancelled ? { jobId: id, slug, type: 'cancelled' } : { jobId: id, slug, type: 'error', code: err.code, userMessage: err.userMessage })
       } finally {
