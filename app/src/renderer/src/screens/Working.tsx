@@ -27,6 +27,7 @@ export function Working({ slug, go }: { slug: string; go: Go }) {
   const started = useRef(Date.now())
   const jobRef = useRef<string | null>(null)
   const [source, setSource] = useState<string | null>(null)
+  const [frameShown, setFrameShown] = useState(false)
   // the take is flipped at render (it was mirrored): its first frame here is shown flipped too
   const [mirrored, setMirrored] = useState(false)
   const [heard, setHeard] = useState<string[]>([])
@@ -135,11 +136,24 @@ export function Working({ slug, go }: { slug: string; go: Go }) {
             </>
           ) : (
             <div className={`phone${running ? ' working' : ''}`}>
-              <div className="phone-screen">
-                {source ? (
-                  <video className={`still${mirrored ? ' mirrored' : ''}`} src={`${source}#t=0.5`} preload="metadata" muted playsInline disablePictureInPicture data-testid="working-frame" />
-                ) : (
-                  <div className="phone-empty">{running ? <Spinner /> : null}</div>
+              {/* Paper until the take's first frame is decoded, then the frame fades in: never a black screen. */}
+              <div className={`phone-screen${frameShown ? '' : ' waiting'}`} data-testid="working-screen">
+                {source && (
+                  <video
+                    className={`still${mirrored ? ' mirrored' : ''}${frameShown ? ' shown' : ''}`}
+                    src={`${source}#t=0.5`}
+                    preload="auto"
+                    muted
+                    playsInline
+                    disablePictureInPicture
+                    onLoadedData={() => setFrameShown(true)}
+                    data-testid="working-frame"
+                  />
+                )}
+                {!source && running && (
+                  <div className="phone-empty" data-testid="working-spinner">
+                    <Spinner />
+                  </div>
                 )}
                 {running && <div className="phone-scan" aria-hidden />}
               </div>
