@@ -27,8 +27,10 @@
 #        python, ffmpeg, dylibs, .so, ... NONE
 #   3. codesign --verify --deep --strict
 #   4. zip -> xcrun notarytool submit --wait -> xcrun stapler staple (the .app)
-#   5. build the .dmg from the signed+stapled app, sign it, notarize it, staple it
-#   6. final checks: codesign --verify, spctl -a -vv (app and dmg), stapler validate
+#   5. build the .dmg from the signed+stapled app, sign it, notarize it, staple it; zip the same app as
+#      Reel-Studio-<v>-arm64-mac.zip (what installed copies download to update themselves)
+#   6. final checks: codesign --verify, spctl -a -vv (app and dmg), stapler validate, and the zip unpacks to
+#      the same valid, stapled app
 set -euo pipefail
 unset ELECTRON_RUN_AS_NODE
 
@@ -171,6 +173,7 @@ notarize() { # notarize <file-to-submit> <what>
 }
 
 DMG="$OUT/Reel-Studio-$DMG_VER-arm64.dmg"
+UPDATE_ZIP="$OUT/Reel-Studio-$DMG_VER-arm64-mac.zip"
 if [ "$SKIP_NOTARIZE" = 1 ]; then
   say "4/6 Notarize: SKIPPED"
 else
@@ -182,8 +185,8 @@ else
   rm -f "$ZIP"
 fi
 
-# ---------- 5. dmg ----------
-say "5/6 Build the .dmg from the signed app"
+# ---------- 5. dmg + update zip ----------
+say "5/6 Build the .dmg and the update zip from the signed app"
 STAGE="$(mktemp -d -t rsdmg)"
 ditto "$SIGNED" "$STAGE/$PRODUCT.app"
 ln -s /Applications "$STAGE/Applications"
@@ -197,6 +200,10 @@ if [ "$ADHOC" = 0 ]; then
     xcrun stapler staple "$DMG"
   fi
 fi
+# The update zip is the stapled app itself. ditto keeps the bundle exactly (symlinks inside the frameworks,
+# permissions, extended attributes), which Squirrel.Mac needs to accept the update; `zip` would break it.
+rm -f "$UPDATE_ZIP"
+ditto -c -k --sequesterRsrc --keepParent "$SIGNED" "$UPDATE_ZIP"
 
 # ---------- 6. final checks ----------
 say "6/6 Final checks"
@@ -211,7 +218,15 @@ else
     spctl -a -vv --type open --context context:primary-signature "$DMG"
   fi
 fi
+UNZIP="$(mktemp -d -t rsupdatezip)"
+ditto -x -k "$UPDATE_ZIP" "$UNZIP"
+codesign --verify --deep --strict "$UNZIP/$PRODUCT.app" || die "the update zip does not unpack to a validly signed app"
+[ -f "$UNZIP/$PRODUCT.app/Contents/Resources/app-update.yml" ] || die "app-update.yml is missing from the app: the publish block in packaging/electron-builder.yml did not reach the build"
+if [ "$SKIP_NOTARIZE" = 0 ]; then xcrun stapler validate "$UNZIP/$PRODUCT.app"; fi
+rm -rf "$UNZIP"
 echo
 echo "DONE."
 echo "  Signed app : $SIGNED"
 echo "  Installer  : $DMG   ($(du -h "$DMG" | cut -f1))"
+echo "  Update zip : $UPDATE_ZIP   ($(du -h "$UPDATE_ZIP" | cut -f1))"
+if [ "$SKIP_NOTARIZE" = 1 ]; then echo "  (not notarized: do not publish these)"; fi

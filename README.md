@@ -118,16 +118,22 @@ speech model download from Hugging Face, image search (Openverse and Wikimedia C
 (Simple Icons) with the words the AI chose, a screenshot of a website or app page the AI names in your reel, and downloads of pictures, videos or songs from links you paste. There is no analytics and no
 crash reporting.
 
-One request happens without you asking: at most once a day it asks `dl.getreelstudio.com/latest.json` whether a
-newer version is out, sending only a generic
-`User-Agent: ReelStudio/<version>` and no cookies, account or ID. If there is one, a small note says so; nothing
-is downloaded or installed. Turn it off in Settings with "Check for updates".
+One request happens without you asking: at most once a day (an hour later if it failed) it asks
+`dl.getreelstudio.com/latest.json` whether a newer version is out, sending only a generic
+`User-Agent: ReelStudio/<version>` and no cookies, account or ID. Settings › About › **Check now** sends the same
+request. If there is a newer version, a button at the bottom of the sidebar offers it; nothing is downloaded or
+installed without a click. Turn the daily check off in Settings with "Check for updates".
 
 Automatic updates are off until you turn them on with the link in your receipt email (or by pasting it in
 Settings › About). That stores your download key in the app's settings file. The key names your purchase (the
-Stripe checkout id, the plan and a date), never your email or name, and the app sends it only to
-`dl.getreelstudio.com/u/`, in a request header with each update download, so the server can check the purchase
-is still active. The daily check above never carries it.
+Stripe checkout id, the plan and a date), never your email or name. With automatic updates on, Reel Studio offers
+to update itself: say yes and it downloads the new version and installs it when you restart. Only that download
+carries the key: when you click **Download update**, electron-updater asks `dl.getreelstudio.com/u/` for the update
+description (`latest-mac.yml` on a Mac, `latest.yml` on Windows) and then the file it names, sending the key in an
+`Authorization` header so the server can check the purchase is still active, its own `User-Agent: electron-builder`,
+and `x-user-staging-id: 00000000-0000-0000-0000-000000000000`, the same for every copy. The daily check above never
+carries the key. Without a key, or when the server turns it down, the button opens the download page in your
+browser instead.
 
 ## Build from source
 

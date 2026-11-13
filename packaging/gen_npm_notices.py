@@ -21,33 +21,55 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parent.parent
 OUT = Path(__file__).resolve().parent / "licenses" / "npm-licenses.txt"
 BUNDLED_FRONTEND = ["react", "react-dom", "scheduler"]
-ALLOWED = {"MIT", "Apache-2.0", "BSD-2-Clause", "BSD-3-Clause", "ISC", "Unlicense", "0BSD", "CC0-1.0"}
+# BlueOak-1.0.0 (sax) and Python-2.0 (argparse) come with electron-updater; both are permissive, OSI-approved
+# licences that only ask for their notice to be kept, which npm-licenses.txt does.
+ALLOWED = {"MIT", "Apache-2.0", "BSD-2-Clause", "BSD-3-Clause", "ISC", "Unlicense", "0BSD", "CC0-1.0", "BlueOak-1.0.0", "Python-2.0"}
 # Packages whose npm tarball carries no licence file: (SPDX shown, file to use instead).
-NO_FILE = {"standardwebhooks": "licenses/npm-extra/standardwebhooks-LICENSE.txt"}
+NO_FILE = {"standardwebhooks": "licenses/npm-extra/standardwebhooks-LICENSE.txt", "lazy-val": "licenses/npm-extra/lazy-val-LICENSE.txt"}
 
 
-def walk(node: dict, seen: set) -> None:
+def installed_dir(name: str, start: Path) -> Path | None:
+    """Where Node finds `name` from a package in `start`: the nearest node_modules/<name> on the way up. A package can
+    ship a nested copy at another version than the top-level one (electron-updater's semver), so the name alone is
+    not enough."""
+    for d in (start, *start.parents):
+        cand = d / "node_modules" / name
+        if cand.is_dir():
+            return cand.resolve()
+    return None
+
+
+def walk(node: dict, at: Path, found: dict) -> None:
+    """Records the directory of every package in `node`'s dependency tree; `at` is where `node` is installed."""
     for name, child in (node.get("dependencies") or {}).items():
-        if name.startswith("@reelstudio/"):
-            walk(child, seen)
+        pkg_dir = installed_dir(name, at)
+        if pkg_dir is None:  # an optional peer that is not installed (zod for the Anthropic SDK) does not ship
+            print("skipping %s: not installed (optional peer)" % name)
             continue
-        seen.add(name)
-        walk(child, seen)
+        if not name.startswith("@reelstudio/"):
+            if pkg_dir in found:
+                continue
+            found[pkg_dir] = name
+        walk(child, pkg_dir, found)
 
 
 def main() -> None:
     npm = shutil.which("npm.cmd") or shutil.which("npm")
     tree = json.loads(subprocess.run([npm, "ls", "--all", "--omit=dev", "--json"], cwd=str(REPO), stdout=subprocess.PIPE,
                                      universal_newlines=True).stdout)
-    names: set = set(BUNDLED_FRONTEND)
-    walk(tree, names)
-    problems, parts = [], []
-    for name in sorted(names):
-        pkg_dir = REPO / "node_modules" / name
-        if not pkg_dir.is_dir():  # an optional peer that is not installed (zod for the Anthropic SDK) does not ship
-            print("skipping %s: not installed (optional peer)" % name)
-            continue
+    found: dict = {}
+    for name in BUNDLED_FRONTEND:
+        pkg_dir = installed_dir(name, REPO)
+        if pkg_dir is not None:
+            found[pkg_dir] = name
+    walk(tree, REPO, found)
+    # One notice per name and version: the same version installed in two places ships the same files.
+    packages: dict = {}
+    for pkg_dir, name in found.items():
         meta = json.loads((pkg_dir / "package.json").read_text(encoding="utf-8"))
+        packages.setdefault((name, meta["version"]), (pkg_dir, meta))
+    problems, parts = [], []
+    for (name, _version), (pkg_dir, meta) in sorted(packages.items()):
         lic = meta.get("license")
         if lic not in ALLOWED:
             problems.append("%s: licence %r is not on the permissive allow-list" % (name, lic))

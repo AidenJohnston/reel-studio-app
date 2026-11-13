@@ -42,12 +42,16 @@ Reel Studio downloads its speech helper once (this is how it "listens" to your v
 
 ## Updating to a newer version
 
-Reel Studio does not update itself yet, but it tells you when a new version is out: a small note at the bottom left says
-**Reel Studio 0.1.1 is out.** (with the new number) and **Download** opens the download page in your browser. You can also open
-**Settings** and click **Check for a newer version** any time. Both open [getreelstudio.com/update.html](https://getreelstudio.com/update.html):
-in the browser you bought with it shows **Download now** straight away; anywhere else, enter the email you paid with and it
-sends you a fresh link. Run the new **Reel-Studio-Setup-...exe** the same way. It installs over the old copy and your
-videos, music and settings are untouched. Only download it from that page or from your download email.
+When a new version is out, a button at the bottom left of the sidebar says so. With automatic updates on (the
+**Turn on automatic updates** button in your receipt email, or **Settings › About › Paste my download link**),
+Reel Studio offers to update itself: click **Download update**, and when it finishes click **Restart to update** and
+confirm. Reel Studio closes, a small window shows the new version installing, and Reel Studio opens again. Your videos
+and settings stay. You can also check from **Settings › About**.
+
+Without automatic updates the button opens [getreelstudio.com/update.html](https://getreelstudio.com/update.html)
+instead: in the browser you bought with it shows **Download now** straight away; anywhere else, enter the email you paid
+with and it sends you a fresh link. Run the new **Reel-Studio-Setup-...exe** the same way. It installs over the old copy
+and your videos, music and settings are untouched. Only download it from that page or from your download email.
 
 ## Removing it
 
