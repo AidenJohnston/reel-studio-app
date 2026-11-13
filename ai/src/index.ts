@@ -551,7 +551,7 @@ function editHost(host: EngineHost, owner: string | undefined) {
           throw e;
         }
       },
-      renderAnimation: (template, params, outPath) => host.renderAnimation(template, params, outPath),
+      renderAnimation: (template, params, outPath, fps) => host.renderAnimation(template, params, outPath, fps),
       reelStudioRoot: () => host.reelStudioRoot(),
       ...(host.captureWebsite ? { captureWebsite: host.captureWebsite.bind(host) } : {}),
     } satisfies EngineHost,
