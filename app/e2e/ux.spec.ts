@@ -114,10 +114,11 @@ test('no AI: honest checklist, note -> button, caption controls, add song + pict
   await expect(page.getByTestId('note-progress')).toBeInViewport() // never scrolled out of sight
   // a manual change says what it is (grandma 2: "Adding pictures" for a colour change) and shows a quick preview first
   await expect(page.getByTestId('note-progress')).toContainText('Updating your subtitles')
-  await expect(page.getByTestId('change-preview')).toBeVisible({ timeout: 60_000 })
   await expect(page.getByTestId('export-wait')).toBeVisible() // says why Export is greyed
   await shot(page, 'ux-09-new-version-working')
   await expect(page.getByTestId('versions').getByText('Version 2')).toBeVisible({ timeout: 10 * 60_000 })
+  // the change stops at its draft: the version plays it and says the full-quality file comes with Export
+  await expect(page.getByTestId('preview-quality')).toHaveText('This is a quick preview. Export makes the full-quality file.')
   const style = projectJson().captions.style
   expect([style.size, style.position, style.color, !!style.box]).toEqual([126, 0.66, '#FFD60A', false])
   // The chat and the version button say what changed (critique 1.8).
@@ -155,6 +156,8 @@ test('no AI: honest checklist, note -> button, caption controls, add song + pict
   await page.getByTestId('export').click()
   await expect(page.getByText('Saved to your computer')).toBeVisible({ timeout: 10 * 60_000 })
   await expect(page.getByTestId('export-name')).toContainText(' - Version 4.mp4')
+  // what people ask before they post, read from the exported file
+  await expect(page.getByTestId('export-facts')).toHaveText(/^1080x1920, 30 fps, full resolution, [\d.]+ MB\. This is the file to post\.$/)
   const where = process.platform === 'darwin' ? 'Show in Finder' : 'Show in Explorer'
   await expect(page.getByTestId('show-in-folder')).toHaveText(where)
   await page.getByTestId('show-in-folder').click()

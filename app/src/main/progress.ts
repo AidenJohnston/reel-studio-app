@@ -19,13 +19,15 @@ export const DEFAULTS: Record<string, Omit<PhaseModel, 'n'>> = {
   'first-edit:final': { base: 8, perMin: 25 },
   'note:edit': { base: 20, perMin: 4 },
   'note:final': { base: 6, perMin: 22 },
-  'rerender:final': { base: 6, perMin: 22 }
+  'rerender:final': { base: 6, perMin: 22 },
+  'export:final': { base: 8, perMin: 25 }
 }
 
 const PLAN: Record<string, Timed[]> = {
   'first-edit': ['listen', 'analyze', 'edit', 'final'],
   note: ['edit', 'final'],
-  rerender: ['final']
+  rerender: ['final'],
+  export: ['final']
 }
 
 /** Phases where the reported percent is real work done (an engine command), not a milestone. */

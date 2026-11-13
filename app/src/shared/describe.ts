@@ -1,6 +1,6 @@
 // "Version 3: bigger yellow subtitles, moved up." Says in plain words what an "Edit it myself"
 // change did, so the chat and the version buttons mean something. Keep free of Node and DOM imports.
-import type { DropResult, ProjectJson } from './api'
+import type { DropResult, ProjectJson, VideoFacts } from './api'
 import { isMirrored } from './mirror'
 
 type Style = Record<string, unknown>
@@ -62,6 +62,18 @@ export function describeChange(before: ProjectJson, patch: Partial<ProjectJson>,
     else if (patch.cover.atSourceTime !== before.cover?.atSourceTime) parts.push('new cover')
   }
   return parts.join(', ')
+}
+
+/** The export box's first line: "1080x1920, 30 fps, full resolution, 24 MB. This is the file to post."
+ * Sizes are in decimal megabytes, as Finder shows them. */
+export function exportFacts(f: VideoFacts): string {
+  const mb = f.bytes / 1e6
+  const size = mb >= 1000 ? `${(mb / 1000).toFixed(1)} GB` : mb >= 10 ? `${Math.round(mb)} MB` : `${Math.max(0.1, mb).toFixed(1)} MB`
+  const fps = Math.round(f.fps * 100) / 100
+  const head = `${f.width}x${f.height}, ${fps} fps`
+  return f.fullResolution
+    ? `${head}, full resolution, ${size}. This is the file to post.`
+    : `${head}, ${size}. This is smaller than full resolution.`
 }
 
 /** "Version 3: bigger yellow subtitles, moved up." */

@@ -125,6 +125,7 @@ test('make a reel end to end', async () => {
   const exported = readdirSync(join(root(), 'Library', 'Exports'))
   expect(exported.some((f) => / - Version 2\.mp4$/.test(f))).toBe(true)
   await expect(page.getByTestId('export-name')).toContainText('- Version 2.mp4')
+  await expect(page.getByTestId('export-facts')).toContainText('This is the file to post.')
   expect(exported.some((f) => f.endsWith('caption.txt'))).toBe(true)
   await page.getByText('Done', { exact: true }).click()
 

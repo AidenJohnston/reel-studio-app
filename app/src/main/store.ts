@@ -215,9 +215,10 @@ export async function listVersions(dir: string): Promise<VersionInfo[]> {
   } catch {
     return []
   }
-  // docs/versions.md: a version is a `vN` folder with `export.mp4`. Drafts live in `versions/preview/`
-  // and are overwritten; they only show (as n = 0, "Preview") when no final version exists yet,
-  // e.g. when an AI run's final render failed.
+  // docs/versions.md: a version is a `vN` folder with its full-quality `export.mp4`, or one saved from its
+  // draft (`draft.mp4` beside the `inputs.json` engine save-version writes; an older build's scratch draft
+  // in a `vN` folder has none and is not a version). The scratch preview in `versions/preview/` is
+  // overwritten; it only shows (as n = 0, "Preview") when no version exists yet.
   const out: VersionInfo[] = []
   const push = async (n: number, d: string, video: string): Promise<void> => {
     const st = await fs.stat(video)
@@ -235,9 +236,9 @@ export async function listVersions(dir: string): Promise<VersionInfo[]> {
     const m = /^v(\d+)$/.exec(name)
     if (!m) continue
     const d = join(vdir, name)
-    const video = join(d, 'export.mp4')
-    if (!existsSync(video) || existsSync(join(d, '.rendering'))) continue
-    await push(Number(m[1]), d, video)
+    if (existsSync(join(d, '.rendering'))) continue
+    const video = existsSync(join(d, 'export.mp4')) ? join(d, 'export.mp4') : existsSync(join(d, 'inputs.json')) ? join(d, 'draft.mp4') : null
+    if (video && existsSync(video)) await push(Number(m[1]), d, video)
   }
   if (!out.length) {
     const d = join(vdir, PREVIEW_DIR)

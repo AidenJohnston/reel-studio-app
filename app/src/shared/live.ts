@@ -11,6 +11,14 @@ export type Preview =
   /** The AI's own draft render (it is checking it). */
   | { kind: 'ai-draft'; video: string; version: number }
 
+/** A picture of what the AI just changed, made before its draft (engine `moments`). */
+export type Moment =
+  | { kind: 'still'; image: string; t: number }
+  | { kind: 'window'; video: string; from: number; to: number }
+
+/** How many moments the screen keeps: one run's three stills and its window. */
+export const MOMENTS_KEPT = 4
+
 export interface LiveState {
   jobId: string | null
   message: string
@@ -30,6 +38,8 @@ export interface LiveState {
   tools: string[]
   /** A note's reply, known before its render is done (fast notes). */
   reply: string | null
+  /** The newest pictures of what changed, oldest first, at most MOMENTS_KEPT. */
+  moments: Moment[]
   /** The job ended. */
   end: { kind: 'done'; version?: number } | { kind: 'error'; code: string; userMessage: string } | { kind: 'cancelled' } | null
 }
@@ -45,6 +55,7 @@ export const EMPTY_LIVE: LiveState = {
   preview: null,
   tools: [],
   reply: null,
+  moments: [],
   end: null
 }
 
@@ -78,6 +89,10 @@ export function reduceLive(s: LiveState, e: JobEvent): LiveState {
       return { ...base, preview: { kind: 'ai-draft', video: e.video, version: e.version } }
     case 'reply':
       return { ...base, reply: e.text }
+    case 'moment': {
+      const m: Moment = e.kind === 'still' ? { kind: 'still', image: e.image, t: e.t } : { kind: 'window', video: e.video, from: e.from, to: e.to }
+      return { ...base, moments: [...base.moments, m].slice(-MOMENTS_KEPT) }
+    }
     case 'done':
       return { ...base, overall: 100, secondsLeft: 0, overdue: false, thinking: false, end: { kind: 'done', version: e.version } }
     case 'error':

@@ -238,7 +238,7 @@ describe('finding 13: transcript and web text are data, style rules are visible 
         { toolCalls: [call('set_gap_cap', { seconds: 0.3 })] },
         { toolCalls: [call('finish', { summary_for_user: 'I slowed it down.' })] },
       ]);
-      const r = await createAI({ host, settingsDir, providerOverride: m, finalRender: false }).applyNote(dir, 'slower', () => undefined);
+      const r = await createAI({ host, settingsDir, providerOverride: m }).applyNote(dir, 'slower', () => undefined);
       expect(r.summary).toContain('I slowed it down.');
     } finally {
       await fsp.chmod(creditsPath, 0o644);
@@ -251,7 +251,7 @@ describe('finding 13: transcript and web text are data, style rules are visible 
       { toolCalls: [call('add_style_rule', { rule: 'Keep music quieter under talking' }), call('set_gap_cap', { seconds: 0.3 })] },
       { toolCalls: [call('finish', { summary_for_user: 'I slowed it down.' })] },
     ]);
-    const r = await createAI({ host, settingsDir, providerOverride: m, finalRender: false }).applyNote(dir, 'slower and remember quiet music', () => undefined);
+    const r = await createAI({ host, settingsDir, providerOverride: m }).applyNote(dir, 'slower and remember quiet music', () => undefined);
     expect(r.summary).toMatch(/My style/);
     expect(r.summary).toContain('Keep music quieter under talking.');
   });
@@ -262,7 +262,7 @@ describe('finding 14: no "I made that change" when the agent ran out of steps', 
     const { dir, host, settingsDir } = await setup();
     const loop = Array.from({ length: 10 }, () => ({ toolCalls: [call('get_project')] }));
     const m = new ScriptedModel([{ toolCalls: [call('set_gap_cap', { seconds: 0.4 })] }, ...loop]);
-    const r = await createAI({ host, settingsDir, providerOverride: m, finalRender: false, maxSteps: 4 }).applyNote(dir, 'slower and add music', () => undefined);
+    const r = await createAI({ host, settingsDir, providerOverride: m, maxSteps: 4 }).applyNote(dir, 'slower and add music', () => undefined);
     expect(r.summary).not.toBe('I made that change.');
     expect(r.summary).toMatch(/ran out of time/);
     expect(r.summary).toMatch(/pauses/);

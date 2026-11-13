@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest';
+import * as fs from 'node:fs';
 import * as fsp from 'node:fs/promises';
 import * as path from 'node:path';
 import { createAI, loadProject, AgentEvent, AIError, runAgent, newToolState, StyleStore, Prompts, pickTakes, ReplayProvider, RecordingProvider } from '../src';
@@ -41,26 +42,27 @@ async function setup() {
 }
 
 describe('agent loop with a scripted model', () => {
-  it('firstEdit: tools mutate project.json, draft then final render, events, summary', async () => {
+  it('firstEdit: tools mutate project.json, ends at its draft and saves it as v1 without a final render, events, summary', async () => {
     const { dir, host, settingsDir } = await setup();
     const model = firstEditScript();
     const ai = createAI({ host, settingsDir, providerOverride: model });
     const events: AgentEvent[] = [];
     const r = await ai.firstEdit(dir, (e) => events.push(e));
     expect(r.summary).toMatch(/best take/);
-    expect(r.version).toBe(1); // the draft is a preview (versions/preview), the final is v1
+    expect(r.version).toBe(1); // the draft is a preview (versions/preview); save-version keeps it as v1
     expect(r.changed.sort()).toEqual(['broll', 'cover', 'cut', 'music', 'post', 'zooms']);
     const p = await loadProject(dir);
     expect(p.cut.keep[0]).toEqual({ from: 'w16', to: 'w26' });
     expect(p.music.track).toBe('Library/Music/gentle.mp3');
     expect(p.broll).toHaveLength(1);
     expect(p.post.hashtags).toHaveLength(5);
-    // the no-AI first look (a preview, never saved), then the AI's preview, then the one final render
+    // the no-AI first look (a preview, never saved), then the AI's preview, saved as the version: no final render
     const renders = host.calls.filter((c) => c.command === 'render');
-    expect(renders.map((c) => c.args.includes('--draft'))).toEqual([true, true, false]);
+    expect(renders.map((c) => c.args.includes('--draft'))).toEqual([true, true]);
+    expect(host.calls.at(-1)!.command).toBe('save-version');
     expect(renders[0].args).toEqual(expect.arrayContaining(['--first-look', '--no-cover', '--music', 'Library/Music/gentle.mp3']));
     expect(events.filter((e) => e.type === 'render')).toEqual([
-      { type: 'render', version: 1, draft: true, firstLook: true }, { type: 'render', version: 1, draft: true }, { type: 'render', version: 1, draft: false }]);
+      { type: 'render', version: 1, draft: true, firstLook: true }, { type: 'render', version: 1, draft: true }]);
     // the project and transcript were handed to the model up front, not fetched in a turn
     expect((model.requests[0].messages[0] as any).content[0].text).toMatch(/Already loaded for you[\s\S]*result of get_project[\s\S]*result of get_transcript/);
     expect(events.some((e) => e.type === 'status' && e.message === 'Picking your best takes')).toBe(true);
@@ -70,6 +72,8 @@ describe('agent loop with a scripted model', () => {
     expect(model.requests[0].system).not.toMatch(/\{\{styleRules\}\}/);
     expect(model.requests[0].tools.length).toBe(26);   // docs/architecture.md section 6 + set_mirror
     await fsp.access(path.join(dir, 'versions', 'v1', 'project.json'));
+    await fsp.access(path.join(dir, 'versions', 'v1', 'draft.mp4'));
+    expect(fs.existsSync(path.join(dir, 'versions', 'v1', 'export.mp4'))).toBe(false);
     await fsp.access(path.join(dir, 'versions', 'preview', 'draft.mp4'));
     expect((await fsp.readdir(path.join(dir, 'versions'))).sort()).toEqual(['preview', 'v1']);
   });
@@ -85,7 +89,7 @@ describe('agent loop with a scripted model', () => {
       { toolCalls: [call('render_draft')] },
       { toolCalls: [call('finish', { summary_for_user: "I turned the music down at the start. I'll remember that for next time." })] },
     ]);
-    const ai = createAI({ host, settingsDir, providerOverride: model, finalRender: false });
+    const ai = createAI({ host, settingsDir, providerOverride: model });
     const before = await loadProject(dir);
     const r = await ai.applyNote(dir, 'music too loud at the start', () => undefined);
     expect(r.changed).toEqual(['music']);
@@ -151,7 +155,7 @@ describe('agent loop with a scripted model', () => {
 });
 
 describe('no AI connected', () => {
-  it('firstEdit runs the deterministic path (transcribe, analyze, autocut, first library song, render)', async () => {
+  it('firstEdit runs the deterministic path (transcribe, analyze, autocut, first library song, its draft saved as v1)', async () => {
     const { root, dir } = await makeProject({ withTranscript: false });
     await fsp.writeFile(path.join(root, 'Library', 'Music', 'b song.mp3'), 'x');
     await fsp.writeFile(path.join(root, 'Library', 'Music', 'a song.mp3'), 'x');
@@ -160,7 +164,8 @@ describe('no AI connected', () => {
     expect((await ai.active()).id).toBe('none');
     const r = await ai.firstEdit(dir, () => undefined);
     // the face track is found beside the transcription (analyze --faces-only), then the rest in order
-    expect(host.calls.map((c) => c.command + (c.args.includes('--faces-only') ? ':faces' : ''))).toEqual(['analyze:faces', 'transcribe', 'analyze', 'autocut', 'render']);
+    expect(host.calls.map((c) => c.command + (c.args.includes('--faces-only') ? ':faces' : ''))).toEqual(['analyze:faces', 'transcribe', 'analyze', 'autocut', 'save-version']);
+    expect(r.version).toBe(1);
     expect(r.summary).toMatch(/Connect ChatGPT/);
     expect(r.summary).toMatch(/"a song"/);
     expect(r.summary).not.toMatch(/—/);

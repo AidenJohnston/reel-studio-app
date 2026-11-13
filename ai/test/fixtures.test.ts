@@ -57,7 +57,7 @@ describe('recorded sessions (replay)', () => {
     p0.cut.keep = [{ from: 'w16', to: 'w56' }];
     p0.music = { ...p0.music, enabled: true, track: 'Library/Music/upbeat drums.mp3' };
     await fsp.writeFile(path.join(dir, 'project.json'), JSON.stringify(p0, null, 2));
-    const ai = createAI({ host, settingsDir: tmpDir(), providerOverride: model('applyNote-bread'), fetch: fakeFetch, lookup: async () => ['93.184.215.14'], finalRender: false });
+    const ai = createAI({ host, settingsDir: tmpDir(), providerOverride: model('applyNote-bread'), fetch: fakeFetch, lookup: async () => ['93.184.215.14'] });
     const r = await ai.applyNote(dir, 'the music is way too loud when I talk about the fridge, and I always want it quieter under my voice', () => undefined);
     const p = await loadProject(dir);
     expect(r.changed).toContain('music');

@@ -140,11 +140,14 @@ look on PATH / repo-relative.
 
 ```
 {"event":"progress","stage":"transcribe","pct":42,"message":"Listening to your video"}
+{"event":"progress","stage":"moments","pct":40,"message":"Here's your change","ready":{"kind":"still","t":2.4,"file":"..."}}
 {"event":"done","result":{...}}
 {"event":"error","code":"NO_AUDIO","message":"<developer detail>","userMessage":"This video has no sound. Try a different file."}
 ```
 
-Exit code 0 on done, 1 on error. The `message` in progress events is user-facing and plain.
+Exit code 0 on done, 1 on error. The `message` in progress events is user-facing and plain. A progress
+event may carry `ready`, a file the app can show right away: `{"kind":"still","t":<output s>,"file"}` or
+`{"kind":"window","from","to","file"}` (only `moments` sends them).
 
 | command | does |
 |---|---|
@@ -157,7 +160,10 @@ Exit code 0 on done, 1 on error. The `message` in progress events is user-facing
 | `render [--draft] [--window a:b]` | renders project.json -> `versions/vN/{export.mp4, cover.png, verify.json}`; `--draft` is a fast preview |
 | `cover` | renders cover.png only |
 | `verify <mp4>` | A/V sync, loudness (-14 LUFS target), duration, black frames, caption-safe placement report |
-| `frames --times t1,t2,...` | extracts PNG frames from the latest render (for the AI to look at) |
+| `moments [--mark] [--no-draft]` | what changed on screen since `work/moments/base.json` (the state last shown), as output intervals (`moments.py`): stills inside them (at most 3, sent as `ready` as each is drawn), the 2 s window around the first (`ready`), then the draft; the result has `intervals`, `changes`, `stills`, `window` and `draft` (the render result). The base becomes this state only when the run finishes. `--mark` only writes the base |
+| `save-version` | saves the edit as a complete version that never changes, from its draft (`versions.py`): `versions/vN/{project.json, inputs.json, draft.mp4, cover.png}`, written whole (`inputs.json` = what the draft's render recorded reading, `reads.py`); rendering the draft only when `versions/preview/` shows another edit or one of its recorded files changed; never a full-quality render (docs/versions.md). The same video keeps its version. Result: `version`, `file`, `draft` |
+| `export [--version N]` | version N's full-quality file, rebuilt from its own snapshot once (`render.run(version=N, work=<its own folder>)`, so the current edit's reports in `work/` stay) and handed back after that (`reused`); refuses with `VERSION_INPUTS_CHANGED` when a file in N's `inputs.json` changed since. Without `--version`: the edit as it is now, saved first. Result: `version`, `file`, `cover`, `reused`, `facts` (width, height, fps, bytes, duration, fullResolution, read with ffprobe) |
+| `frames --times t1,t2,...` | PNG stills of the edit for the AI to look at: cut from the newest render that still shows the project, or drawn straight from the project when none does |
 | `search-images`, `fetch-image`, `download-media` | find a freely licensed image, fetch one by URL, download a video or song from a link |
 | `attach --project <dir> <file> [--name N]` | a picture, GIF or short clip the user attached to a note -> `work/assets/attach-<id>-<stem>.<ext>` + sidecar `<asset>.attach.json` (name, kind, bytes, size, duration, sound, thumb) + a 320 px still in `work/thumbs/`. JPG/PNG copied; HEIC, still GIF/WebP, BMP -> PNG; animated GIF/WebP -> silent H.264 mp4 (looped to at least 3 s); clips copied. Limits: pictures 25 MB, clips and GIFs 200 MB and 60 s; anything else is refused with a plain message and nothing is written |
 | `doctor` | checks ffmpeg, the speech model, fonts, GPU; prints a human report |
@@ -295,7 +301,9 @@ transparent layer. No CDN is used at run time; any JS is vendored.
 export type AgentEvent =
   | { type: 'status'; message: string; pct?: number }        // plain words, shown in the Working screen / chat
   | { type: 'tool'; name: string; summary: string }           // e.g. "Added b-roll on 'twenty bucks'"
-  | { type: 'render'; version: number; draft: boolean };
+  | { type: 'render'; version: number; draft: boolean }
+  | { type: 'moment'; kind: 'still'; t: number; file: string }              // what an AI reply changed, before its draft
+  | { type: 'moment'; kind: 'window'; from: number; to: number; file: string };
 export interface AgentResult { summary: string; version: number; styleRulesAdded: string[]; changed: string[] }
 export interface ScriptResult { hook: string; script: string; onScreenText: string[] }
 

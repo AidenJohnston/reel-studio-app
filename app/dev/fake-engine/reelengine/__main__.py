@@ -287,14 +287,32 @@ def write_captions(proj: Path, data: dict) -> None:
     (proj / "work" / "captions.json").write_text(json.dumps({"cues": cues}), "utf-8")
 
 
+def shown(data: dict) -> str:
+    """What the video shows (engine project.edit_signature): the project without its bookkeeping."""
+    return json.dumps({k: v for k, v in data.items() if k not in ("updatedAt", "version", "notes", "post", "createdAt")},
+                      sort_keys=True)
+
+
+def same_edit(vdir: Path, data: dict) -> bool:
+    snap = vdir / "project.json"
+    return snap.exists() and shown(json.loads(snap.read_text("utf-8"))) == shown(data)
+
+
+def pick_version(proj: Path, data: dict) -> int:
+    """engine render.pick_version: the current version while its edit is unchanged, else the next."""
+    cur = int(data.get("version", 0))
+    return cur if cur and same_edit(proj / "versions" / f"v{cur}", data) else cur + 1
+
+
 def cmd_render(args: list[str]) -> dict:
     draft = "--draft" in args
     proj = Path(take(args, "--project"))
-    data = load(proj)
+    rebuild = take(args, "--version")      # engine render.run(version=): a saved version, from its own snapshot
+    data = load(proj) if rebuild is None else json.loads((proj / "versions" / f"v{rebuild}" / "project.json").read_text("utf-8"))
     if os.environ.get("FAKE_ENGINE_FAIL") == "render":
         raise Fail("RENDER_FAILED", "I could not finish your video. Please try again.")
     # docs/versions.md: drafts overwrite versions/preview/; only a final makes versions/vN/.
-    n = int(data.get("version", 0)) + 1
+    n = pick_version(proj, data) if rebuild is None else int(rebuild)
     vdir = proj / "versions" / ("preview" if draft else f"v{n}")
     vdir.mkdir(parents=True, exist_ok=True)
     (vdir / ".rendering").write_text("", "utf-8")
@@ -317,13 +335,77 @@ def cmd_render(args: list[str]) -> dict:
     (vdir / "verify.json").write_text(json.dumps({"ok": True, "duration": dur}), "utf-8")
     (vdir / "project.json").write_text(json.dumps(data, indent=2, ensure_ascii=False), "utf-8")
     (vdir / ".rendering").unlink()
-    if not draft:
+    if not draft and rebuild is None:
         write_captions(proj, data)
         data["version"] = n
         save(proj, data)
     progress("render", 100, "Done")
     return {"version": n, "path": str(vdir / name), "file": str(vdir / name), "draft": draft, "preview": draft,
             "versionDir": str(vdir)}
+
+
+def inputs(proj: Path, data: dict) -> dict:
+    """engine versions.inputs, for the take only: the files outside project.json the video is made from."""
+    take_file = proj / data["sources"][0]["path"]
+    return {"take": [take_file.stat().st_size, take_file.stat().st_mtime_ns]}
+
+
+def same_video(vdir: Path, proj: Path, data: dict) -> bool:
+    f = vdir / "inputs.json"
+    return same_edit(vdir, data) and f.exists() and json.loads(f.read_text("utf-8")) == inputs(proj, data)
+
+
+def cmd_save_version(args: list[str]) -> dict:
+    """engine versions.save: the snapshot and its draft, written whole; a saved version never changes."""
+    proj = Path(take(args, "--project"))
+    data = load(proj)
+    cur = int(data.get("version", 0))
+    vdir = proj / "versions" / f"v{cur}"
+    if cur and same_video(vdir, proj, data):
+        done = (vdir / "export.mp4").exists()
+        return {"version": cur, "file": str(vdir / ("export.mp4" if done else "draft.mp4")), "draft": not done,
+                "versionDir": str(vdir)}
+    preview = proj / "versions" / "preview"
+    if not (same_edit(preview, data) and (preview / "draft.mp4").exists()):
+        cmd_render(["--project", str(proj), "--draft"])
+    n = cur + 1
+    vdir, part = proj / "versions" / f"v{n}", proj / "versions" / f".v{n}.part"
+    for stale in (vdir, part):
+        shutil.rmtree(stale, ignore_errors=True)
+    part.mkdir(parents=True)
+    for name in ("draft.mp4", "cover.png"):
+        if (preview / name).exists():
+            shutil.copyfile(preview / name, part / name)
+    (part / "project.json").write_text(json.dumps(dict(data, version=n), indent=2, ensure_ascii=False), "utf-8")
+    (part / "inputs.json").write_text(json.dumps(inputs(proj, data)), "utf-8")
+    os.replace(part, vdir)
+    data["version"] = n
+    save(proj, data)
+    progress("render", 100, "Your change is saved")
+    return {"version": n, "file": str(vdir / "draft.mp4"), "draft": True, "versionDir": str(vdir)}
+
+
+def cmd_export(args: list[str]) -> dict:
+    """engine versions.export: a version's full-quality file, rebuilt from its own snapshot once."""
+    proj = Path(take(args, "--project"))
+    asked = take(args, "--version")
+    n = int(asked) if asked is not None else cmd_save_version(["--project", str(proj)])["version"]
+    vdir = proj / "versions" / f"v{n}"
+    if not (vdir / "project.json").exists():
+        raise Fail("NO_VERSION", f"I couldn't find Version {n}. Pick another version and export again.")
+    reused = (vdir / "export.mp4").exists()
+    if reused:
+        progress("render", 100, "Your video is ready")
+    else:
+        cmd_render(["--project", str(proj), "--version", str(n)])
+    video = vdir / "export.mp4"
+    info = probe(str(video))
+    fmt = json.loads((vdir / "project.json").read_text("utf-8")).get("format") or {"width": 1080, "height": 1920}
+    cover = vdir / "cover.png"
+    return {"version": n, "file": str(video), "cover": str(cover) if cover.exists() else None, "reused": reused,
+            "facts": {"width": info["width"], "height": info["height"], "fps": info["fps"], "bytes": video.stat().st_size,
+                      "duration": info["duration"],
+                      "fullResolution": (info["width"], info["height"]) == (fmt["width"], fmt["height"])}}
 
 
 def cmd_probe(args: list[str]) -> dict:
@@ -377,7 +459,8 @@ def cmd_doctor(_args: list[str]) -> dict:
 COMMANDS = {
     "probe": cmd_probe, "classify": cmd_classify, "init": cmd_init, "transcribe": cmd_transcribe,
     "analyze": cmd_analyze, "autocut": cmd_autocut, "render": cmd_render, "doctor": cmd_doctor,
-    "download-model": cmd_download_model, "attach": cmd_attach,
+    "download-model": cmd_download_model, "attach": cmd_attach, "save-version": cmd_save_version,
+    "export": cmd_export,
 }
 
 

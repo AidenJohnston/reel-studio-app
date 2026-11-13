@@ -35,7 +35,8 @@ import {
 } from './store'
 import { addToLibrary, isVideo, listLibrary, uniqueDest } from './library'
 import { createJobManager } from './jobs'
-import { createLiveVideos } from './live-video'
+import { makeExport, saveHandEdit, type Exported } from './export'
+import { createLiveMoments, createLiveVideos } from './live-video'
 import { rememberQuestion, styleConsent } from './style-consent'
 import type { AgentResult } from './ai-types'
 import { loadAI } from './ai'
@@ -168,7 +169,9 @@ const jobs = createJobManager(
       ((await readProject(slug)).sources ?? []).reduce((a: number, s: { duration?: number }) => a + (Number(s?.duration) || 0), 0)
   },
   // render events carry a playable URL (a stable copy for drafts: main/live-video.ts)
-  ((live) => (slug: string, e) => live(projectDir(slug), e))(createLiveVideos())
+  ((live) => (slug: string, e) => live(projectDir(slug), e))(createLiveVideos()),
+  // and so do the pictures of each change made before its draft
+  ((live) => (slug: string, e) => live(projectDir(slug), e))(createLiveMoments())
 )
 const models = createModelManager(runEngine, (s) => broadcast('model:progress', s))
 // "Update available" notice (main/update-check.ts): one anonymous GET a day, never in test runs.
@@ -337,43 +340,42 @@ function safeFileName(s: string): string {
   return t.slice(0, 80) || 'My video'
 }
 
+/** Export: the full-quality file is made here, once (engine `export`; notes and hand edits stop at their
+ * draft). It is rebuilt from the chosen version's own snapshot, so every version exports its own video,
+ * and the file made the first time is handed back after that. It runs as a normal job, so it shows
+ * progress, Stop works, and nothing else runs on this video meanwhile. */
 async function exportVersion(slug: string, n: number): Promise<ExportResult> {
   const dir = projectDir(slug)
-  let versions = await listVersions(dir)
-  let v = versions.find((x) => x.n === n) ?? versions[versions.length - 1]
+  const versions = await listVersions(dir)
+  const v = versions.find((x) => x.n === n) ?? versions[versions.length - 1]
   if (!v) throw { code: 'NO_VERSION', userMessage: 'This video is not ready yet. Wait for it to finish, then try again.' }
   if (jobs.forSlug(slug)) throw { code: 'BUSY', userMessage: 'I am still working on this video. Wait until it is done, then export.' }
-  if (v.draft) {
-    // A preview is not the full-quality file: make it first, as a normal job (progress, Stop, and
-    // nothing else can run on this video meanwhile) (review 25).
-    jobs.start(slug, 'rerender', async (emit, signal) => {
-      emit({ type: 'status', message: 'Making the full-quality video', pct: 1, phase: 'final' })
-      const r: any = await runEngine(
-        'render',
-        ['--project', dir],
-        (pr) => emit({ type: 'status', message: pr.message || 'Making the full-quality video', pct: pr.pct, phase: 'final' }),
-        signal
-      )
-      const version = Number(r?.version ?? 0)
-      emit({ type: 'render', version, draft: false })
-      return { summary: '', version, quiet: true }
-    })
-    await jobs.forSlug(slug)?.done
-    versions = await listVersions(dir)
-    v = versions[versions.length - 1]
-    if (!v || v.draft) throw { code: 'EXPORT_FAILED', userMessage: 'I could not make the full-quality video. Try Export again.' }
-  }
+  let made: Exported | null = null
+  let failed: unknown = null
+  jobs.start(slug, 'export', async (emit, signal) => {
+    try {
+      // "Preview" (n = 0, no version yet): the edit as it is now, saved as a version first
+      made = await makeExport(runEngine, dir, v.n || null, emit, signal)
+    } catch (e) {
+      failed = e
+      throw e
+    }
+    log(`[export] v${made.version} ${made.reused ? 'reused' : 'rendered'}`)
+    return { summary: '', version: made.version, quiet: true }
+  })
+  await jobs.forSlug(slug)?.done
+  if (!made) throw failed ?? { code: 'EXPORT_FAILED', userMessage: 'I could not make the full-quality video. Try Export again.' }
+  const { version, file, cover: coverSrc, facts } = made as Exported
   const p = await readProject(slug)
   const exportsDir = binDir('exports')
   await fs.mkdir(exportsDir, { recursive: true })
   // "<title> - Version 2.mp4": the same words as the version buttons, never a bare "(2)".
-  const name = `${safeFileName(p.title || slug)} - Version ${v.n}`
+  const name = `${safeFileName(p.title || slug)} - Version ${version}`
   const video = uniqueDest(exportsDir, `${name}.mp4`)
   const stem = basename(video, '.mp4')
-  await fs.copyFile(v.videoPath, video)
+  await fs.copyFile(file, video)
   let cover: string | null = null
-  const coverSrc = join(dirname(v.videoPath), 'cover.png')
-  if (existsSync(coverSrc)) {
+  if (coverSrc && existsSync(coverSrc)) {
     cover = join(exportsDir, `${stem} cover.png`)
     await fs.copyFile(coverSrc, cover)
   }
@@ -385,7 +387,7 @@ async function exportVersion(slug: string, n: number): Promise<ExportResult> {
   const captionFile = join(exportsDir, `${stem} caption.txt`)
   await fs.writeFile(captionFile, caption + '\n', 'utf8')
   if (!TEST) shell.showItemInFolder(video)
-  return { folder: exportsDir, video, cover, captionFile, caption }
+  return { folder: exportsDir, video, cover, captionFile, caption, facts }
 }
 
 // ---- IPC ----------------------------------------------------------------------------------------
@@ -602,28 +604,14 @@ function registerIpc(): void {
   })
   // `change` = what the user changed, in plain words ("bigger yellow subtitles"), for the chat and the version button.
   // A manual change is render-only (no AI), called what it is ("Updating your subtitles", never the engine's
-  // own step names like "Adding pictures"), and fast to SEE: a half-size preview first (the Reel screen plays
-  // it), then the full-quality version (grandma 2: a colour change took 3 minutes and said "Adding pictures").
+  // own step names like "Adding pictures"), and fast to SEE: pictures of what changed, then its draft, saved
+  // as the version (main/export.ts). The full-quality file waits for Export (grandma 2: a colour change took
+  // 3 minutes and said "Adding pictures").
   handle('projects:rerender', async (_e, slug: string, change?: string, label?: string) => {
     const dir = projectDir(slug)
     const words = typeof label === 'string' && label.trim() ? label.trim().slice(0, 60) : 'Updating your video'
     const jobId = jobs.start(slug, 'rerender', async (emit, signal) => {
-      emit({ type: 'status', message: words, pct: 1, phase: 'final' })
-      const look: any = await runEngine(
-        'render',
-        ['--project', dir, '--draft', '--no-cover'],
-        (p) => emit({ type: 'status', message: words, pct: Math.round(p.pct * 0.3), phase: 'final' }),
-        signal
-      )
-      emit({ type: 'render', version: Number(look?.version ?? 0), draft: true, ...(look?.file ? { file: String(look.file) } : {}) })
-      const r: any = await runEngine(
-        'render',
-        ['--project', dir],
-        (p) => emit({ type: 'status', message: words, pct: 30 + Math.round(p.pct * 0.7), phase: 'final' }),
-        signal
-      )
-      const version = Number(r?.version ?? (await readProject(slug)).version)
-      emit({ type: 'render', version, draft: false, ...(r?.file ? { file: String(r.file) } : {}) })
+      const version = await saveHandEdit(runEngine, dir, words, emit, signal)
       return { summary: versionMessage(version, typeof change === 'string' ? change.slice(0, 200) : ''), version }
     })
     return { jobId }
@@ -819,7 +807,8 @@ app.whenReady().then(async () => {
       settingsDir: join(settingsDir(), 'ai'),
       dev: DEV_PROVIDERS,
       secretStore: safeStorage,
-      cliEnv: cliBaseEnv
+      cliEnv: cliBaseEnv,
+      moments: true
     },
     log
   )

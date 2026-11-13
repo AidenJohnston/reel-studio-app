@@ -45,7 +45,7 @@ describe('fast notes (no model turns)', () => {
     expect(planFastNote('make the captions lower case', await loadProject(dir))).toBeNull();
   });
 
-  it('applies a simple note with one direct change and one final render, no model', async () => {
+  it('applies a simple note with one direct change and its draft, saved as the version without a final render, no model', async () => {
     const { dir, host, settingsDir } = await setup();
     const model = new ScriptedModel([new Error('the model must not be called for a fast note')]);
     const ai = createAI({ host, settingsDir, providerOverride: model });
@@ -57,7 +57,9 @@ describe('fast notes (no model turns)', () => {
     expect(r.summary).toBe('I made the captions a bit smaller.');
     expect(r.changed).toEqual(['captions']);
     expect(Number((await loadProject(dir)).captions.style.size)).toBeLessThan(size);
-    expect(host.calls.filter((c) => c.command === 'render').map((c) => c.args.includes('--draft'))).toEqual([false]);
+    expect(host.calls.filter((c) => c.command === 'render').map((c) => c.args.includes('--draft'))).toEqual([true]);
+    expect(host.calls.at(-1)!.command).toBe('save-version');
+    expect(r.version).toBe((await loadProject(dir)).version);
     expect(events.some((e) => e.type === 'status' && e.phase === 'final')).toBe(true);
     // the reply goes out BEFORE the render that makes it true (the app shows it at once)
     const reply = events.findIndex((e) => e.type === 'reply');
@@ -76,8 +78,10 @@ describe('fast notes (no model turns)', () => {
     const r: any = await ai.applyNote(dir, 'the music is too loud at the start', () => undefined);
     expect(r.fast).toBeUndefined();
     expect((model.requests[0].messages[0] as any).content[0].text).toMatch(/result of get_project/);
-    // only the music changed, which a preview cannot show: no draft, just the final render
-    expect(host.calls.filter((c) => c.command === 'render').map((c) => c.args.includes('--draft'))).toEqual([false]);
+    // only the music changed: render_draft skips it (nothing new on screen), and the note ends with the
+    // one draft that has the new sound, saved as the version
+    expect(host.calls.filter((c) => c.command === 'render').map((c) => c.args.includes('--draft'))).toEqual([true]);
+    expect(host.calls.at(-1)!.command).toBe('save-version');
   });
 });
 

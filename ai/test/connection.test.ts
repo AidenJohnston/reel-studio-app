@@ -384,7 +384,7 @@ describe('saved connections (createAI)', () => {
     await fsp.writeFile(path.join(dir, asset), tinyPng());
     await fsp.writeFile(path.join(dir, 'work', 'thumbs', 'attach-1a2b3c4d-face.jpg'), tinyPng());
     await fsp.writeFile(path.join(dir, `${asset}.attach.json`), JSON.stringify({ asset, name: 'face.png', kind: 'image', bytes: 2048, width: 8, height: 8, thumb: 'work/thumbs/attach-1a2b3c4d-face.jpg', createdAt: new Date().toISOString() }));
-    const ai = createAI({ host: new FakeHost(root), settingsDir: tmpDir(), secretStore: fakeSafeStorage, localClaude: { bin: null }, finalRender: false });
+    const ai = createAI({ host: new FakeHost(root), settingsDir: tmpDir(), secretStore: fakeSafeStorage, localClaude: { bin: null } });
 
     const saved = await ai.saveConnection({ label: 'Text only', kind: 'openai', baseURL: `${mock.origin}/v1`, model: 'mock-small', key: KEY });
     expect(saved.connection).toMatchObject({ supportsImages: false });

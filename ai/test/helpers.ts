@@ -84,6 +84,7 @@ export class FakeHost implements EngineHost {
   engineAssets = false;
   songInfo: any = { duration: 120, bpm: 92, energy: 'calm', tags: ['calm', 'warm'], suggestedStartAt: 7.5, arrivals: [{ at: 30, riseDb: 6 }], curve: [[0, -20]] };
   renderExtra: any = {};
+  framesExtra: any = {};
   constructor(private readonly root: string, private readonly lines = SAMPLE_LINES) {}
   reelStudioRoot(): string { return this.root; }
   async renderAnimation(template: string, params: Record<string, unknown>, outPath: string): Promise<string> {
@@ -123,13 +124,28 @@ export class FakeHost implements EngineHost {
         await fsp.writeFile(path.join(vd, draft ? 'draft.mp4' : 'export.mp4'), 'fake');
         return { version: v, preview: draft, draft, duration: 12.3, verify: { ok: true }, ...this.renderExtra };
       }
+      case 'save-version': {
+        // engine versions.save: the snapshot and its draft; the same edit keeps its number
+        const shown = (x: any) => JSON.stringify({ ...x, version: 0, updatedAt: 0, createdAt: 0, notes: 0, post: 0 });
+        const cur = p.version ?? 0;
+        const snap = path.join(dir, 'versions', `v${cur}`, 'project.json');
+        const same = cur > 0 && fs.existsSync(snap) && shown(JSON.parse(await fsp.readFile(snap, 'utf8'))) === shown(p);
+        const v = same ? cur : cur + 1;
+        const vd = path.join(dir, 'versions', `v${v}`);
+        await fsp.mkdir(vd, { recursive: true });
+        await fsp.writeFile(path.join(vd, 'draft.mp4'), 'fake');
+        await fsp.writeFile(path.join(vd, 'project.json'), JSON.stringify({ ...p, version: v }, null, 2));
+        p.version = v;
+        await fsp.writeFile(pj, JSON.stringify(p, null, 2));
+        return { version: v, file: path.join(vd, 'draft.mp4'), draft: true, versionDir: vd };
+      }
       case 'frames': {
         const times = args[args.indexOf('--times') + 1].split(',').map(Number);
         const fd = path.join(dir, 'work', 'frames');
         await fsp.mkdir(fd, { recursive: true });
         const frames = [];
         for (const t of times) { const f = path.join(fd, `f_${t}.png`); await fsp.writeFile(f, tinyPng()); frames.push({ time: t, path: f }); }
-        return { frames };
+        return { frames, ...this.framesExtra };
       }
       case 'search-images': return { results: this.searchResults };
       case 'fetch-image': {
