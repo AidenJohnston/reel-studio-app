@@ -1,6 +1,6 @@
 // Mirror of the @reelstudio/ai interface (docs/architecture.md section 8). The real package is loaded at
 // runtime when it exists; until then ai-mock.ts implements the same shape.
-import type { JobUpdate } from '../shared/api'
+import type { JobUpdate, StyleRule } from '../shared/api'
 
 /** What @reelstudio/ai emits: the job contract minus `heard` (main adds that one itself). */
 export type AgentEvent = Exclude<JobUpdate, { type: 'heard' }>
@@ -9,6 +9,8 @@ export interface UserFacingError {
   code: string
   userMessage: string
   link?: string
+  /** Shown in the chat even after Stop, which otherwise says nothing (jobs.ts): what the stop could not undo. */
+  tellAfterStop?: string
 }
 
 export interface AgentResult {
@@ -94,7 +96,8 @@ export interface AI {
   setActive(id: ProviderStatus['id'], connectionId?: string): Promise<void>
   setClaudeKey(key: string | null): Promise<ProviderStatus>
   firstEdit(projectDir: string, onEvent: (e: AgentEvent) => void, signal?: AbortSignal): Promise<AgentResult>
-  /** `opts.attachments`: `work/assets/attach-*` refs main already checked (the AI checks them again). */
+  /** `opts.attachments`: `work/assets/attach-*` refs main already checked (the AI checks them again). A rejected
+   * note may carry `tellAfterStop` (UserFacingError). */
   applyNote(
     projectDir: string,
     note: string,
@@ -103,12 +106,14 @@ export interface AI {
     opts?: { attachments?: string[] }
   ): Promise<AgentResult>
   writeScript(idea: string, onEvent: (e: AgentEvent) => void, signal?: AbortSignal): Promise<ScriptResult>
-  styleRules(): Promise<{ id: string; text: string; createdAt: string }[]>
+  styleRules(): Promise<StyleRule[]>
   removeStyleRule(id: string): Promise<void>
   /** Saves one My style rule (after the user said Yes). Optional: older packages lack it. */
   addStyleRule?(text: string): Promise<{ id: string; text: string; createdAt: string }>
   /** My style started over because its file was damaged; the damaged copy is kept next to it. Optional: older packages lack it. */
   styleWasDamaged?(): Promise<boolean>
+  /** My style: change a rule's words, or pause or resume it. Optional: older packages lack it. */
+  updateStyleRule?(id: string, patch: { text?: string; paused?: boolean }): Promise<StyleRule>
   /** A fresh look at the person's own Claude Code app (`bin` stays in main). Optional: older packages lack it. */
   claudeCodeStatus?(): Promise<ClaudeCodeStatus>
   /** The person's own servers (provider 'custom'). Optional: older packages and the mock lack them. */

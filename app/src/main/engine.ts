@@ -15,6 +15,8 @@ export interface EngineError {
   code: string
   userMessage: string
   message?: string
+  /** kept from an AI error (UserFacingError in ai-types.ts): shown even after Stop */
+  tellAfterStop?: string
 }
 
 export type EngineEvent =
@@ -213,7 +215,10 @@ export function isEngineError(e: unknown): e is EngineError {
 }
 
 export function toUserError(e: unknown): EngineError {
-  if (isEngineError(e)) return { code: e.code, userMessage: e.userMessage, message: e.message }
+  if (isEngineError(e)) {
+    const tell = (e as { tellAfterStop?: unknown }).tellAfterStop
+    return { code: e.code, userMessage: e.userMessage, message: e.message, ...(typeof tell === 'string' && tell ? { tellAfterStop: tell } : {}) }
+  }
   const msg = e instanceof Error ? e.message : String(e)
   return { code: 'UNEXPECTED', userMessage: GENERIC_ERROR, message: msg }
 }

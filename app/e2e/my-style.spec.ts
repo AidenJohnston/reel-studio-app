@@ -27,3 +27,77 @@ test('a damaged My style file is kept next to a new one, and My style says so in
     await app.close().catch(() => {})
   }
 })
+
+test('Edit changes a rule\'s words, and Pause keeps it listed but off', async () => {
+  const mine = mkdtempSync(join(BASE, 'style-'))
+  const root = join(mine, 'Documents', 'Reel Studio')
+  const file = join(root, 'My style.json')
+  mkdirSync(root, { recursive: true })
+  writeFileSync(file, JSON.stringify({ version: 1, rules: [{ id: 'r1', text: 'Keep music quieter under talking.', createdAt: '2026-10-22T00:00:00.000Z' }] }))
+  const saved = () => JSON.parse(readFileSync(file, 'utf8')).rules
+  const { app, page } = await launch({ REELSTUDIO_ROOT: root, REELSTUDIO_USER_DATA: join(mine, 'user data') })
+  try {
+    await passFirstRun(page)
+    await page.getByTestId('nav-style').click()
+    const rule = page.getByTestId('style-rule')
+    await expect(rule).toContainText('Keep music quieter under talking.')
+
+    // Escape leaves the words as they were and puts focus back on Edit
+    await page.getByRole('button', { name: 'Edit "Keep music quieter under talking."' }).click()
+    await page.getByTestId('style-edit-input').fill('Something else')
+    await page.keyboard.press('Escape')
+    await expect(page.getByRole('button', { name: 'Edit "Keep music quieter under talking."' })).toBeFocused()
+
+    await page.keyboard.press('Enter')
+    // typed loosely: saved as one sentence, capitalised, with a full stop, as a new rule is
+    await page.getByTestId('style-edit-input').fill('keep music much quieter under talking')
+    await shot(page, 'style-editing')
+    await page.keyboard.press('Enter')
+    await expect(rule).toContainText('Keep music much quieter under talking.')
+    expect(saved()).toEqual([expect.objectContaining({ id: 'r1', text: 'Keep music much quieter under talking.' })])
+
+    await page.getByRole('button', { name: 'Pause "Keep music much quieter under talking."' }).click()
+    await expect(rule).toContainText('Paused')
+    expect(saved()[0].paused).toBe(true)
+    await shot(page, 'style-paused')
+    await page.getByRole('button', { name: 'Turn back on "Keep music much quieter under talking."' }).click()
+    await expect(rule).not.toContainText('Paused')
+    expect(saved()[0].paused).toBeUndefined()
+  } finally {
+    await app.close().catch(() => {})
+  }
+})
+
+test('a rule\'s words cannot change while Save is still saving them', async () => {
+  const mine = mkdtempSync(join(BASE, 'style-'))
+  const root = join(mine, 'Documents', 'Reel Studio')
+  mkdirSync(root, { recursive: true })
+  writeFileSync(join(root, 'My style.json'), JSON.stringify({ version: 1, rules: [{ id: 'r1', text: 'Keep music quieter under talking.', createdAt: '2026-10-22T00:00:00.000Z' }] }))
+  const { app, page } = await launch({ REELSTUDIO_ROOT: root, REELSTUDIO_USER_DATA: join(mine, 'user data') })
+  try {
+    await passFirstRun(page)
+    await page.getByTestId('nav-style').click()
+    // the save waits in main until the test lets it finish
+    await app.evaluate(({ ipcMain }) => {
+      const g = globalThis as { finishStyleSave?: () => void }
+      ipcMain.removeHandler('style:update')
+      ipcMain.handle('style:update', () => new Promise((done) => (g.finishStyleSave = () => done({ ok: true, value: null }))))
+    })
+    await page.getByRole('button', { name: 'Edit "Keep music quieter under talking."' }).click()
+    const input = page.getByTestId('style-edit-input')
+    await input.fill('Keep music much quieter under talking')
+    await page.keyboard.press('Enter')
+    await expect.poll(() => app.evaluate(() => typeof (globalThis as { finishStyleSave?: unknown }).finishStyleSave)).toBe('function')
+
+    // words typed now would be thrown away when the save closes the row
+    await page.keyboard.type(' at the start')
+    await expect(input).toHaveValue('Keep music much quieter under talking')
+    await page.keyboard.press('Escape')
+    await expect(input).toBeVisible()
+
+    await app.evaluate(() => (globalThis as { finishStyleSave?: () => void }).finishStyleSave?.())
+    await expect(input).toHaveCount(0)
+  } finally {
+    await app.close().catch(() => {})
+  }
+})

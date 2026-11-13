@@ -5,7 +5,8 @@ import { randomUUID } from 'node:crypto';
 import * as path from 'node:path';
 import { styleFile, writeFileAtomic } from './project';
 
-export interface StyleRule { id: string; text: string; createdAt: string }
+/** `paused`: listed in My style, but left out of what the AI reads. */
+export interface StyleRule { id: string; text: string; createdAt: string; paused?: boolean }
 /** `damaged`: the file name of a damaged My style.json kept next to this one when My style started over. */
 export interface StyleFile { version: 1; rules: StyleRule[]; damaged?: string }
 
@@ -94,8 +95,11 @@ export class StyleStore {
     return typeof data?.damaged === 'string' && fs.existsSync(path.join(path.dirname(this.file), path.basename(data.damaged)));
   }
 
-  /** Adds a rule unless an equivalent one already exists. */
-  async add(text: string): Promise<{ added: boolean; rule: StyleRule }> {
+  /** Adds a rule unless an equivalent one already exists. Every caller is the person asking for the rule (Yes to a
+   * suggestion, or an "always..." note), so an equivalent paused rule is turned back on (PR #83 review, option A).
+   * `resumed`: this call is what turned it back on, decided in the same write, so a caller undoing its own change
+   * never pauses a rule someone else turned on. */
+  async add(text: string): Promise<{ added: boolean; resumed: boolean; rule: StyleRule }> {
     return this.serial(() => this.addNow(text));
   }
 
@@ -105,14 +109,35 @@ export class StyleStore {
     return (await this.list()).find((r) => normalize(r.text) === n);
   }
 
-  private async addNow(text: string): Promise<{ added: boolean; rule: StyleRule }> {
+  private async addNow(text: string): Promise<{ added: boolean; resumed: boolean; rule: StyleRule }> {
     const clean = cleanRuleText(text);
     const data = await this.read();
     const dup = data.rules.find((r) => normalize(r.text) === normalize(clean));
-    if (dup) return { added: false, rule: dup };
+    if (dup) {
+      const resumed = !!dup.paused;
+      if (resumed) {
+        delete dup.paused;
+        await this.write(data);
+      }
+      return { added: false, resumed, rule: dup };
+    }
     const rule: StyleRule = { id: randomUUID(), text: clean, createdAt: new Date().toISOString() };
     await this.write({ ...data, rules: [...data.rules, rule] });
-    return { added: true, rule };
+    return { added: true, resumed: false, rule };
+  }
+
+  /** My style: the person changed a rule's words, or paused or resumed it. */
+  async update(id: string, patch: { text?: string; paused?: boolean }): Promise<StyleRule> {
+    return this.serial(async () => {
+      const data = await this.read();
+      const rule = data.rules.find((r) => r.id === id);
+      if (!rule) throw { code: 'NOT_FOUND', userMessage: 'That rule is not in My style any more.' };
+      if (patch.text !== undefined) rule.text = cleanRuleText(patch.text);
+      if (patch.paused === true) rule.paused = true;
+      if (patch.paused === false) delete rule.paused;
+      await this.write(data);
+      return rule;
+    });
   }
 
   async remove(id: string): Promise<void> {
@@ -123,7 +148,7 @@ export class StyleStore {
   }
 
   async asPromptText(): Promise<string> {
-    const rules = await this.list();
+    const rules = (await this.list()).filter((r) => !r.paused);
     return rules.length ? rules.map((r) => `- ${r.text}`).join('\n') : '(none yet)';
   }
 }
