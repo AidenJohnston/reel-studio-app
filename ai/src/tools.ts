@@ -3,10 +3,11 @@
 import * as fs from 'node:fs';
 import * as fsp from 'node:fs/promises';
 import * as path from 'node:path';
+import { createHash } from 'node:crypto';
 import {
-  Analysis, Broll, LIBRARY_FOLDERS, LibraryKind, MusicLevel, Project, Transcript, TREATMENTS, Word, WordAnchor,
+  Analysis, Broll, CaptionStyle, LIBRARY_FOLDERS, LibraryKind, MusicLevel, Project, Transcript, TREATMENTS, Word, WordAnchor,
   anchorText, anchorWords, approxDuration, approxOutputTimes, keptWords, loadAnalysis, loadProject, loadTranscript,
-  nextBrollId, normalizeKeep, saveProject, validateProject, wordIndex, anchorProblem,
+  captionsUnderInstagram, nextBrollId, normalizeKeep, captionCorrectionProblem, saveProject, validateProject, wordIndex, anchorProblem,
 } from './project';
 import { S, JSONSchema, validate, fillNulls } from './schema';
 import { ANIMATION_IDS, ENGINE_FED, TimedWord, alignWordTimes, animationParamsSchema, cleanParams, itemTimes, phraseTime, templateSpec } from './animations';
@@ -48,6 +49,9 @@ export interface ToolContext {
   fetchImpl?: typeof fetch;
   /** the user's own note for this task (applyNote); decides whether add_style_rule saves or only proposes */
   userNote?: string;
+  /** A note edits `file`, its private copy of project.json, and renders its previews into `dir`;
+   * project.json changes only when the whole note is done (editor.ts applyNote). */
+  note?: { id: string; file: string; dir: string };
   /** DNS lookup used to refuse private/loopback hosts (test hook; default node:dns) */
   lookupImpl?: LookupFn;
   /** whole-download timeout for in-process image fetches (test hook; default 30 s) */
@@ -76,7 +80,7 @@ export function newToolState(): ToolState {
 // ---------------------------------------------------------------- helpers
 
 export async function load(ctx: ToolContext): Promise<{ p: Project; t: Transcript }> {
-  ctx.project = await loadProject(ctx.projectDir);
+  ctx.project = await loadProject(ctx.projectDir, ctx.note?.file);
   if (!ctx.transcript) ctx.transcript = await loadTranscript(ctx.projectDir, ctx.project);
   if (ctx.analysis === undefined) ctx.analysis = await loadAnalysis(ctx.projectDir);
   return { p: ctx.project, t: ctx.transcript };
@@ -88,7 +92,7 @@ async function mutate(ctx: ToolContext, field: string, fn: (p: Project, t: Trans
   if (typeof problem === 'string') throw new ToolInputError(problem);
   const problems = validateProject(p, t);
   if (problems.length) throw new ToolInputError(problems.join('; '));
-  await saveProject(ctx.projectDir, p);
+  await saveProject(ctx.projectDir, p, ctx.note?.file);
   ctx.state.changed.add(field);
   (ctx.state.dirty ??= new Set()).add(field);
 }
@@ -107,9 +111,13 @@ const quote = (t: Transcript, a: WordAnchor, max = 6) => {
   return words.length > max ? `${words.slice(0, max).join(' ')}...` : words.join(' ');
 };
 
+// Hand-mirrored from engine/reelengine/schema/project.schema.json; schema-parity.test checks drift.
+const WORD_ID = { pattern: '^w[0-9]+$' };
+const BROLL_ID = { pattern: '^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$' };
+
 const ANCHOR = S.obj({
-  from: S.str('first word id, e.g. "w44"'),
-  to: S.str('last word id (inclusive)'),
+  from: S.str('first word id, e.g. "w44"', WORD_ID),
+  to: S.str('last word id (inclusive)', WORD_ID),
 });
 
 function libraryDir(ctx: ToolContext, kind: LibraryKind): string {
@@ -123,6 +131,39 @@ const EXT: Record<string, string[]> = {
   raw: ['.mp4', '.mov', '.m4v'],
   exports: ['.mp4'],
 };
+
+/** Every file a note adds to work/assets starts with this: "n" and 8 hex of its id. The id is in the
+ * note's project.json entry once the note is saved, so the name alone says whether it was. */
+export function notePrefix(noteId: string): string {
+  return `n${createHash('sha1').update(noteId).digest('hex').slice(0, 8)}-`;
+}
+
+/** A name for a file this task adds to work/assets (a slug follows). */
+function assetName(ctx: ToolContext, hint: string): string {
+  return ctx.note ? `${notePrefix(ctx.note.id)}${hint}` : hint;
+}
+
+/** assetName for a picture, made a slug of 40 characters at most. The hint is made a slug first, and
+ * one with nothing usable in it becomes `fallback`: a note's file must keep its whole prefix, dash
+ * included, or it would pass as saved (projectAssets). */
+function assetSlug(ctx: ToolContext, hint: string, fallback = 'image'): string {
+  return assetName(ctx, slugName(hint, ctx.note ? 40 - notePrefix(ctx.note.id).length : 40, fallback));
+}
+
+/** Files already in work/assets the editor may reuse: everything except a download from a note that
+ * was never saved (and a half-written `.part` file). Files from first edits and older projects carry
+ * no note prefix and are always offered. */
+async function projectAssets(ctx: ToolContext): Promise<string[]> {
+  const { p } = await load(ctx);
+  const ok = new Set((p.notes ?? []).flatMap((n) => (n.id ? [notePrefix(n.id)] : [])));
+  if (ctx.note) ok.add(notePrefix(ctx.note.id));
+  const files = await listFiles(path.join(ctx.projectDir, 'work', 'assets'), EXT.broll, 'work/assets', 0);
+  return files.filter((f) => {
+    const name = path.basename(f);
+    const note = /^n[0-9a-f]{8}-/.exec(name)?.[0];
+    return !name.includes('.part.') && (!note || ok.has(note));
+  });
+}
 
 async function listFiles(dir: string, exts: string[], prefix: string, depth = 2): Promise<string[]> {
   const out: string[] = [];
@@ -162,6 +203,17 @@ export function resolveAsset(ctx: ToolContext, ref: string): { ref: string; abs:
     if (fs.existsSync(r.abs)) return r;
   }
   return null;
+}
+
+function requireAsset(ctx: ToolContext, ref: string): { ref: string; abs: string } {
+  const resolved = resolveAsset(ctx, ref);
+  if (!resolved) throw new ToolInputError(`asset not found: ${ref}`);
+  return resolved;
+}
+
+function checkBrollAssets(ctx: ToolContext, b: Broll): void {
+  if (b.asset) requireAsset(ctx, b.asset);
+  for (const asset of b.assets ?? []) requireAsset(ctx, asset);
 }
 
 /** Transcript words and web text are DATA. They are fenced, and anything that looks like a fence
@@ -248,9 +300,16 @@ function projectView(ctx: ToolContext, p: Project, t: Transcript): unknown {
   };
 }
 
+/** Engine commands that read the edit: during a note they read its private copy. */
+const READS_EDIT = new Set(['render', 'anim-context', 'cover-candidates']);
+
+function projectArgs(ctx: ToolContext, command: string): string[] {
+  return ['--project', ctx.projectDir, ...(ctx.note && READS_EDIT.has(command) ? ['--project-file', ctx.note.file] : [])];
+}
+
 async function engine(ctx: ToolContext, command: string, extra: string[] = [], stageMessage?: string): Promise<any> {
   if (stageMessage) ctx.emit({ type: 'status', message: stageMessage });
-  return ctx.host.runEngine(command, ['--project', ctx.projectDir, ...extra], (pr) => {
+  return ctx.host.runEngine(command, [...projectArgs(ctx, command), ...extra], (pr) => {
     ctx.emit({ type: 'status', message: pr.message || stageMessage || 'Working', pct: pr.pct });
   }, ctx.signal);
 }
@@ -368,11 +427,15 @@ export function popCards(p: Project): { id: string; text: string }[] {
     .map((b) => ({ id: b.id, text: asData(String((b.params as any)?.text ?? '')) }));
 }
 
-/** Layers the last render put on screen for under `min` seconds (engine windows, not anchors): too
+/** Where each layer of a rendered video was on screen: the engine's layers.json beside that video. */
+async function layersOf(video: string): Promise<any[]> {
+  try { return JSON.parse(await fsp.readFile(path.join(path.dirname(video), 'layers.json'), 'utf8'))?.items ?? []; } catch { return []; }
+}
+
+/** Layers a render put on screen for under `min` seconds (engine windows, not anchors): too
  * short to read. Usually a picture whose next visual starts right after it. */
-async function shortFlashes(ctx: ToolContext, p: Project, t: Transcript | undefined, min = 1.2): Promise<{ id: string; seconds: number; says: string }[]> {
-  let recs: any[] = [];
-  try { recs = JSON.parse(await fsp.readFile(path.join(ctx.projectDir, 'work', 'layers', 'layers.json'), 'utf8'))?.items ?? []; } catch { return []; }
+async function shortFlashes(video: string | undefined, p: Project, t: Transcript | undefined, min = 1.2): Promise<{ id: string; seconds: number; says: string }[]> {
+  const recs = video ? await layersOf(video) : [];
   return recs.filter((r) => typeof r?.t0 === 'number' && typeof r?.t1 === 'number' && !r.skipped && r.t1 - r.t0 < min)
     .map((r) => {
       const b = p.broll.find((x) => x.id === r.id);
@@ -405,17 +468,23 @@ export function visibleChangeSinceRender(ctx: ToolContext): boolean {
   return [...(ctx.state.dirty ?? [])].some((f) => !NOT_VISIBLE.has(f));
 }
 
-export async function doRender(ctx: ToolContext, draft: boolean): Promise<RenderInfo> {
+/** `announce: false`: a note's final video is shown only once the note is saved (editor.ts). */
+export async function doRender(ctx: ToolContext, draft: boolean, announce = true): Promise<RenderInfo> {
   if (ctx.renderGate) await ctx.renderGate.catch(() => undefined);
   ctx.state.dirty = new Set();
-  const result = await engine(ctx, 'render', draft ? ['--draft'] : [], draft ? 'Making a preview' : 'Making the final video');
-  const p = await loadProject(ctx.projectDir);
+  const out = draft && ctx.note ? ['--out', ctx.note.dir] : [];
+  const result = await engine(ctx, 'render', draft ? ['--draft', ...out] : [], draft ? 'Making a preview' : 'Making the final video');
+  const p = await loadProject(ctx.projectDir, ctx.note?.file);
   const version = Number(result?.version ?? p.version ?? 0);
   ctx.project = p;
   const info: RenderInfo = { version, draft, result };
   ctx.state.renders.push(info);
-  ctx.emit({ type: 'render', version, draft, ...(result?.file ? { file: String(result.file) } : {}) });
+  if (announce) ctx.emit(renderEvent(info));
   return info;
+}
+
+export function renderEvent(r: RenderInfo): AgentEvent {
+  return { type: 'render', version: r.version, draft: r.draft, ...(r.result?.file ? { file: String(r.result.file) } : {}) };
 }
 
 const MIME: Record<string, string> = { '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.webp': 'image/webp', '.gif': 'image/gif' };
@@ -450,14 +519,20 @@ async function downloadImage(ctx: ToolContext, url: string, nameHint?: string): 
   const ext = sniffImage(buf);
   if (!ext) throw new ToolInputError(`that link is not an image (${res.headers.get('content-type') ?? 'unknown type'})`);
   const urlPath = new URL(got.url).pathname;
-  const base = slugName(nameHint ?? path.basename(urlPath, path.extname(urlPath)));
+  const base = nameHint ?? assetSlug(ctx, path.basename(urlPath, path.extname(urlPath)));
   const dir = path.join(ctx.projectDir, 'work', 'assets');
   await fsp.mkdir(dir, { recursive: true });
-  let name = `${base}${ext}`; let n = 2;
-  while (fs.existsSync(path.join(dir, name))) name = `${base}-${n++}${ext}`;
-  const dest = safeResolve(ctx.projectDir, ctx.host.reelStudioRoot(), `work/assets/${name}`, 'write');
-  await fsp.writeFile(dest.abs, buf);
-  return `work/assets/${name}`;
+  // claim the name with the write itself: fetch_image runs in parallel
+  for (let n = 1; ; n++) {
+    const name = n === 1 ? `${base}${ext}` : `${base}-${n}${ext}`;
+    const dest = safeResolve(ctx.projectDir, ctx.host.reelStudioRoot(), `work/assets/${name}`, 'write');
+    try {
+      await fsp.writeFile(dest.abs, buf, { flag: 'wx' });
+      return `work/assets/${name}`;
+    } catch (e: any) {
+      if (e?.code !== 'EEXIST') throw e;
+    }
+  }
 }
 
 /** The credit block the post caption ends with, rebuilt from the pictures the edit really uses. */
@@ -510,7 +585,7 @@ async function captureSite(ctx: ToolContext, url: string, layout: 'phone' | 'des
   if (!ctx.host.captureWebsite) throw new ToolInputError('website screenshots only work in the Reel Studio app; use search_images or a text-pop with the name');
   let host = '';
   try { host = new URL(/^[a-z][a-z0-9+.-]*:/i.test(url.trim()) ? url.trim() : `https://${url.trim()}`).hostname.replace(/^www\./i, ''); } catch { /* the host refuses it below */ }
-  const base = slugName(nameHint || `${host || 'website'}-screen`);
+  const base = assetSlug(ctx, nameHint || `${host || 'website'}-screen`, 'website-screen');
   const dir = path.join(ctx.projectDir, 'work', 'assets');
   await fsp.mkdir(dir, { recursive: true });
   let name = `${base}.png`; let n = 2;
@@ -539,7 +614,10 @@ async function fetchImage(ctx: ToolContext, url: string, nameHint?: string): Pro
 async function fetchImageWithThumb(ctx: ToolContext, url: string, nameHint?: string): Promise<{ asset: string; thumb?: string }> {
   if (!/^https?:\/\//i.test(url)) throw new ToolInputError('url must start with http:// or https://');
   // the name is a slug before it reaches the engine's argv; the engine slugs too
-  const name = nameHint ? slugName(nameHint) : undefined;
+  const urlPath = new URL(url).pathname;
+  const hint = nameHint || (ctx.note ? path.basename(urlPath, path.extname(urlPath)) : '');
+  // a note's picture always gets a name: the engine's own (image.png) carries no note prefix
+  const name = hint || ctx.note ? assetSlug(ctx, hint) : undefined;
   try {
     const r = await engine(ctx, 'fetch-image', ['--url', url, ...(name ? ['--name', name] : [])], 'Downloading the picture');
     const asset = r?.asset;
@@ -594,7 +672,7 @@ interface AnimContext { t0: number; region?: { x: number; y: number; w: number; 
  *  clip start: from the engine (exact, `anim-context`), else approximated from the cut here. */
 async function animContext(ctx: ToolContext, anchor: WordAnchor, duration: number): Promise<AnimContext | null> {
   try {
-    const r = await ctx.host.runEngine('anim-context', ['--project', ctx.projectDir, '--from', anchor.from, '--to', anchor.to,
+    const r = await ctx.host.runEngine('anim-context', [...projectArgs(ctx, 'anim-context'), '--from', anchor.from, '--to', anchor.to,
       '--duration', String(duration)], undefined, ctx.signal);
     if (r && Array.isArray(r.words)) return { t0: r.t0, region: r.region, layout: r.layout, words: r.words, exact: true };
   } catch {
@@ -673,10 +751,12 @@ async function makeAnimation(ctx: ToolContext, template: string, raw: Record<str
   const dir = path.join(ctx.projectDir, 'work', 'assets');
   await fsp.mkdir(dir, { recursive: true });
   let n = 1;
-  while (fs.existsSync(path.join(dir, `anim-${template}-${n}.mov`)) || fs.existsSync(path.join(dir, `anim-${template}-${n}.webm`))) n++;
-  const out = path.join(dir, `anim-${template}-${n}.mov`);      // qtrle .mov + .anim.json sidecar
+  const stem = assetName(ctx, `anim-${template}`);
+  while (fs.existsSync(path.join(dir, `${stem}-${n}.mov`)) || fs.existsSync(path.join(dir, `${stem}-${n}.webm`))) n++;
+  const out = path.join(dir, `${stem}-${n}.mov`);      // qtrle .mov + .anim.json sidecar
   ctx.emit({ type: 'status', message: 'Making an animation' });
-  const written = await ctx.host.renderAnimation(template, params, out);
+  const project = await loadProject(ctx.projectDir);
+  const written = await ctx.host.renderAnimation(template, params, out, project.format.fps);
   const abs = written && path.isAbsolute(written) ? written : out;
   // project.json only holds paths inside the project: never an absolute one
   let asset: string;
@@ -716,6 +796,11 @@ const PARAMS = S.obj({
   iconic: S.opt(S.bool('true when the picture is a logo or icon (it reads at a smaller size); null = guess')),
   style: S.opt(S.enum(['pop', 'label'], 'text-pop look: label = dark words on a white box, as written (the hook title, a step label "2: Editing"); pop = big outlined capitals (one key word or number). Default pop')),
 });
+
+// What sets a caption look in Edit it myself apart (app/src/shared/caption-presets.ts). Size, Position, Colour
+// and the colour of the spoken word fine-tune a look; turning the highlight on or off changes it.
+const captionLook = (st: CaptionStyle): string =>
+  JSON.stringify([!!st.box, !!st.pop, !!st.highlight, st.case ?? null, st.maxWords ?? null, st.outline ?? null, st.outlineColor ?? null]);
 
 const tools: ToolDef[] = [
   {
@@ -766,21 +851,39 @@ const tools: ToolDef[] = [
     description: 'Change caption look. Pass null for anything you are not changing.',
     parameters: S.obj({
       enabled: S.opt(S.bool()),
-      preset: S.opt(S.str('style preset name, e.g. "bold-lower"')),
-      size: S.opt(S.num('font size in px at 1080 wide. Default 105 (proven readable on a phone); 84 = small, 126 = big. Never below 80')),
-      maxWords: S.opt(S.int('words per caption chunk, 1-4')),
-      case: S.opt(S.enum(['upper', 'sentence', 'lower', 'as-is'])),
-      color: S.opt(S.str('hex color like #FFFFFF')),
-      position: S.opt(S.num('vertical position of the line centre as a fraction of height. Default 0.75 = just under the chin; 0.66 = higher', { minimum: 0.05, maximum: 0.95 })),
+      preset: S.opt(S.str('leave null: the name of the look the person picked in Edit it myself; it does not change how captions are drawn')),
+      size: S.opt(S.num('font size in px at 1080 wide. Default 105 (proven readable on a phone); 84 = small, 126 = big. Never below 80', { minimum: 10, maximum: 300 })),
+      maxWords: S.opt(S.int('words per caption chunk, 1-4', { minimum: 1, maximum: 12 })),
+      case: S.opt(S.enum(['upper', 'lower', 'as-is', 'title'])),
+      color: S.opt(S.str('hex color like #FFFFFF', { pattern: '^#[0-9A-Fa-f]{6}([0-9A-Fa-f]{2})?$' })),
+      position: S.opt(S.num('vertical position of the line centre as a fraction of height. Default 0.75 = just under the chin; 0.66 = higher. 0.75 is as low as they go at the default size and stay clear of Instagram\'s caption and username, less when bigger. Lower is allowed, and the result then carries a warning to pass on', { minimum: 0.05, maximum: 0.95 })),
+      highlight: S.opt(S.str('colour of the word being spoken, hex like #FFD60A; "none" turns the word highlight off')),
+      pop: S.opt(S.bool()),
     }),
     async run(ctx, args) {
+      let warning: string | null = null;
       await mutate(ctx, 'captions', (p) => {
+        const shownUnder = () => (p.captions.enabled ? captionsUnderInstagram(p.format, p.captions.style) : null);
+        const underBefore = shownUnder();
+        if (args.highlight != null && args.highlight !== 'none' && !/^#[0-9A-Fa-f]{6}$/.test(args.highlight)) return 'highlight must be a colour like #FFD60A, or "none"';
         if (args.enabled !== null && args.enabled !== undefined) p.captions.enabled = args.enabled;
-        for (const k of ['preset', 'size', 'maxWords', 'case', 'color', 'position']) {
-          if (args[k] !== null && args[k] !== undefined) (p.captions.style as any)[k] = args[k];
+        const style = p.captions.style;
+        const before = captionLook(style);
+        // sizePicked means the person picked this size in Edit it myself; a note that changes it makes it the AI's
+        if (args.size != null && args.size !== style.size) delete style.sizePicked;
+        for (const k of ['preset', 'size', 'maxWords', 'case', 'color', 'position', 'highlight', 'pop']) {
+          if (args[k] !== null && args[k] !== undefined) style[k] = args[k];
         }
+        if (args.highlight === 'none') delete style.highlight;
+        // The picker trusts a saved `preset` name over the fields. Once the look itself changes the name is wrong,
+        // and without it the picker matches the look by its fields.
+        if (captionLook(style) !== before) delete style.preset;
+        // The person may post elsewhere, so a position in Instagram's bottom band is allowed. When a change of size or
+        // position leaves shown captions there, or turns them on there, the model is told so it can pass it on.
+        const under = shownUnder();
+        if (under && under !== underBefore) warning = `${under} Tell the person this in one plain sentence.`;
       });
-      return { content: { ok: true, captions: ctx.project!.captions }, summary: 'Adjusted the captions' };
+      return { content: { ok: true, captions: ctx.project!.captions, ...(warning ? { warning } : {}) }, summary: 'Adjusted the captions' };
     },
   },
   {
@@ -788,9 +891,12 @@ const tools: ToolDef[] = [
     description: 'Fix a misheard word or phrase in the captions (e.g. from "cloud" to "Claude"). from = exactly as transcribed. A single word is replaced EVERYWHERE it appears, so when the same word is right elsewhere ("script"), give the whole misheard phrase instead ("type script" -> "TypeScript"). One correction per mistake.',
     parameters: S.obj({ from: S.str('the wrong text as transcribed'), to: S.str('the correct text') }),
     async run(ctx, args) {
-      await mutate(ctx, 'captions', (p) => {
+      await mutate(ctx, 'captions', (p, t) => {
         const c = p.captions.corrections.filter((x) => x.at || x.from.toLowerCase() !== String(args.from).toLowerCase());
-        c.push({ from: args.from, to: args.to });
+        const proposed = { from: args.from, to: args.to };
+        c.push(proposed);
+        const problem = captionCorrectionProblem(keptWords(t, p.cut.keep), c, proposed);
+        if (problem) return problem;
         p.captions.corrections = c;
       });
       return { content: { ok: true }, summary: `Fixed the caption "${args.to}"` };
@@ -817,8 +923,7 @@ const tools: ToolDef[] = [
     async run(ctx, args) {
       const kind = args.kind as LibraryKind;
       const files = await listFiles(libraryDir(ctx, kind), EXT[kind], `Library/${LIBRARY_FOLDERS[kind]}`);
-      const project = kind === 'images' || kind === 'broll'
-        ? await listFiles(path.join(ctx.projectDir, 'work', 'assets'), EXT.broll, 'work/assets', 0) : [];
+      const project = kind === 'images' || kind === 'broll' ? await projectAssets(ctx) : [];
       const songs = kind === 'music' && files.length ? await librarySongs(ctx) : null;
       return { content: { kind, files, projectAssets: project, ...(songs ? { songs, howToChoose: SONG_HELP } : {}), note: files.length ? undefined : `The ${LIBRARY_FOLDERS[kind]} folder is empty.` } };
     },
@@ -835,7 +940,7 @@ const tools: ToolDef[] = [
       let ref: string | null = null;
       let abs: string | null = null;
       if (!args.track && args.level) {
-        const cur = (await loadProject(ctx.projectDir)).music;
+        const cur = (await loadProject(ctx.projectDir, ctx.note?.file)).music;
         if (!cur.enabled || !cur.track) {
           // a volume change on a video with no song: nothing happens, and the reply must not claim it did
           return {
@@ -852,11 +957,14 @@ const tools: ToolDef[] = [
         ref = r.ref;
         abs = r.abs;
       }
-      const prev = (await loadProject(ctx.projectDir)).music;
+      const prev = (await loadProject(ctx.projectDir, ctx.note?.file)).music;
       // a new song with no start point: start where the engine hears a calm bar before the build
       const song = abs && ref !== prev.track ? await analyzeMusic(ctx, abs) : null;
       const startAt = args.startAt !== null && args.startAt !== undefined ? args.startAt
         : (song && typeof song.suggestedStartAt === 'number' ? song.suggestedStartAt : (ref !== prev.track ? 0 : undefined));
+      if (startAt !== undefined && validate(S.num(undefined, { minimum: 0 }), startAt).length) {
+        throw new ToolInputError('music startAt must be a finite number >= 0');
+      }
       await mutate(ctx, 'music', (p) => {
         p.music.track = ref;
         p.music.enabled = ref !== null;
@@ -877,7 +985,7 @@ const tools: ToolDef[] = [
     name: 'set_music_automation',
     description: 'Replace music volume changes, each over a word range: gainDb relative to the level (e.g. -6 quieter, +3 swell). Empty list = none.',
     parameters: S.obj({
-      automation: S.arr(S.obj({ fromWord: S.str(), toWord: S.str(), gainDb: S.num('-24 to +6', { minimum: -40, maximum: 12 }) })),
+      automation: S.arr(S.obj({ fromWord: S.str(undefined, WORD_ID), toWord: S.str(undefined, WORD_ID), gainDb: S.num('-24 to +6', { minimum: -40, maximum: 12 }) })),
     }),
     async run(ctx, args) {
       const { t } = await load(ctx);
@@ -918,7 +1026,11 @@ const tools: ToolDef[] = [
         const results = await searchImages(ctx, args.search).catch((e) => { throw new ToolInputError(`image search is not available (${e?.userMessage ?? e?.message}); use text-pop or make_animation`); });
         let lastErr = '';
         for (const r of results.slice(0, 3)) {
-          try { asset = r.path ? r.path : await fetchImage(ctx, r.url, args.search); break; } catch (e: any) { lastErr = e.message; }
+          try {
+            const candidate = r.path ? r.path : await fetchImage(ctx, r.url, args.search);
+            asset = requireAsset(ctx, candidate).ref;
+            break;
+          } catch (e: any) { lastErr = e.message; }
         }
         if (!asset) throw new ToolInputError(`no usable image found for "${args.search}"${lastErr ? ` (${lastErr})` : ''}; try another search, text-pop, or make_animation`);
       } else if (args.treatment !== 'text-pop') {
@@ -929,6 +1041,7 @@ const tools: ToolDef[] = [
       await mutate(ctx, 'broll', (p) => {
         id = nextBrollId(p);
         const b: Broll = { id, anchor: { from: args.anchor.from, to: args.anchor.to }, leadIn: 0.13, treatment: args.treatment, asset, params: stripNulls(args.params ?? {}) };
+        checkBrollAssets(ctx, b);
         p.broll.push(b);
       });
       const says = quote(t, args.anchor);
@@ -940,7 +1053,7 @@ const tools: ToolDef[] = [
     name: 'update_broll',
     description: 'Change an existing b-roll by id. Pass null for anything you are not changing.',
     parameters: S.obj({
-      id: S.str(),
+      id: S.str(undefined, BROLL_ID),
       anchor: S.opt(ANCHOR),
       treatment: S.opt(S.enum(TREATMENTS)),
       asset: S.opt(S.str()),
@@ -968,13 +1081,15 @@ const tools: ToolDef[] = [
         const wantFull = args.treatment === 'full-frame' ? true : args.treatment === 'animation' ? false : anim.layout === 'full';
         const anchor = args.anchor ? { from: args.anchor.from, to: args.anchor.to } : existing!.anchor;
         if (wantFull === (anim.layout === 'full') && !args.anchor) {
+          checkBrollAssets(ctx, existing!);
           return { content: { ok: true, unchanged: true, layout: anim.layout, placement: ANIMATION_PLACEMENT } };
         }
         const made = await makeAnimation(ctx, anim.template, anim.params, anchor, wantFull ? { fullScreen: true } : { topOnly: true });
         let says = '';
         await mutate(ctx, 'broll', (pp) => {
           const b = pp.broll.find((x) => x.id === args.id)!;
-          b.anchor = anchor; b.asset = made.asset; b.treatment = 'animation';
+          b.anchor = anchor; b.asset = requireAsset(ctx, made.asset).ref; b.treatment = 'animation';
+          checkBrollAssets(ctx, b);
           says = quote(t, b.anchor);
         });
         const summary = wantFull !== (anim.layout === 'full')
@@ -990,6 +1105,7 @@ const tools: ToolDef[] = [
         if (args.treatment) b.treatment = args.treatment;
         if (asset) b.asset = asset;
         if (args.params) b.params = { ...b.params, ...stripNulls(args.params) };
+        checkBrollAssets(ctx, b);
         says = quote(t, b.anchor);
       });
       return { content: { ok: true }, summary: `Adjusted the visual on "${says}"` };
@@ -998,7 +1114,7 @@ const tools: ToolDef[] = [
   {
     name: 'remove_broll',
     description: 'Remove a b-roll by id.',
-    parameters: S.obj({ id: S.str() }),
+    parameters: S.obj({ id: S.str(undefined, BROLL_ID) }),
     async run(ctx, args) {
       const { t } = await load(ctx);
       let says = '';
@@ -1075,12 +1191,12 @@ const tools: ToolDef[] = [
   },
   {
     name: 'set_zoom',
-    description: 'Replace all zoom-ins. Each zoom spans one whole line, from its first word to its last; scale ~1.08-1.15. Use on punchlines and key lines, and on face-only stretches with no b-roll (about 3-6 per minute, never two back to back). Empty list = no zooms.',
-    parameters: S.obj({ zooms: S.arr(S.obj({ anchor: ANCHOR, scale: S.num('1.0-1.5', { minimum: 1, maximum: 1.6 }) })) }),
+    description: 'Replace all zoom-ins. Each zoom spans one whole line, from its first word to its last; scale ~1.08-1.15. Use on punchlines and key lines, and on face-only stretches with no b-roll (about 3-6 per minute, never two back to back). Save style "snap" (a quick eased push-in with motion blur) for the one or two biggest punchlines; the rest stay hard cuts. Empty list = no zooms.',
+    parameters: S.obj({ zooms: S.arr(S.obj({ anchor: ANCHOR, scale: S.num('1.0-1.5', { minimum: 1, maximum: 1.6 }), style: S.opt(S.enum(['snap'], 'null = hard cut in and out')) })) }),
     async run(ctx, args) {
       const { t } = await load(ctx);
       args.zooms.forEach((z: any, i: number) => checkAnchor(t, z.anchor, `zooms[${i}]`));
-      await mutate(ctx, 'zooms', (p) => { p.zooms = args.zooms.filter((z: any) => z.scale > 1.001).map((z: any) => ({ anchor: z.anchor, scale: z.scale })); });
+      await mutate(ctx, 'zooms', (p) => { p.zooms = args.zooms.filter((z: any) => z.scale > 1.001).map((z: any) => ({ anchor: z.anchor, scale: z.scale, ...(z.style ? { style: z.style } : {}) })); });
       return { content: { ok: true, count: ctx.project!.zooms.length }, summary: args.zooms.length ? 'Added a few zoom-ins on the big moments' : 'Took out the zooms' };
     },
   },
@@ -1189,6 +1305,11 @@ const tools: ToolDef[] = [
       try { text = cleanRuleText(args.rule); } catch { throw new ToolInputError('rule is empty'); }
       const existing = await ctx.style.find(text);
       if (existing) return { content: { ok: true, alreadySaved: existing.text } };
+      if (noteAsksToRemember(ctx.userNote) && ctx.note) {
+        // saved to My style with the note itself, never before (editor.ts applyNote)
+        if (!ctx.state.styleRulesAdded.includes(text)) ctx.state.styleRulesAdded.push(text);
+        return { content: { ok: true, saved: text }, summary: `Saved to My style: "${text}"` };
+      }
       if (noteAsksToRemember(ctx.userNote)) {
         const r = await ctx.style.add(text);
         if (r.added) { ctx.state.styleRulesAdded.push(r.rule.text); ctx.state.styleRuleIds.push(r.rule.id); }
@@ -1241,7 +1362,7 @@ const tools: ToolDef[] = [
       if (perMin > 10) notes.push(`${p.zooms.length} zooms is about ${Math.round(perMin)} a minute, which reads as constant: keep 4 to 8 a minute, on punchlines and in the middle of bare stretches (set_zoom replaces the list).`);
       const pops = popCards(p);
       if (pops.length > 2) notes.push(`${pops.length} big word cards (see wordCards): they read as filler and each one stays up about 2 s, past the end of a short line. Keep at most 2 (a number or a name the viewer must remember); replace the rest with a picture or an animation, or remove them.`);
-      const flashes = await shortFlashes(ctx, p, ctx.transcript);
+      const flashes = await shortFlashes(r.file, p, ctx.transcript);
       if (flashes.length) notes.push(`${flashes.length} visual${flashes.length > 1 ? 's are' : ' is'} on screen for under 1.2 s (see tooShort), too short to read. For each: extend its anchor to the end of its phrase (a picture needs about 2 s), or when the next visual starts right after it, keep the stronger one or move the next one later.`);
       const names = ctx.transcript ? unshownNames(p, ctx.transcript) : [];
       if (names.length) notes.push(`Named things the viewer hears but never sees (see namedNotShown). A brand, app, product, company or show: search_images "<name> logo" and place it on its words; a place or event: "<name> photo". Skip people the viewer would not know and anything that is not really a name.`);
@@ -1281,8 +1402,11 @@ const tools: ToolDef[] = [
         }
       }
       if (!times.length) throw new ToolInputError('give times or words');
-      const { pick, moved } = await settleOnAnimations(ctx, times.slice(0, 6));
-      const r = await engine(ctx, 'frames', ['--times', pick.join(',')]);
+      // this note's newest preview, else the video the project shows now
+      const video: string = ctx.state.renders.at(-1)?.result?.file
+        ?? path.join(ctx.projectDir, 'versions', p.version ? `v${p.version}` : 'preview', p.version ? 'export.mp4' : 'draft.mp4');
+      const { pick, moved } = await settleOnAnimations(video, times.slice(0, 6));
+      const r = await engine(ctx, 'frames', ['--times', pick.join(','), '--file', video]);
       const frames: { time: number; path: string }[] = (Array.isArray(r) ? r : (r?.frames ?? [])).map((f: any, i: number) =>
         typeof f === 'string' ? { time: pick[i], path: f } : { time: f.time ?? f.t ?? pick[i], path: f.path ?? f.file });
       const images: ImagePart[] = [];
@@ -1318,9 +1442,8 @@ const tools: ToolDef[] = [
 /** A frame in the middle of an animation shows a count-up half way or half the words (live e2e: the
  * model read a count-up mid-way and reported the wrong number). Times inside an animation's window
  * move to its settled end (0.15 s before it ends), and the result says so. */
-async function settleOnAnimations(ctx: ToolContext, times: number[]): Promise<{ pick: number[]; moved: { asked: number; sampled: number; id: string }[] }> {
-  let recs: any[] = [];
-  try { recs = JSON.parse(await fsp.readFile(path.join(ctx.projectDir, 'work', 'layers', 'layers.json'), 'utf8'))?.items ?? []; } catch { /* no layers yet */ }
+async function settleOnAnimations(video: string, times: number[]): Promise<{ pick: number[]; moved: { asked: number; sampled: number; id: string }[] }> {
+  const recs = await layersOf(video);
   const anims = recs.filter((r) => (r?.treatment === 'animation' || r?.zone === 'animation' || r?.zone === 'full') && typeof r.t0 === 'number' && typeof r.t1 === 'number' && !r.skipped);
   const moved: { asked: number; sampled: number; id: string }[] = [];
   const pick = times.map((tm) => {
@@ -1357,8 +1480,8 @@ export async function executeTool(ctx: ToolContext, name: string, rawArgs: unkno
   ctx.state.toolCalls++;
   const tool = toolByName(name);
   if (!tool) return { content: JSON.stringify({ error: `unknown tool "${name}". Tools: ${TOOL_NAMES.join(', ')}` }), isError: true };
-  const args = fillNulls(tool.parameters as JSONSchema, rawArgs ?? {});
-  const problems = validate(tool.parameters as JSONSchema, args);
+  const args = fillNulls(tool.parameters, rawArgs ?? {});
+  const problems = validate(tool.parameters, args);
   if (problems.length) return { content: JSON.stringify({ error: `invalid arguments: ${problems.join('; ')}` }), isError: true };
   try {
     const out = await tool.run(ctx, args);
@@ -1369,6 +1492,8 @@ export async function executeTool(ctx: ToolContext, name: string, rawArgs: unkno
     if (ctx.signal?.aborted) throw err;
     if (err instanceof ToolInputError) return { content: JSON.stringify({ error: err.message }), isError: true };
     if (err instanceof AIError) throw err;
+    // part of the engine may still be writing: the job must end and keep the project (index.ts editHost)
+    if (err?.code === 'ENGINE_STUCK') throw err;
     // Engine failures arrive as {code, userMessage}
     const msg = err?.userMessage ?? err?.message ?? String(err);
     return { content: JSON.stringify({ error: `${tool.name} failed: ${msg}`, code: err?.code ?? null }), isError: true };

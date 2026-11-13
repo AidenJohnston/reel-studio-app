@@ -247,6 +247,65 @@ def test_zoom_release_hides_under_full_frame(tmp_path, media):
     assert z.t1 == pytest.approx(p["t1"])
 
 
+@pytest.mark.parametrize("fps", [30, 24])
+def test_snap_zoom_never_moves_across_a_cut(tmp_path, media, fps):
+    """A snap zoom held over a cut keeps both eased ramps; one whose release would run across a cut
+    releases on the cut instead, hidden by it. At 24 fps this cut and the zoom's end round to frames
+    two apart."""
+    ctx = _ctx(tmp_path, media["video"], keep=((0.0, 9.0), (10.0, 14.0), (15.0, 20.0)))
+    ctx.fmt["fps"] = fps
+    cut1, cut2 = (s.out_start for s in ctx.out_timeline[1:])
+    fx.set_project(ctx, zooms=[
+        {"anchor": {"from": fx.word_near(ctx, 2.0), "to": fx.word_near(ctx, cut1 - 0.3)}, "scale": 1.12, "style": "snap"},
+        {"anchor": {"from": fx.word_near(ctx, cut2 - 2.0), "to": fx.word_near(ctx, cut2 + 1.5)}, "scale": 1.12,
+         "style": "snap"}])
+    ending, across = zoom.build_zooms(ctx)
+    assert ending.t1 == pytest.approx(cut1, abs=0.5 / fps) and ending.ramp_out == 0 and ending.ramp_in > 0
+    assert across.t0 < cut2 < across.t1 and across.ramp_in > 0 and across.ramp_out > 0
+    assert across.t0 + across.ramp_in < cut2 < across.t1 - across.ramp_out
+
+
+def test_snap_zoom_on_a_short_word_after_a_cut_still_shows(tmp_path, media):
+    """The cut that starts a one-word line sits inside its release window: the zoom keeps its word
+    and releases hard, as a default zoom does."""
+    ctx = _ctx(tmp_path, media["video"], keep=((1.0, 9.0), (10.0, 14.0)))
+    cut = ctx.out_timeline[1].out_start
+    wid = fx.word_near(ctx, cut)
+    tr = ctx.project_dir / "work" / "transcript.json"
+    words = json.loads(tr.read_text())["words"]
+    w = next(w for w in words if w["id"] == wid)
+    w["e"] = round(w["s"] + 0.15, 3)
+    tr.write_text(json.dumps({"words": words}))
+    ctx = fx.make_ctx(ctx.project_dir)
+    fx.set_project(ctx, zooms=[{"anchor": {"from": wid, "to": wid}, "scale": 1.12, "style": "snap"}])
+    [z] = zoom.build_zooms(ctx)
+    assert z.t0 == pytest.approx(cut, abs=0.5 / 30) and z.t1 == pytest.approx(cut + 0.2, abs=0.5 / 30)
+    assert z.ramp_out == 0
+
+
+@pytest.mark.parametrize("fps", [24, 30])
+def test_snap_zoom_keeps_a_short_last_word_starting_on_a_cut(monkeypatch, fps):
+    """A cut on the last word must not end a multi-word zoom before that word plays."""
+    from types import SimpleNamespace
+
+    starts, ends = {"first": 8.0, "last": 10.0}, {"first": 8.3, "last": 10.04}
+    ctx = SimpleNamespace(
+        project={"zooms": [{"anchor": {"from": "first", "to": "last"}, "scale": 1.12, "style": "snap"}]},
+        fmt={"width": W, "height": H, "fps": fps}, duration=12.0,
+        out_timeline=[SimpleNamespace(out_start=0.0), SimpleNamespace(out_start=10.0)],
+        word_out_time=starts.__getitem__, word_out_end=ends.__getitem__)
+    monkeypatch.setattr(broll, "output_face_union", lambda *args: (440, 884, 200, 200))
+
+    [z] = zoom.build_zooms(ctx, with_broll=False)
+
+    assert z.t0 == 8.0
+    assert z.t1 == pytest.approx(round((ends["last"] + zoom.TAIL) * fps) / fps)
+    assert z.t1 > ends["last"]
+    assert z.ramp_in > 0
+    assert z.ramp_out == 0
+    assert zoom.progress(z, starts["last"]) == 1.0
+
+
 # --- music -------------------------------------------------------------------------------------
 
 def test_loudness_matches_ffmpeg(media):
@@ -262,7 +321,7 @@ def _mix(tmp_path, media, level, automation=()):
                                "automation": list(automation), "fadeOut": 1.0})
     voice = fx.cut_voice(ctx, tmp_path / "voice.wav")
     out = music.build_audio(ctx, voice)
-    return ctx, out, json.loads((ctx.work / "audio" / "mix.json").read_text())
+    return ctx, out, json.loads(Path(out).with_suffix(".json").read_text())
 
 
 @pytest.mark.parametrize("level,gap", [("under-voice", 19.0), ("quiet", 24.0), ("loud-intro", 19.0)])
@@ -345,7 +404,7 @@ def test_build_audio_real_take_and_song(tmp_path):
                                "automation": [], "fadeOut": 1.5})
     out = music.build_audio(ctx, fx.cut_voice(ctx, pdir / "voice.wav"))
     m = music.ffmpeg_measure(out)
-    rep = json.loads((ctx.work / "audio" / "mix.json").read_text())
+    rep = json.loads(Path(out).with_suffix(".json").read_text())
     assert m["lufs"] == pytest.approx(-14.0, abs=1.0)
     assert m["truePeak"] <= -1.0
     assert rep["music"]["measuredGapDb"] >= 16.0                                   # voice clearly on top
@@ -469,3 +528,29 @@ def test_reanchored_clip_layer_matches_its_new_window(tmp_path, media, treatment
         assert got == pytest.approx(lay.t1 - lay.t0, abs=0.1), (treatment, t1, got, lay.t0, lay.t1)
         longest = max(longest, got)
     assert longest > 2.0
+
+
+def test_reanchored_video_phone_above_the_speaker_gets_a_band_as_long_as_its_window(tmp_path, media):
+    # A close-up leaves no room beside the face, so the phone goes in a band above the speaker. The
+    # band was named without its length: widening the card reused the one-word band, and the phone
+    # froze on its last frame for the rest of the window.
+    ctx = _ctx(tmp_path, media["video"])
+    box = [330.0, 700.0, 420.0, 500.0]
+    track = {"version": placement.TRACK_VERSION, "width": W, "height": H, "fps": 3.0, "detector": "test",
+             "samples": [{"t": t / 3, "box": box, "core": placement.core_from_box(box), "score": 1.0}
+                         for t in range(0, 72)], "median": box, "found": 1.0}
+    (ctx.project_dir / "work" / "face-s1.json").write_text(json.dumps(track), encoding="utf-8")
+
+    def seconds(p):
+        return float(subprocess.run([fx.FFPROBE, "-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0",
+                                     str(p)], capture_output=True, text=True, check=True).stdout)
+    windows = []
+    for t1 in (2.1, 5.0):                     # one word first, then a longer span, same b-roll id
+        fx.set_project(ctx, broll=[_item(ctx, 1, 2.0, t1, "phone-card", media["clip"])])
+        lay = next(l for l in broll.build_layers(ctx) if l.kind == "video")
+        rec = json.loads((ctx.work / "layers" / "layers.json").read_text(encoding="utf-8"))["items"][0]
+        assert rec["zone"] == "split-top", rec
+        windows.append(lay.t1 - lay.t0)
+    assert windows[1] > windows[0] + 1.0
+    bands = sorted(seconds(p) for p in (ctx.work / "layers").glob("b1-*-top-*.mp4"))
+    assert bands and bands[-1] == pytest.approx(windows[1], abs=0.1), (bands, windows)

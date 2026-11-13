@@ -19,7 +19,7 @@ export interface Transcript { words: Word[]; language?: string; [k: string]: unk
 
 export interface CaptionStyle {
   preset?: string; font?: string; size?: number; maxWords?: number;
-  case?: 'upper' | 'lower' | 'sentence' | 'as-is' | string; color?: string; outline?: number; outlineColor?: string; shadow?: number; box?: boolean; position?: number;
+  case?: 'upper' | 'lower' | 'as-is' | 'title' | string; color?: string; outline?: number; outlineColor?: string; shadow?: number; box?: boolean; position?: number;
   [k: string]: unknown;
 }
 /** at: a fix the person made to that one word in the Subtitles list (engine captions.py apply_corrections). */
@@ -46,13 +46,19 @@ export interface Broll {
   id: string; anchor: WordAnchor; leadIn?: number; treatment: Treatment | string;
   asset: string | null; assets?: string[]; params: BrollParams; [k: string]: unknown;
 }
-export interface Zoom { anchor: WordAnchor; scale: number; [k: string]: unknown }
+export interface Zoom { anchor: WordAnchor; scale: number; style?: 'snap'; [k: string]: unknown }
 export interface Cover { atSourceTime: number; source: string; text: string | null; [k: string]: unknown }
 export interface Post { caption: string; hashtags: string[]; keywords: string[]; [k: string]: unknown }
 export interface NoteEntry {
   version: number; text: string; applied: string[]; at: string;
   /** files the user attached to this note (`work/assets/attach-*`), 0.1.2 */
   attachments?: string[];
+  /** the app's job id for this note, and what the app still has to tell the user once it is saved:
+   * after a crash right after saving, the app finds the note here and finishes that (app store.ts) */
+  id?: string;
+  reply?: string;
+  styleRulesAdded?: string[];
+  styleSuggestions?: string[];
 }
 
 export interface Project {
@@ -117,6 +123,27 @@ export function withDefaults(p: Partial<Project>): Project {
   } as Project;
 }
 
+/**
+ * The lowest the centre of a caption can sit, as a fraction of the height, with its box still above Instagram's
+ * caption and username (engine/reelengine/verify.py IG_BOTTOM_FRAC, the bottom 19%). The box is
+ * captions.render_ass's for a cue wrapped to two lines, the most `fit` makes: twice the size plus the outline
+ * (box padding for a box) top and bottom, scaled from 1080 wide, and a pixel more because the engine's cue
+ * report rounds it. Which cues wrap is only known at render time, so every position assumes two lines.
+ */
+export function lowestCaptionPosition(format: Format, style: CaptionStyle): number {
+  const outline = style.box ? Math.max(style.outline ?? 8, 18) : (style.outline ?? 8);
+  const half = ((2 * (style.size ?? 105) + 2 * outline) * format.width) / 1080 / 2;
+  return Math.floor(((0.81 * format.height - half - 1) / format.height) * 100) / 100;
+}
+
+/** The plain-words warning when captions reach Instagram's caption and username, or null when they stay clear. */
+export function captionsUnderInstagram(format: Format, style: CaptionStyle): string | null {
+  const lowest = lowestCaptionPosition(format, style);
+  const position = style.position ?? 0.75;
+  if (position <= lowest) return null;
+  return `At position ${position} and size ${style.size ?? 105}, a caption that wraps to two lines reaches under Instagram's caption and username, so it is partly hidden on Instagram. At this size, ${lowest} or higher stays clear.`;
+}
+
 const isNum = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);
 const isStr = (v: unknown): v is string => typeof v === 'string';
 
@@ -157,8 +184,9 @@ export function validateProject(p: unknown, transcript?: Transcript): string[] {
 
 // ---------------------------------------------------------------- files
 
-/** Atomic write: temp file in the same folder, fsync, rename over the target (retries on Windows locks). */
-export async function writeFileAtomic(file: string, data: string | Buffer, mode?: number): Promise<void> {
+/** Atomic write: temp file in the same folder, fsync, rename over the target (retries on Windows locks).
+ * `beforeRename` runs right before every rename attempt; throwing from it leaves the target as it was. */
+export async function writeFileAtomic(file: string, data: string | Buffer, mode?: number, beforeRename?: () => Promise<void>): Promise<void> {
   await fsp.mkdir(path.dirname(file), { recursive: true });
   const tmp = `${file}.${process.pid}.${randomUUID().slice(0, 8)}.tmp`;
   const fh = await fsp.open(tmp, 'w', mode);
@@ -173,6 +201,7 @@ export async function writeFileAtomic(file: string, data: string | Buffer, mode?
   let lastErr: unknown;
   for (let attempt = 0; attempt <= 40; attempt++) {
     try {
+      await beforeRename?.();
       await fsp.rename(tmp, file);
       return;
     } catch (err: any) {
@@ -190,8 +219,8 @@ export async function readJson<T = any>(file: string): Promise<T> {
   return JSON.parse(text.replace(/^﻿/, '')) as T;
 }
 
-export async function loadProject(projectDir: string): Promise<Project> {
-  const file = path.join(projectDir, PROJECT_FILE);
+/** `file`: another document of this project (a note's private copy); default project.json. */
+export async function loadProject(projectDir: string, file = path.join(projectDir, PROJECT_FILE)): Promise<Project> {
   let raw: any;
   try { raw = await readJson(file); } catch (err: any) {
     throw new ProjectError(`Could not read ${file}: ${err?.message ?? err}`);
@@ -202,11 +231,15 @@ export async function loadProject(projectDir: string): Promise<Project> {
   return p;
 }
 
-export async function saveProject(projectDir: string, p: Project): Promise<void> {
+export async function saveProject(projectDir: string, p: Project, file = path.join(projectDir, PROJECT_FILE)): Promise<void> {
+  await writeFileAtomic(file, projectBytes(p));
+}
+
+export function projectBytes(p: Project): string {
   const problems = validateProject(p);
   if (problems.length) throw new ProjectError(`Refusing to save invalid project: ${problems.join('; ')}`, problems);
   p.updatedAt = new Date().toISOString();
-  await writeFileAtomic(path.join(projectDir, PROJECT_FILE), JSON.stringify(p, null, 2) + '\n');
+  return JSON.stringify(p, null, 2) + '\n';
 }
 
 /** Always <project>/work/transcript.json: `transcript.file` is never joined. */
@@ -310,6 +343,95 @@ export function isKept(t: Transcript, keep: WordAnchor[], wordId: string): boole
 
 const norm = (s: string) => s.toLowerCase().replace(/[^\p{L}\p{N}' ]+/gu, '').trim();
 
+/** Mirrors captions.py's stitch_numbers, normalize_corrections and apply_corrections matching. */
+export function captionCorrectionProblem(kept: readonly Word[], corrections: CaptionCorrection[], proposed: CaptionCorrection): string | null {
+  const bare = (word: string) => word.trim().replace(/^["'(\[¿¡]+/, '').replace(/[.,!?;:"')\]…]+$/, '').toLowerCase();
+  const words: { w: string; ids: string[]; fixed: boolean }[] = [];
+  for (let i = 0; i < kept.length; i++) {
+    const word = kept[i].w;
+    const next = kept[i + 1]?.w;
+    if (/^\$?\p{Decimal_Number}+$/u.test(word.trim()) && next && /^,\p{Decimal_Number}{3}/u.test(next.trim())) {
+      words.push({ w: word.trim() + next.trim(), ids: [kept[i].id, kept[i + 1].id], fixed: false });
+      i++;
+    } else words.push({ w: word, ids: [kept[i].id], fixed: false });
+  }
+  const tokens = (text: string) => text.trim().split(/\s+/).filter(Boolean);
+  const single = new Map<string, CaptionCorrection>();
+  const spans: { correction: CaptionCorrection; from: string[]; to: string[] }[] = [];
+  const at = new Map<string, CaptionCorrection>();
+  const heard = new Map(kept.map((word) => [word.id, word.w]));
+  const heardIds = [...heard.keys()];
+  const heardWords = [...heard.values()];
+  for (const correction of corrections) {
+    const from = tokens(correction.from).map(bare);
+    const to = tokens(correction.to);
+    if (correction.at) {
+      const i = heardIds.indexOf(correction.at), j = heardIds.indexOf(correction.through ?? correction.at);
+      const now = tokens(heardWords.slice(i, j + 1).join(' ')).map(bare);
+      if (i < 0 || j < 0 || (now.length === from.length && now.every((word, k) => word === from[k]))) {
+        at.set(correction.at, correction);
+      }
+      continue;
+    }
+    if (!from.length) continue;
+    if (from.length === 1 && to.length === 1) single.set(from[0], correction);
+    else spans.push({ correction, from, to });
+  }
+  // The words the proposed correction would replace before any other correction runs. An existing
+  // correction is reported as the conflict only when it rewrites one of these words.
+  const core = (word: string) => /^[^\p{L}\p{N}_]*([\p{L}\p{N}_]+(?:['’][\p{L}\p{N}_]+)?)/u.exec(word)?.[1].toLowerCase();
+  const target = new Set<string>();
+  const want = tokens(proposed.from).map(bare);
+  if (want.length === 1 && tokens(proposed.to).length === 1) {
+    for (const word of words) {
+      const c = core(word.w);
+      if (c && (c === want[0] || c.split(/['’]/)[0] === want[0])) word.ids.forEach((id) => target.add(id));
+    }
+  } else if (want.length) {
+    for (let i = 0; i + want.length <= words.length; i++) {
+      if (want.every((word, k) => bare(words[i + k].w) === word)) words.slice(i, i + want.length).forEach((word) => word.ids.forEach((id) => target.add(id)));
+    }
+  }
+  const remaining = words;
+  const blocking = new Set<string>();
+  const blocks = (ids: string[], correction: CaptionCorrection) => { if (ids.some((id) => target.has(id))) blocking.add(correction.from); };
+  // Subtitle edits run first, merge their anchored span and protect it from global corrections.
+  for (let i = 0; i < remaining.length; i++) {
+    const prev = remaining[i - 1]?.ids ?? [];
+    const fix = remaining[i].ids.map((id) => !prev.includes(id) ? at.get(id) : undefined).find(Boolean);
+    if (!fix) continue;
+    const through = fix.through ? remaining.findIndex((word, k) => k >= i && word.ids.includes(fix.through!)) : i;
+    const count = (through < 0 ? i : through) - i + 1;
+    const merged = remaining.slice(i, i + count);
+    const ids = [...new Set(merged.flatMap((word) => word.ids))];
+    remaining.splice(i, count, { w: fix.to || merged.map((word) => word.w).join(' '), ids, fixed: true });
+    blocks(ids, fix);
+  }
+  for (let i = 0; i < remaining.length; i++) {
+    for (const span of spans) {
+      if (!span.from.every((word, k) => remaining[i + k] && !remaining[i + k].fixed && bare(remaining[i + k].w) === word)) continue;
+      if (span.correction === proposed) return null;
+      const ids = remaining.slice(i, i + span.from.length).flatMap((word) => word.ids);
+      blocks(ids, span.correction);
+      remaining.splice(i, span.from.length, ...span.to.map((w) => ({ w, ids, fixed: true })));
+      i += Math.max(0, span.to.length - 1);
+      break;
+    }
+  }
+  for (const word of remaining) {
+    if (word.fixed) continue;
+    // Python's Unicode \w includes letters, numbers and underscore; punctuation stays in the tail.
+    const c = core(word.w);
+    if (!c) continue;
+    const correction = single.get(c) ?? single.get(c.split(/['’]/)[0]);
+    if (correction === proposed) return null;
+    if (correction) blocks(word.ids, correction);
+  }
+  return blocking.size
+    ? `correction "${proposed.from}" has no matches after existing corrections: ${[...blocking].map((from) => `"${from}"`).join(', ')}; remove or change the conflicting correction first`
+    : `phrase not found in the part of the video that is kept: "${proposed.from}"; check whether it was cut and restore that section first`;
+}
+
 /** Finds a phrase in the transcript (kept words first). Returns the inclusive anchor or null. */
 export function findPhrase(t: Transcript, phrase: string, keep?: WordAnchor[]): WordAnchor | null {
   const target = norm(phrase).split(/\s+/).filter(Boolean);
@@ -384,10 +506,12 @@ export function versionDir(projectDir: string, n: number): string {
   return path.join(projectDir, 'versions', `v${n}`);
 }
 
+/** Saved versions: a `vN` folder counts only up to project.json's `version` (docs/versions.md). */
 export async function listVersions(projectDir: string): Promise<number[]> {
   try {
+    const { version } = await loadProject(projectDir);
     const names = await fsp.readdir(path.join(projectDir, 'versions'));
-    return names.map((n) => /^v(\d+)$/.exec(n)).filter(Boolean).map((m) => Number(m![1])).sort((a, b) => a - b);
+    return names.map((n) => /^v(\d+)$/.exec(n)).filter(Boolean).map((m) => Number(m![1])).filter((n) => n <= version).sort((a, b) => a - b);
   } catch { return []; }
 }
 
@@ -403,9 +527,10 @@ export async function snapshotVersion(projectDir: string, p: Project, n: number,
 
 /** Restores versions/vN/project.json as the current project (keeps the newer version counter). */
 export async function restoreVersion(projectDir: string, n: number): Promise<Project> {
+  const cur = await loadProject(projectDir);
+  if (n > cur.version) throw new ProjectError(`version ${n} was never saved (the project is at ${cur.version})`);
   const snap = withDefaults(await readJson(path.join(versionDir(projectDir, n), PROJECT_FILE)));
-  const cur = await loadProject(projectDir).catch(() => null);
-  if (cur) snap.version = Math.max(cur.version, snap.version);
+  snap.version = Math.max(cur.version, snap.version);
   await saveProject(projectDir, snap);
   return snap;
 }

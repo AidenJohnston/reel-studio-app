@@ -215,6 +215,7 @@ def test_render_flips_the_picture_but_not_the_captions(tmp_path, take, monkeypat
             pytest.skip("no CUDA on this machine")
     else:
         monkeypatch.setattr(tools, "hwaccel", lambda: None)
+        monkeypatch.setattr(tools, "hwaccel_to_memory", lambda encoder: ([], []))
     frames = {}
     for mirror in (False, True):
         pdir = _project(tmp_path / hw, take, mirror)

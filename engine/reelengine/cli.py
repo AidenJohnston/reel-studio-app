@@ -30,9 +30,39 @@ def _project(args) -> Path:
     return Path(args.project)
 
 
+def _in_work(args, option: str):
+    """A path option that must stay inside <project>/work (a note's private document and drafts)."""
+    value = getattr(args, option, None)
+    if not value:
+        return None
+    pdir = _project(args).resolve()
+    path = (pdir / value).resolve()
+    if not path.is_relative_to(pdir / "work"):
+        raise EngineError("UNSAFE_PATH", f"--{option.replace('_', '-')} {value} is outside {pdir / 'work'}",
+                          "Reel Studio asked the engine to use a file outside this video's folder.")
+    return path
+
+
 def cmd_probe(args):
     from . import probe
     return probe.probe(Path(args.file))
+
+
+def cmd_export_probe(args):
+    from . import export_media
+    return export_media.inspect(Path(args.file))
+
+
+def cmd_export_media(args):
+    from . import export_media
+    if args.bitrate is None:
+        return export_media.remux(Path(args.file), Path(args.dest))
+    return export_media.encode(Path(args.file), Path(args.dest), args.bitrate)
+
+
+def cmd_export_cover(args):
+    from . import export_media
+    return export_media.cover(Path(args.file), Path(args.dest), args.at)
 
 
 def cmd_classify(args):
@@ -43,7 +73,8 @@ def cmd_classify(args):
 
 def cmd_init(args):
     from . import init as initmod
-    return initmod.run(_project(args), args.title, [Path(f) for f in args.files], slug=args.slug)
+    return initmod.run(_project(args), args.title, [Path(f) for f in args.files], slug=args.slug,
+                       faster_exports=args.faster_exports)
 
 
 def cmd_transcribe(args):
@@ -73,7 +104,13 @@ def cmd_render(args):
     from . import render
     return render.run(_project(args), draft=args.draft, window=args.window,
                       root=Path(args.root) if args.root else None, verify=not args.no_verify,
-                      first_look=args.first_look, music=args.music, cover=not args.no_cover)
+                      first_look=args.first_look, music=args.music, cover=not args.no_cover,
+                      project_file=_in_work(args, "project_file"), out=_in_work(args, "out"))
+
+
+def cmd_proxy(args):
+    from . import proxy
+    return proxy.run(_project(args))
 
 
 def cmd_cover(args):
@@ -87,7 +124,8 @@ def cmd_cover_candidates(args):
     if not moments:
         raise EngineError("BAD_ARGS", "cover-candidates needs --at", "Reel Studio didn't say which moments to look at.")
     return render.cover_candidates(_project(args), moments, source=args.source,
-                                   root=Path(args.root) if args.root else None)
+                                   root=Path(args.root) if args.root else None,
+                                   project_file=_in_work(args, "project_file"))
 
 
 def cmd_verify(args):
@@ -275,7 +313,7 @@ def cmd_anim_context(args):
     broll.anim_context). The AI calls this before rendering an animation."""
     from . import broll, project as projmod, render, tools
     pdir = _project(args).resolve()
-    proj = projmod.load(pdir)
+    proj = projmod.load(pdir, file=_in_work(args, "project_file"))
     words = projmod.load_transcript(pdir, proj)["words"]
     tl = projmod.timeline(pdir, proj, words)
     ctx = render.make_ctx(pdir, proj, tl, True, tools.root_dir(args.root), pdir / "work" / "render")
@@ -293,6 +331,13 @@ def cmd_doctor(args):
     return doctor.run()
 
 
+# Commands that change nothing in the project, and `attach`, which only adds its own uniquely named
+# file: they run even while Reel Studio has the project open. Every other command given --project is
+# refused then unless Reel Studio runs it (owner.py).
+NOT_PROJECT_WRITES = {"probe", "doctor", "verify", "search-images", "analyze-music", "download-model",
+                      "classify", "attach"}
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = _Parser(prog="reelengine", description="Reel Studio media engine")
     sub = p.add_subparsers(dest="command", parser_class=_Parser)
@@ -301,15 +346,27 @@ def build_parser() -> argparse.ArgumentParser:
         sp = sub.add_parser(name, help=help_)
         sp.set_defaults(fn=fn)
         sp.add_argument("--project", help="project folder")
+        sp.add_argument("--owner", help="token of the Reel Studio job that has the project open (owner.py)")
         return sp
 
     sp = add("probe", cmd_probe, "describe a media file")
     sp.add_argument("file")
+    sp = add("export-probe", cmd_export_probe, "read what a platform export decides on: size, audio bitrate, edit lists")
+    sp.add_argument("file")
+    sp = add("export-media", cmd_export_media, "re-encode a finished edit to fit a platform's size limit, or only redo its audio")
+    sp.add_argument("file")
+    sp.add_argument("--dest", required=True)
+    sp.add_argument("--bitrate", type=int, help="video bits per second for a re-encode at the same size; without it, copy the video")
+    sp = add("export-cover", cmd_export_cover, "save a JPEG cover from a video frame or a picture")
+    sp.add_argument("file")
+    sp.add_argument("--dest", required=True)
+    sp.add_argument("--at", type=float, help="seconds into a video (default: the whole picture)")
     sp = add("classify", cmd_classify, "sort dropped files into the Library")
     sp.add_argument("--root", help="Reel Studio root (default REELENGINE_ROOT or ~/Documents/Reel Studio)")
     sp.add_argument("--move", action="store_true", help="move instead of copy")
     sp.add_argument("files", nargs="+")
     sp = add("init", cmd_init, "create a project from raw takes")
+    sp.add_argument("--faster-exports", action="store_true")
     sp.add_argument("--title", default="My video")
     sp.add_argument("--slug")
     sp.add_argument("files", nargs="+")
@@ -333,10 +390,14 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--first-look", action="store_true",
                     help="preview of the deterministic edit (default cut + captions) without saving it")
     sp.add_argument("--music", help="Library/... song for --first-look when the project has none")
+    sp.add_argument("--project-file", help="render this project document instead of project.json")
+    sp.add_argument("--out", help="folder for a draft (default versions/preview)")
+    add("proxy", cmd_proxy, "make the 1080p copy of each 4K or HDR take that previews read")
     sp = add("cover-candidates", cmd_cover_candidates, "the best cover frame near each moment, as stills")
     sp.add_argument("--at", required=True, help="raw-take seconds t1,t2,...")
     sp.add_argument("--source")
     sp.add_argument("--root")
+    sp.add_argument("--project-file")
     sp = add("cover", cmd_cover, "render cover.png only")
     sp.add_argument("--root")
     sp = add("verify", cmd_verify, "check an mp4")
@@ -375,6 +436,7 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--to", dest="word_to", required=True)
     sp.add_argument("--duration", type=float)
     sp.add_argument("--root")
+    sp.add_argument("--project-file")
     sp = add("attach", cmd_attach, "add a picture, GIF or short clip attached to a note")
     sp.add_argument("file")
     sp.add_argument("--name", help="the file's original name (shown to the user)")
@@ -396,6 +458,9 @@ def main(argv=None) -> int:
         if not getattr(args, "fn", None):
             raise EngineError("BAD_ARGS", "no command given",
                               "Reel Studio didn't tell the engine what to do. Please try again.")
+        if args.project and args.command not in NOT_PROJECT_WRITES:
+            from . import owner
+            owner.check(Path(args.project), args.owner)
         result = args.fn(args)
         proto.done(result)
         return 0
@@ -420,5 +485,15 @@ def main(argv=None) -> int:
         return 1
 
 
+def run() -> int:
+    """The engine as a process (`python -m reelengine`, the `reelengine` command): on Windows it first
+    joins the Job Object that ends its ffmpeg with it. main() alone does not, because tests call it
+    inside their own process."""
+    if sys.platform == "win32":
+        from .contain import contain_children
+        contain_children()
+    return main()
+
+
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(run())

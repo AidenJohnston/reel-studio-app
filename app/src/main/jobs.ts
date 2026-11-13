@@ -1,8 +1,10 @@
 // Long-running work (first edit, notes, re-renders). One job per project at a time. Every event
 // goes to the renderer; app.json records the running job so a crash can be recovered at startup.
 import { randomUUID } from 'node:crypto'
-import type { JobEvent, JobKind, JobUpdate, Phase } from '../shared/api'
-import { addChat, cleanPartialVersions, projectDir, updateAppState } from './store'
+import type { JobEvent, JobKind, JobUpdate, Phase, VersionMade } from '../shared/api'
+import { addChat, cleanPartialVersions, listVersions, projectDir, recordVersionMade, settleInterrupted, stamp, updateAppState } from './store'
+import { claimProject, type ProjectOwner } from './owner'
+import type { ChatLine } from './style-consent'
 import { toUserError } from './engine'
 import { learn, ProgressTracker, type SpeedHistory } from './progress'
 
@@ -20,7 +22,15 @@ export interface ProgressDeps {
 
 /** Turns a finished render into a playable URL of a copy that is safe to play (index.ts). */
 export type ToVideo = (slug: string, e: Extract<JobUpdate, { type: 'render' }>) => Promise<string | null>
-export type JobFn = (emit: Emit, signal: AbortSignal) => Promise<{ summary: string; version?: number; quiet?: boolean }>
+/** `job.id`: a note is saved in project.json under it (store.ts settleInterrupted). `job.owner`: the
+ * token that owns the project while the job runs; every engine command and edit it starts joins with
+ * it (`--owner`, ai owner.ts). `chat`: the lines to post when the job ends (default: the summary).
+ * `made`: what this job changed, recorded for `version` only if the job's own final render made it (see start). */
+export type JobFn = (
+  emit: Emit,
+  signal: AbortSignal,
+  job: { id: string; owner: string | null }
+) => Promise<{ summary: string; version?: number; chat?: ChatLine[]; made?: Pick<VersionMade, 'by' | 'summary'> }>
 
 interface Running {
   id: string
@@ -39,14 +49,40 @@ interface Running {
 export function createJobManager(broadcast: (e: JobEvent) => void, log: (s: string) => void, progress?: ProgressDeps, toVideo?: ToVideo) {
   const jobs = new Map<string, Running>()
 
+  /** Projects a manual edit is writing right now: no job may start on them meanwhile. */
+  const held = new Set<string>()
+  /** Projects attachments are adding files to or removing their own from (`share`). The note box sends
+   * several at once, and each writes only its own uniquely named files, so they run side by side and
+   * share one owner lock, which the last of them lets go of. Jobs and manual edits wait for them all. */
+  const sharing = new Map<string, { count: number; owner: Promise<ProjectOwner>; closing?: Promise<void> }>()
+  /** Projects an engine process may still be writing to after its job ended (ENGINE_STUCK): nothing
+   * runs on them and they stay closed until Reel Studio restarts and its leftovers are reaped. */
+  const stuck = new Map<string, { code: string; userMessage: string }>()
+  const BUSY = { code: 'BUSY', userMessage: 'I am still working on this video. Give me a moment, or press Stop.' }
+
+  function refuseIfBusy(slug: string): void {
+    const s = stuck.get(slug)
+    if (s) throw s
+    if (forSlug(slug) || held.has(slug) || sharing.has(slug)) throw BUSY
+  }
+
+  function keepStuck(slug: string, e: unknown): void {
+    const err = e as { code?: string; userMessage?: string }
+    if (err?.code === 'ENGINE_STUCK') stuck.set(slug, { code: err.code, userMessage: err.userMessage ?? 'Part of Reel Studio\'s video engine is still running on this video.' })
+  }
+
   function forSlug(slug: string): Running | undefined {
     return [...jobs.values()].find((j) => j.slug === slug)
   }
 
+  /** Nothing else may write to the project: a job runs on it, or it is kept closed. A manual edit
+   * (`hold`) does not count: it is quick, and only refuses jobs and other edits meanwhile. */
+  function isClosed(slug: string): boolean {
+    return stuck.has(slug) || !!forSlug(slug)
+  }
+
   function start(slug: string | null, kind: JobKind, fn: JobFn, opts: { note?: string } = {}): string {
-    if (slug && forSlug(slug)) {
-      throw { code: 'BUSY', userMessage: 'I am still working on this video. Give me a moment, or press Stop.' }
-    }
+    if (slug) refuseIfBusy(slug)
     const id = randomUUID()
     const abort = new AbortController()
     const job: Running = { id, slug, kind, abort, message: 'Getting started', pct: 0, overall: 0, secondsLeft: null, overdue: false, thinking: false, done: Promise.resolve() }
@@ -56,8 +92,12 @@ export function createJobManager(broadcast: (e: JobEvent) => void, log: (s: stri
     let mediaSec = 0
     let mediaAsked = false
     const pending: Promise<void>[] = []
+    // after a failure or Stop, a render still being copied is never shown
+    let open = true
     const tracker = new ProgressTracker(kind, 0, history)
+    let owner: ProjectOwner | null = null
     let phase: Phase | undefined
+    let ended = false
     // `thinking` is state, not a one-off: the once-a-second repeats keep saying it until the AI answers
     const status = (): void => {
       const snap = tracker.snapshot()
@@ -71,11 +111,16 @@ export function createJobManager(broadcast: (e: JobEvent) => void, log: (s: stri
     // re-broadcast once a second: time moves the bar and the estimate even while the AI thinks
     const tick = setInterval(() => status(), progress?.tickMs ?? 1000)
     tick.unref?.()
+    const end = (): void => {
+      ended = true
+      clearInterval(tick)
+    }
 
     job.done = (async () => {
       try {
         // Inside the try: if even this fails, the user gets an error instead of a job that never ends.
         if (slug) {
+          owner = await enter(slug)
           await updateAppState(slug, (s) => {
             s.job = { id, kind, startedAt: new Date().toISOString(), note: opts.note }
             s.lastError = null
@@ -90,15 +135,23 @@ export function createJobManager(broadcast: (e: JobEvent) => void, log: (s: stri
         // main.log gets each new status line and each AI step, timed, so a slow edit can be traced afterwards
         const t0 = Date.now()
         let logged = ''
+        // What made a version is recorded where success is announced, only if this job's final render produced it
+        // and it did not exist before (an unchanged edit re-renders, and so reuses, the current version).
+        const existed = new Set(slug ? (await listVersions(projectDir(slug))).filter((v) => !v.draft).map((v) => v.n) : [])
+        const finals = new Set<number>()
         const res = await fn((e) => {
+          // A cancelled engine can still print progress while it dies (Windows: about a second). Anything the
+          // job emits once it has ended would reach the screen after `cancelled` and put the job back there.
+          if (ended) return
           if (e.type === 'status') {
             if (e.message && e.message !== logged) log(`[job ${kind}] ${(logged = e.message)}`)
             job.message = e.message || job.message
             // Raw: per-step percents restart at 0; `overall` (progress.ts) is the whole job.
             if (typeof e.pct === 'number') job.pct = Math.max(0, Math.min(100, e.pct))
-            if (e.phase && slug && progress && !mediaAsked) {
+            // project.json exists once a phase after init starts: the estimate scales with it. Preparing a clip
+            // happens inside init, before project.json is written, so it never asks.
+            if (e.phase && e.phase !== 'prepare' && slug && progress && !mediaAsked) {
               mediaAsked = true
-              // project.json exists once a phase starts (after init): the estimate scales with it
               void progress.mediaSeconds(slug).then((s) => { mediaSec = s; tracker.setMedia(s) }).catch(() => undefined)
             }
             tracker.update(e.phase, e.phase ? e.pct : undefined)
@@ -111,49 +164,150 @@ export function createJobManager(broadcast: (e: JobEvent) => void, log: (s: stri
             send({ jobId: id, slug, type: 'tool', name: e.name, summary: e.summary })
           } else if (e.type === 'render') {
             const r = e
+            if (!r.draft) finals.add(r.version)
             const video = slug && toVideo ? toVideo(slug, r).catch(() => null) : Promise.resolve(null)
-            pending.push(video.then((v) => send({ jobId: id, slug, type: 'render', version: r.version, draft: r.draft, firstLook: !!r.firstLook, video: v })))
+            pending.push(video.then((v) => { if (open) send({ jobId: id, slug, type: 'render', version: r.version, draft: r.draft, firstLook: !!r.firstLook, video: v }) }))
           } else if (e.type === 'reply') send({ jobId: id, slug, type: 'reply', text: e.text })
           else send({ jobId: id, slug, type: 'heard', words: e.words })
-        }, abort.signal)
+        }, abort.signal, { id, owner: owner?.token ?? null })
+        end()
         await Promise.all(pending) // a render's event before `done`, never after
         if (progress && mediaSec > 0) {
           // what each phase really took on this computer: the next estimate starts from it
           await progress.saveHistory(learn(history, kind, mediaSec, tracker.finish())).catch(() => undefined)
         }
+        // The work is saved: bookkeeping that fails now is logged, never reported as a failed job. The
+        // job stays recorded in app.json then, and settleInterrupted finishes it before the next job.
         if (slug) {
           await updateAppState(slug, (s) => {
             s.job = null
             s.status = 'ready'
-          })
-          if (!res.quiet) await addChat(slug, 'editor', res.summary, res.version)
+            s.chat.push(...(res.chat ?? [{ from: 'editor', text: res.summary, version: res.version }]).map(stamp))
+          }).catch((e) => log(`[job ${kind}] saved, but app.json was not updated: ${String(e)}`))
+          const n = res.version
+          if (res.made && n !== undefined && finals.has(n) && !existed.has(n)) {
+            await recordVersionMade(slug, { version: n, ...res.made, at: new Date().toISOString() })
+              .catch((e) => log(`[job ${kind}] saved, but what made v${n} was not recorded: ${String(e)}`))
+          }
         }
         log(`[job ${kind}] done in ${Math.round((Date.now() - t0) / 1000)} s`)
         send({ jobId: id, slug, type: 'done', summary: res.summary, version: res.version })
       } catch (e) {
+        end()
+        open = false
+        await Promise.allSettled(pending)
         const err = toUserError(e)
         const cancelled = err.code === 'CANCELLED' || abort.signal.aborted
         if (!cancelled) log(`[job ${kind}] ${err.code}: ${err.message ?? ''}`)
-        if (slug) {
-          await cleanPartialVersions(projectDir(slug)).catch(() => [])
+        if (slug && err.code === 'ENGINE_STUCK') stuck.set(slug, { code: err.code, userMessage: err.userMessage })
+        // Without the project (an earlier job could not be settled) this job wrote nothing, and app.json's
+        // record of that earlier job must stay for settleInterrupted. With a stuck engine nothing is
+        // cleaned up or let go: it may still be writing.
+        if (slug && owner && !stuck.has(slug)) {
+          // a version it could not remove (Windows refuses while a file is open) is left for the next
+          // start or job on the project, which tries again (store.ts settleInterrupted)
+          const cleaned = await cleanPartialVersions(projectDir(slug)).then(() => true, (e) => {
+            log(`[job ${kind}] could not remove an unfinished version: ${(e as Error)?.message ?? e}`)
+            return false
+          })
           await updateAppState(slug, (s) => {
             s.job = null
+            if (cleaned) delete s.cleanupOwed
+            else s.cleanupOwed = true
             if (kind === 'first-edit') s.status = cancelled ? 'interrupted' : 'failed'
-            if (!cancelled) s.lastError = { code: err.code, userMessage: err.userMessage }
+            // An export failure is shown in the export dialog; the video itself is fine.
+            if (!cancelled && kind !== 'export') s.lastError = { code: err.code, userMessage: err.userMessage }
           }).catch(() => {})
-          if (!cancelled && kind !== 'first-edit') await addChat(slug, 'editor', err.userMessage).catch(() => {})
         }
+        if (slug && !cancelled && kind !== 'first-edit' && kind !== 'export') await addChat(slug, 'editor', err.userMessage).catch(() => {})
         send(cancelled ? { jobId: id, slug, type: 'cancelled' } : { jobId: id, slug, type: 'error', code: err.code, userMessage: err.userMessage })
       } finally {
         clearInterval(tick)
+        if (!(slug && stuck.has(slug))) await owner?.release().catch((e) => log(`[job ${kind}] could not let go of the project: ${String(e)}`))
         jobs.delete(id)
       }
     })()
     return id
   }
 
+  /** Marks the project open, then finishes a job app.json still records, before anything else writes. */
+  async function enter(slug: string): Promise<ProjectOwner> {
+    const owner = await claimProject(projectDir(slug))
+    try {
+      if ((await settleInterrupted(slug)) === 'unreadable') {
+        throw { code: 'PROJECT_UNREADABLE', userMessage: 'I could not read this video right now. Try again in a moment.' }
+      }
+      return owner
+    } catch (e) {
+      await owner.release()
+      throw e
+    }
+  }
+
+  /** Runs a quick change to a project (a manual edit) as its only writer: refused while a job runs
+   * on it, and no job can start on it until `fn` is done. */
+  async function hold<T>(slug: string, fn: (owner: string) => Promise<T>): Promise<T> {
+    refuseIfBusy(slug)
+    held.add(slug)
+    try {
+      const owner = await enter(slug)
+      try {
+        return await fn(owner.token)
+      } catch (e) {
+        keepStuck(slug, e)
+        throw e
+      } finally {
+        if (!stuck.has(slug)) await owner.release()
+      }
+    } finally {
+      held.delete(slug)
+    }
+  }
+
+  /** Runs an attachment change: refused while a job runs on the project or a manual edit holds it, but
+   * never by another attachment. No job or manual edit starts until every one of them is done. */
+  async function share<T>(slug: string, fn: (owner: string) => Promise<T>): Promise<T> {
+    // the last one is still letting go of the lock: a lock claimed now could be the one it deletes
+    for (let prev = sharing.get(slug); prev?.closing; prev = sharing.get(slug)) await prev.closing
+    const closed = stuck.get(slug)
+    if (closed) throw closed
+    if (forSlug(slug) || held.has(slug)) throw BUSY
+    let entry = sharing.get(slug)
+    if (!entry) sharing.set(slug, (entry = { count: 0, owner: claimProject(projectDir(slug)) }))
+    entry.count++
+    try {
+      const owner = await entry.owner
+      return await fn(owner.token)
+    } catch (e) {
+      keepStuck(slug, e)
+      throw e
+    } finally {
+      if (--entry.count === 0) {
+        const last = entry
+        last.closing = (async () => {
+          if (!stuck.has(slug)) await last.owner.then((o) => o.release(), () => undefined).catch((e) => log(`[attach] could not let go of ${slug}: ${String(e)}`))
+          sharing.delete(slug)
+        })()
+        await last.closing
+      }
+    }
+  }
+
+  /** A project something of a previous run still writes to (orphans.ts reap): closed until it stops. */
+  /** `why`: an engine of this run that would not stop (ENGINE_STUCK); without it, one from last time. */
+  function keepClosed(slug: string, why?: { code: string; userMessage: string }): void {
+    stuck.set(slug, why ? { code: why.code, userMessage: why.userMessage } : { code: 'ENGINE_STILL_RUNNING', userMessage: "Part of Reel Studio's video engine from last time is still running on this video. Quit and reopen Reel Studio in a few minutes, or restart your computer, before you change it." })
+  }
+
   return {
     start,
+    hold,
+    share,
+    /** Throws while a job runs on the project, a manual edit or an attachment holds it, or it is kept
+     * closed: a note or deleting the video must wait. */
+    refuseIfBusy,
+    isClosed,
+    keepClosed,
     forSlug,
     get: (id: string) => jobs.get(id),
     cancel(id: string): void {

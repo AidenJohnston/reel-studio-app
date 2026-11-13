@@ -35,7 +35,7 @@ export interface EngineHost {
     onProgress?: (p: { stage: string; pct: number; message: string }) => void,
     signal?: AbortSignal
   ): Promise<any>
-  renderAnimation(template: string, params: Record<string, unknown>, outPath: string): Promise<string>
+  renderAnimation(template: string, params: Record<string, unknown>, outPath: string, fps?: number): Promise<string>
   reelStudioRoot(): string
   captureWebsite?(
     url: string,
@@ -93,14 +93,16 @@ export interface AI {
   active(): Promise<ProviderStatus>
   setActive(id: ProviderStatus['id'], connectionId?: string): Promise<void>
   setClaudeKey(key: string | null): Promise<ProviderStatus>
-  firstEdit(projectDir: string, onEvent: (e: AgentEvent) => void, signal?: AbortSignal): Promise<AgentResult>
-  /** `opts.attachments`: `work/assets/attach-*` refs main already checked (the AI checks them again). */
+  firstEdit(projectDir: string, onEvent: (e: AgentEvent) => void, signal?: AbortSignal, opts?: { owner?: string }): Promise<AgentResult>
+  /** `opts.attachments`: `work/assets/attach-*` refs main already checked (the AI checks them again).
+   * `opts.id`: the job id the note is saved under. `opts.saveStyleRules: false`: return rules, the app asks.
+   * `opts.owner`: the job's owner token, which the note joins instead of taking the project. */
   applyNote(
     projectDir: string,
     note: string,
     onEvent: (e: AgentEvent) => void,
     signal?: AbortSignal,
-    opts?: { attachments?: string[] }
+    opts?: { attachments?: string[]; id?: string; saveStyleRules?: boolean; owner?: string }
   ): Promise<AgentResult>
   writeScript(idea: string, onEvent: (e: AgentEvent) => void, signal?: AbortSignal): Promise<ScriptResult>
   styleRules(): Promise<{ id: string; text: string; createdAt: string }[]>

@@ -102,11 +102,12 @@ test('no AI: honest checklist, note -> button, caption controls, add song + pict
   await expect(page.getByTestId('caption-controls')).toBeVisible()
   await expect(page.getByTestId('cap-size-medium')).toHaveAttribute('aria-checked', 'true') // 105 px default
   await expect(page.getByTestId('cap-pos-lower')).toHaveAttribute('aria-checked', 'true')
-  await expect(page.getByTestId('cap-look-white')).toHaveAttribute('aria-checked', 'true')
+  await expect(page.getByTestId('cap-look-clean')).toHaveAttribute('aria-checked', 'true')
+  await expect(page.getByTestId('cap-color-white')).toHaveAttribute('aria-checked', 'true')
   await shot(page, 'ux-07-captions-tab')
   await page.getByTestId('cap-size-big').click()
   await page.getByTestId('cap-pos-higher').click()
-  await page.getByTestId('cap-look-yellow').click()
+  await page.getByTestId('cap-color-yellow').click()
   await shot(page, 'ux-08-captions-picked')
   await expect(page.getByTestId('sub-preview')).toBeVisible()
   await page.getByTestId('make-version').click()
@@ -120,10 +121,23 @@ test('no AI: honest checklist, note -> button, caption controls, add song + pict
   await expect(page.getByTestId('versions').getByText('Version 2')).toBeVisible({ timeout: 10 * 60_000 })
   const style = projectJson().captions.style
   expect([style.size, style.position, style.color, !!style.box]).toEqual([126, 0.66, '#FFD60A', false])
-  // The chat and the version button say what changed (critique 1.8).
+  // The chat and the version menu say what changed (critique 1.8).
   await expect(page.getByTestId('bubble-editor').last()).toHaveText('Version 2: bigger yellow subtitles, moved up.')
-  await expect(page.getByTestId('versions').getByText('Version 2')).toHaveAttribute('title', 'Version 2: bigger yellow subtitles, moved up.')
+  await page.getByTestId('version-switch').click()
+  await expect(page.getByTestId('version-item-2')).toContainText('Bigger yellow subtitles, moved up')
+  await expect(page.getByTestId('version-item-1')).toContainText('First edit')
+  await page.keyboard.press('Escape')
+  await expect(page.getByTestId('version-menu')).toHaveCount(0)
   await expect(page.getByTestId('export')).toHaveText('Export Version 2')
+  // A reply's button changes the newest version, so with an older one on screen it switches back first.
+  await page.getByTestId('version-prev').click()
+  await expect(page.getByTestId('version-latest')).toBeVisible()
+  await page.getByTestId('bubble-editor').getByTestId('action-open-captions').first().click()
+  await expect(page.getByTestId('caption-controls')).toBeVisible()
+  await expect(page.getByTestId('version-latest')).toHaveCount(0)
+  await expect(page.getByTestId('export')).toHaveText('Export Version 2')
+  await page.keyboard.press('Escape')
+  await expect(page.getByTestId('drawer')).toHaveCount(0)
 
   // ---- 5. "Add a song": one click, the picker, a new version with the song ----
   await answerFilePicker(app, media.song)

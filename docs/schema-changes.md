@@ -26,6 +26,16 @@ All additive (optional fields only), per docs/architecture.md section 3. Schema:
   `duration`, `hasAudio`, `fromGif`, `thumb`, `createdAt`). The sidecar is not part of project.json. A note
   may have empty `text` when it has attachments.
 
+## 2026-10-21 (all-or-nothing notes)
+
+- `notes[].id` (string): the app's job id for the note. `notes[].reply` (string): what the editor told the
+  user. `notes[].styleRulesAdded`, `notes[].styleSuggestions` (string arrays, only when non-empty): My style
+  rules the note asked to remember or the AI proposed. They are saved with the note so that, if the app
+  closes right after a note is saved, the next start posts the reply and asks about the rules once
+  (`app/src/main/store.ts` `recoverInterrupted`).
+- `version` is also what makes a `versions/vN` folder count: a folder above it is a note that was never
+  saved (docs/versions.md).
+
 ## 2026-10-20 (mirror)
 
 - `sources[].mirror` (boolean, absent = false): the take is mirrored (a front-camera selfie: posters, shirts and
@@ -50,3 +60,31 @@ All additive (optional fields only), per docs/architecture.md section 3. Schema:
   grouped as before. Anchored on word ids, so a recut keeps them.
 - `work/captions.json` cues gain `tokens` (each word as drawn, before upper-casing, with the transcript word ids
   it came from; a word taken off the captions is `""`) and `run` (lines with different runs can't be joined).
+
+## 2026-10-22 (caption presets)
+
+- `captions.style.highlight` (`#RRGGBB`, no alpha, absent = none): the word being spoken is drawn in this colour, one
+  word at a time. Each word is lit from its start until the next word starts. A line whose text lost a token
+  (a word that was only punctuation) is drawn without the highlight.
+- `captions.style.pop` (boolean, absent = false): each line grows from 80% to full size over its first 120 ms,
+  carrying on across the word events of a highlighted line.
+- `captions.style.preset` names the look the line started from in "Edit it myself" (`clean`, `bold-pop`,
+  `karaoke`, `boxed`, `minimal`). The engine draws only the style fields; the name is for the picker. The AI's
+  `set_caption_style` removes it when it changes the look itself (pop, the highlight on or off, case, words per
+  line), so the picker then matches the look by its fields.
+- `captions.style.sizePicked` (boolean, absent = false): the person picked `size` in the Size row of "Edit it
+  myself". Picking a look then keeps that size; without it the look's own size applies. `set_caption_style` removes
+  it when it changes the size. The engine ignores it.
+
+## 2026-10-22 (snap zooms)
+
+- `zooms[].style` (`"snap"`, absent = the hard punch-in as before): the zoom eases in over about 0.22 s
+  (ease-out) and back over about 0.3 s (a critically damped spring), with motion blur only while the scale
+  moves. Motion never runs across a jump cut. Either end falls back to the hard cut of a default zoom where
+  easing would look wrong: the punch-in when the zoom directly follows another zoom or a cut falls inside
+  it; the release when the zoom runs into the next one, ends under face-hiding b-roll, is too short to
+  hold (under about 0.8 s) or has a cut inside its release. A cut right after the last word takes the
+  release itself. A snap whose fixed point (the point the picture grows out of) is far enough from the
+  face to carry the eyes more than 9% of the frame's width punches in and releases hard, like a default
+  zoom. A face-centred zoom gets there when the face sits high and off centre.
+  Written by the AI's `set_zoom` tool.

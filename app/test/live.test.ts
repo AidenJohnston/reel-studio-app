@@ -9,7 +9,7 @@ import { EMPTY_LIVE, PREVIEW_LABEL, liveFromDetail, reduceLive, type LiveState }
 import { createLiveVideos, LIVE_DIR } from '../src/main/live-video'
 import { createJobManager } from '../src/main/jobs'
 import { pathFromMediaUrl } from '../src/main/media-url'
-import { projectDir } from '../src/main/store'
+import { projectDir, readAppState } from '../src/main/store'
 import { setupPaths } from './helpers'
 
 const J = { jobId: 'j1', slug: 's' }
@@ -98,6 +98,16 @@ describe('live videos (main): a draft plays from a copy the engine never overwri
 })
 
 describe('job manager (main): the contract on the wire', () => {
+  it('fails if a failed export lands in the editor chat or marks the video as failed', async () => {
+    setupPaths()
+    const slug = 'export-fails'
+    mkdirSync(projectDir(slug), { recursive: true })
+    const jobs = createJobManager(() => undefined, () => undefined)
+    jobs.start(slug, 'export', async () => { throw { code: 'ENOSPC', userMessage: 'Your disk is full.' } })
+    await jobs.forSlug(slug)?.done
+    expect(await readAppState(slug)).toMatchObject({ chat: [], lastError: null })
+  })
+
   it('keeps thinking across the once-a-second repeats, adds video to renders before done, passes reply + heard', async () => {
     setupPaths()
     const slug = 'wire'
@@ -117,7 +127,7 @@ describe('job manager (main): the contract on the wire', () => {
       await new Promise((r) => setTimeout(r, 80))
       emit({ type: 'tool', name: 'set_cut', summary: 'Kept your best takes' })
       emit({ type: 'reply', text: 'Done soon.' })
-      return { summary: 'ok', version: 1, quiet: true }
+      return { summary: 'ok', version: 1, chat: [] }
     })
     await jobs.forSlug(slug)?.done
     const i = events.findIndex((e) => e.type === 'status' && e.thinking)
@@ -137,5 +147,87 @@ describe('job manager (main): the contract on the wire', () => {
     expect(statuses[0]).toMatchObject({ secondsLeft: null })
     expect(statuses.some((e) => e.type === 'status' && typeof e.secondsLeft === 'number' && e.secondsLeft > 0)).toBe(true)
     expect(existsSync(projectDir(slug))).toBe(true)
+  })
+
+  it('a manual edit and a note never run on one video at once', async () => {
+    setupPaths()
+    const slug = 'one-lane'
+    mkdirSync(projectDir(slug), { recursive: true })
+    const jobs = createJobManager(() => undefined, () => undefined)
+    let release!: () => void
+    let saving!: () => void
+    const inside = new Promise<void>((r) => (saving = r))
+    const editing = jobs.hold(slug, () => { saving(); return new Promise<void>((r) => (release = r)) })
+    await inside
+    expect(readFileSync(join(projectDir(slug), 'work', '.owner.lock'), 'utf8')).toBeTruthy()
+    expect(() => jobs.start(slug, 'note', async () => ({ summary: 'ok' }))).toThrow(expect.objectContaining({ code: 'BUSY' }))
+    release()
+    await editing
+    let finish!: (r: { summary: string }) => void
+    const note = new Promise<{ summary: string }>((r) => (finish = r))
+    jobs.start(slug, 'note', () => note)
+    await expect(jobs.hold(slug, async () => 'saved')).rejects.toMatchObject({ code: 'BUSY' })
+    finish({ summary: 'ok' })
+    await jobs.forSlug(slug)?.done
+    await expect(jobs.hold(slug, async () => 'saved')).resolves.toBe('saved')
+  })
+
+  it('asks for the video length only after init, not while a clip is being prepared inside it', async () => {
+    setupPaths()
+    const slug = 'prepared'
+    mkdirSync(projectDir(slug), { recursive: true })
+    let step = ''
+    const asked: string[] = []
+    const jobs = createJobManager(() => undefined, () => undefined, {
+      loadHistory: async () => ({ v: 1, phases: {} }),
+      saveHistory: async () => undefined,
+      mediaSeconds: async () => {
+        asked.push(step)
+        return 30
+      },
+      tickMs: 15
+    })
+    jobs.start(slug, 'first-edit', async (emit) => {
+      step = 'prepare'
+      emit({ type: 'status', message: 'Preparing your video', pct: 40, phase: 'prepare' })
+      step = 'listen'
+      emit({ type: 'status', message: 'Listening to your video', pct: 10, phase: 'listen' })
+      return { summary: 'ok', chat: [] }
+    })
+    await jobs.forSlug(slug)?.done
+    expect(asked).toEqual(['listen'])
+  })
+
+  it('says nothing more about a job once it is cancelled, even when its engine still prints progress', async () => {
+    setupPaths()
+    const slug = 'stopped'
+    mkdirSync(projectDir(slug), { recursive: true })
+    const events: JobEvent[] = []
+    const jobs = createJobManager((e) => events.push(e), () => undefined, {
+      loadHistory: async () => ({ v: 1, phases: {} }),
+      saveHistory: async () => undefined,
+      mediaSeconds: async () => 30,
+      tickMs: 15
+    })
+    const held: { emit?: (e: { type: 'status'; message: string; pct: number; phase: 'final' }) => void } = {}
+    let running!: () => void
+    const started = new Promise<void>((r) => (running = r))
+    const id = jobs.start(slug, 'rerender', async (emit, signal) => {
+      held.emit = emit
+      emit({ type: 'status', message: 'Making the full-quality video', pct: 1, phase: 'final' })
+      const stopped = new Promise((r) => signal.addEventListener('abort', r, { once: true }))
+      running()
+      await stopped
+      throw { code: 'CANCELLED', userMessage: 'Stopped.' }
+    })
+    await started
+    jobs.cancel(id)
+    await jobs.forSlug(slug)?.done
+    // the runner rejected at once; the dying engine's last progress line arrives after the job ended
+    held.emit!({ type: 'status', message: 'Putting it all together', pct: 40, phase: 'final' })
+    await new Promise((r) => setTimeout(r, 60))
+    const end = events.findIndex((e) => e.type === 'cancelled')
+    expect(end).toBeGreaterThan(-1)
+    expect(events.slice(end + 1)).toEqual([])
   })
 })

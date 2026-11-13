@@ -228,8 +228,35 @@ function conversationKey(req: CompletionRequest): string {
 
 interface Waiter { resolve: (r: any) => void; reject: (e: unknown) => void }
 
+const END_STEP_MS = 3000;
+
+/** Settles once a session process has exited and closed its output (`closed`). With its input ended it
+ * is given END_STEP_MS, then SIGTERM, then SIGKILL, END_STEP_MS each. Still open after that (a process
+ * that survives SIGKILL, or a child of it holding the output, even after the process itself exited), it
+ * fails: Stop says so instead of waiting forever. */
+function ended(child: ChildProcessWithoutNullStreams, closed: Promise<void>): Promise<void> {
+  return new Promise<void>((resolve, reject) => {
+    const steps: (() => void)[] = [
+      () => child.kill(),
+      () => child.kill('SIGKILL'),
+      () => reject(new AIError('cli_stuck', 'The AI would not stop. Restart Reel Studio if this keeps happening.', { detail: `claude process ${child.pid} still open after SIGKILL` })),
+    ];
+    let timer: NodeJS.Timeout;
+    const next = (): void => {
+      timer = setTimeout(() => {
+        try { steps.shift()!(); } catch { /* gone */ }
+        if (steps.length) next();
+      }, END_STEP_MS);
+    };
+    next();
+    void closed.then(() => { clearTimeout(timer); resolve(); });
+  });
+}
+
 interface LiveSession {
   child: ChildProcessWithoutNullStreams;
+  /** settles on the process's 'close': it exited and nothing holds its output open */
+  done: Promise<void>;
   key: string;
   /** req.messages.length + 1 after the last answered turn: where the next delta starts */
   next: number;
@@ -249,6 +276,8 @@ export class ClaudeCliProvider implements ModelProvider {
   readonly supportsImages = true;
   readonly model: string;
   private live: LiveSession | null = null;
+  /** settles once every session process this provider ended has exited */
+  private ending: Promise<void> = Promise.resolve();
   constructor(private readonly o: CliOptions & { session?: boolean; effort?: string } = {}) { this.model = o.model ?? 'sonnet'; }
 
   private args(): string[] {
@@ -263,20 +292,33 @@ export class ClaudeCliProvider implements ModelProvider {
     ];
   }
 
-  /** Ends the live session (the agent loop calls this when a run ends). */
-  dispose(): void {
+  /** Ends the live session (the agent loop calls this when a run ends) and settles once its process,
+   * and any session ended before it, has exited: Stop waits for every process a note started, and
+   * fails with cli_stuck when one would not stop (ended). */
+  dispose(): Promise<void> {
     const s = this.live; this.live = null;
-    if (!s) return;
-    if (s.idle) clearTimeout(s.idle);
-    s.closed = true;
-    try { s.child.stdin.end(); } catch { /* gone */ }
-    const t = setTimeout(() => { try { s.child.kill(); } catch { /* gone */ } }, 3000);
-    t.unref?.();
+    if (s) {
+      if (s.idle) clearTimeout(s.idle);
+      s.closed = true;
+      try { s.child.stdin.end(); } catch { /* gone */ }
+      // every session's process is waited for, even after an earlier one failed: then the first failure
+      this.ending = Promise.allSettled([this.ending, ended(s.child, s.done)]).then((rs) => {
+        const failed = rs.find((r): r is PromiseRejectedResult => r.status === 'rejected');
+        if (failed) throw failed.reason;
+      });
+    }
+    return this.ending;
+  }
+
+  /** Ends the live session without waiting: a process that would not stop fails the run's own dispose (agent.ts). */
+  private drop(): void {
+    this.dispose().catch(() => undefined);
   }
 
   private startSession(key: string): LiveSession {
     const child = spawn(this.o.bin ?? 'claude', this.args(), { cwd: this.o.cwd ?? workDir(), env: cliEnv(this.o.env), windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] });
-    const s: LiveSession = { child, key, next: 0, buf: '', closed: false, waiter: null, idle: null };
+    const done = new Promise<void>((resolve) => child.once('close', () => resolve()));
+    const s: LiveSession = { child, done, key, next: 0, buf: '', closed: false, waiter: null, idle: null };
     let errTail = '';
     child.stderr.setEncoding('utf8').on('data', (d: string) => { errTail = (errTail + d).slice(-800); });
     child.stdout.setEncoding('utf8').on('data', (d: string) => {
@@ -308,7 +350,7 @@ export class ClaudeCliProvider implements ModelProvider {
     let rendered: { text: string; images: { label: string; img: ImagePart }[] };
     if (continues) { s = cur!; rendered = renderDelta(req, s.next); }
     else {
-      this.dispose();
+      this.drop();
       s = this.live = this.startSession(key);
       rendered = renderConversation(req);
     }
@@ -316,8 +358,8 @@ export class ClaudeCliProvider implements ModelProvider {
     const result = await new Promise<any>((resolve, reject) => {
       let settled = false;
       const finish = (fn: () => void) => { if (settled) return; settled = true; clearTimeout(timer); req.signal?.removeEventListener('abort', abort); fn(); };
-      const timer = setTimeout(() => finish(() => { s.waiter = null; this.dispose(); reject(new AIError('cli_timeout', 'The AI took too long to answer.', { retryable: true })); }), this.o.timeoutMs ?? 600_000);
-      const abort = () => finish(() => { s.waiter = null; this.dispose(); reject(new AIError('cancelled', 'Stopped.')); });
+      const timer = setTimeout(() => finish(() => { s.waiter = null; this.drop(); reject(new AIError('cli_timeout', 'The AI took too long to answer.', { retryable: true })); }), this.o.timeoutMs ?? 600_000);
+      const abort = () => finish(() => { s.waiter = null; this.drop(); reject(new AIError('cancelled', 'Stopped.')); });
       if (req.signal?.aborted) return abort();
       req.signal?.addEventListener('abort', abort, { once: true });
       s.waiter = { resolve: (r) => finish(() => resolve(r)), reject: (e) => finish(() => reject(e)) };
@@ -327,7 +369,7 @@ export class ClaudeCliProvider implements ModelProvider {
     });
     s.next = req.messages.length + 1;
     // an idle session must not outlive its run for long (a crashed caller never calls dispose)
-    s.idle = setTimeout(() => { if (this.live === s) this.dispose(); }, 120_000);
+    s.idle = setTimeout(() => { if (this.live === s) this.drop(); }, 120_000);
     s.idle.unref?.();
     return result;
   }

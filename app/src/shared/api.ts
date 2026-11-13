@@ -1,6 +1,7 @@
 // Types shared by the main process, the preload bridge and the renderer.
 // Keep this file free of Node and DOM imports.
 import type { ChatAction } from './notes'
+import type { Platform, PlatformExportRequest } from './platforms'
 export type { ChatAction } from './notes'
 
 export type AppCommand = { type: 'new-video' | 'settings' | 'export' | 'library' } | { type: 'open-reel'; slug: string }
@@ -50,6 +51,18 @@ export interface ChecklistItem {
   detail?: string
 }
 
+/**
+ * What made a version, recorded in app.json once, when its final render first succeeded
+ * (main/jobs.ts). A rerender that reuses the version records nothing.
+ */
+export interface VersionMade {
+  version: number
+  by: 'note' | 'hand'
+  /** The note as the person wrote it (may be empty when only files were attached), or the change made by hand. */
+  summary: string
+  at: string
+}
+
 export interface ChatMessage {
   id: string
   from: 'you' | 'editor'
@@ -97,9 +110,10 @@ export interface ProjectDetail extends ProjectSummary {
   versions: VersionInfo[]
   words: Word[]
   keptIds: string[]
-  /** The caption lines of the last full render, word by word (engine work/captions.json). */
+  /** The caption lines of the saved version (or the preview before one), word by word: its captions.json. */
   captionLines: CaptionToken[][]
   checklist: ChecklistItem[]
+  versionsMade: VersionMade[]
   chat: ChatMessage[]
   lastError: { code: string; userMessage: string } | null
   job: { id: string; kind: JobKind; message: string; pct: number; overall: number; secondsLeft: number | null; overdue: boolean; thinking: boolean } | null
@@ -159,7 +173,7 @@ export interface ProjectJson {
 export type JobKind = 'first-edit' | 'note' | 'rerender' | 'export' | 'script'
 
 /** The steps of a job, tagged by the ai package on its status events (main/progress.ts times them). */
-export type Phase = 'listen' | 'analyze' | 'firstLook' | 'edit' | 'final'
+export type Phase = 'prepare' | 'listen' | 'analyze' | 'firstLook' | 'edit' | 'final'
 
 /**
  * What a running job reports to main (jobs.ts `Emit`): the ai package's AgentEvent plus what main adds
@@ -268,6 +282,7 @@ export interface AppInfo {
   /** The root in friendly words: "Documents › Reel Studio". */
   rootDisplay: string
   firstRunDone: boolean
+  fasterExports: boolean
   engine: { mode: 'real' | 'fake'; dir: string; python: string }
   ai: 'package' | 'mock'
   test: boolean
@@ -339,6 +354,11 @@ export interface ExportResult {
   caption: string
 }
 
+export interface PlatformExportResult {
+  folder: string
+  files: { platform: Platform; video: string; cover: string; captionFile: string; caption: string }[]
+}
+
 /** "Send to my phone": one network the phone could reach this computer on. */
 export interface PhoneAddress {
   address: string
@@ -377,6 +397,9 @@ export interface UserError {
 export interface ReelApi {
   app: {
     info(): Promise<AppInfo>
+    clipboardFiles(): Promise<string[]>
+    takeOpenFiles(): Promise<string[]>
+    onFilesAvailable(cb: () => void): () => void
     finishFirstRun(): Promise<void>
     openFolder(path: string): Promise<void>
     copyText(text: string): Promise<void>
@@ -385,6 +408,7 @@ export interface ReelApi {
     pathForFile(file: File): string
     chooseFolder(): Promise<string | null>
     setRoot(path: string): Promise<AppInfo>
+    setFasterExports(on: boolean): Promise<AppInfo>
     /** Menu items, keyboard shortcuts handled by the menu, and notification clicks. */
     onCommand(cb: (c: AppCommand) => void): () => void
     /** Drag a finished file out of the app (desktop, folder, browser upload box). Call from dragstart. */
@@ -437,6 +461,7 @@ export interface ReelApi {
      * `label`: what to call the work while it runs ("Updating your subtitles"). Render only, never the AI. */
     rerender(slug: string, change?: string, label?: string): Promise<{ jobId: string }>
     exportVersion(slug: string, version: number): Promise<ExportResult>
+    exportPlatforms(slug: string, version: number, request: PlatformExportRequest): Promise<PlatformExportResult>
     remove(slug: string): Promise<void>
   }
   /** Pictures, GIFs and short clips on a note (0.1.2). Each call copies the files into the project. */

@@ -3,13 +3,20 @@
 // Anything with a place in the video, a second request, a lasting preference or a word we are not
 // sure about goes to the full AI editor instead. Missing a fast path costs ~20 s; a wrong one costs
 // the user's trust, so this list stays short and strict.
-import type { Project } from './project';
+import { captionsUnderInstagram, lowestCaptionPosition, type Project } from './project';
+
+const UNDER_INSTAGRAM = 'Where they sit, a two-line caption reaches under Instagram\'s own caption and username, so part of it can be hidden on Instagram. Say "captions higher" to move them up.';
 
 export interface FastCall { name: string; args: Record<string, unknown> }
 export interface FastPlan { kind: string; calls: FastCall[]; summary: string }
 
 /** Words that mean "a specific place", "more than one thing", or "remember this": never fast. */
 const NOT_FAST = /\b(when|where|while|whenever|start|starting|beginning|begin|intro|end|ending|middle|part|parts|after|before|during|first|last|second|seconds|minute|word|words|say|says|said|saying|line|case|always|every|everywhere|from now|next time|remember|future|and|but|also|plus|then|instead|except|picture|photo|image|cover|zoom|cut|font|color|colour|hashtag|post|song|track|different|change|another|why)\b|\d|["“”?]/;
+
+const NEGATED = /\b(not|cannot|can not|dont|don['’]t|never|no longer|keep|leave|stop|without changing|nothing|none|neither|nor)\b|\b\w+n['’]t\b/;
+// "no" asks for a removal only when it names what to remove ("no captions", "no more music"); any
+// other "no" ("no need to make captions smaller") negates the request, so the AI reads it.
+const NO_SUBJECT = /\bno (more |the )?(captions?|subtitles?|subs|words on screen|text|music|background music|beat)\b/g;
 
 const CAPTIONS = /\b(captions?|subtitles?|subs|words on screen|text)\b/;
 const MUSIC = /\b(music|background music|beat)\b/;
@@ -19,12 +26,18 @@ function clamp(v: number, lo: number, hi: number): number { return Math.max(lo, 
 export function planFastNote(note: string, p: Project): FastPlan | null {
   const n = note.toLowerCase().replace(/[.!,]+/g, ' ').replace(/\s+/g, ' ').trim();
   if (!n || n.length > 60 || NOT_FAST.test(n)) return null;
+  // This complaint asks for louder music; other negated requests still need the full editor.
+  const cannotHearMusic = /^(i )?can'?t hear (the )?music$/.test(n);
+  if ((NEGATED.test(n) || /\bno\b/.test(n.replace(NO_SUBJECT, ''))) && !cannotHearMusic) return null;
   const caps = CAPTIONS.test(n); const music = MUSIC.test(n);
   if (caps === music) return null;                 // neither, or both: let the AI read it
 
   if (caps) {
     const style: any = p.captions?.style ?? {};
     const size = Number(style.size) || 105;
+    // Size changes turn captions on, so a caption hidden before is new on screen even where it already sat.
+    const newlyUnder = (next: Record<string, unknown>) =>
+      !!captionsUnderInstagram(p.format, next) && (!p.captions.enabled || !captionsUnderInstagram(p.format, style));
     if (/\b(no|remove|turn off|take out|get rid of|hide|without)\b/.test(n) && !/\b(smaller|bigger|larger|higher|lower|up|down)\b/.test(n)) {
       if (!p.captions.enabled) return null;
       return { kind: 'captions-off', calls: [{ name: 'set_caption_style', args: { enabled: false } }], summary: 'I took the captions off.' };
@@ -32,12 +45,15 @@ export function planFastNote(note: string, p: Project): FastPlan | null {
     if (/\b(smaller|too big|too large|tinier|less big|shrink)\b/.test(n)) {
       const next = Math.round(clamp(size * 0.85, 80, 160));
       if (next >= size) return null;               // already at the smallest readable size: the AI explains
-      return { kind: 'captions-smaller', calls: [{ name: 'set_caption_style', args: { size: next, enabled: true } }], summary: 'I made the captions a bit smaller.' };
+      const summary = newlyUnder({ ...style, size: next }) ? `I made the captions a bit smaller. ${UNDER_INSTAGRAM}` : 'I made the captions a bit smaller.';
+      return { kind: 'captions-smaller', calls: [{ name: 'set_caption_style', args: { size: next, enabled: true } }], summary };
     }
     if (/\b(bigger|larger|too small|too tiny|hard to read|enlarge)\b/.test(n)) {
       const next = Math.round(clamp(size * 1.15, 80, 160));
       if (next <= size) return null;
-      return { kind: 'captions-bigger', calls: [{ name: 'set_caption_style', args: { size: next, enabled: true } }], summary: 'I made the captions a bit bigger.' };
+      // a bigger line is taller and can reach Instagram's caption: say so, but never move them unasked
+      const summary = newlyUnder({ ...style, size: next }) ? `I made the captions a bit bigger. ${UNDER_INSTAGRAM}` : 'I made the captions a bit bigger.';
+      return { kind: 'captions-bigger', calls: [{ name: 'set_caption_style', args: { size: next, enabled: true } }], summary };
     }
     const pos = Number(style.position) || 0.75;
     if (/\b(higher|up|too low)\b/.test(n)) {
@@ -46,12 +62,13 @@ export function planFastNote(note: string, p: Project): FastPlan | null {
       return { kind: 'captions-up', calls: [{ name: 'set_caption_style', args: { position: next } }], summary: 'I moved the captions up a little.' };
     }
     if (/\b(lower|down|too high)\b/.test(n)) {
-      const next = Math.round(clamp(pos + 0.06, 0.5, 0.85) * 100) / 100;
+      const next = Math.round(clamp(pos + 0.06, 0.5, lowestCaptionPosition(p.format, style)) * 100) / 100;
       if (next <= pos) return null;
       return { kind: 'captions-down', calls: [{ name: 'set_caption_style', args: { position: next } }], summary: 'I moved the captions down a little.' };
     }
     if (/\b(add|turn on|put back|bring back|show)\b/.test(n) && !p.captions.enabled) {
-      return { kind: 'captions-on', calls: [{ name: 'set_caption_style', args: { enabled: true } }], summary: 'I put the captions back on.' };
+      const summary = captionsUnderInstagram(p.format, style) ? `I put the captions back on. ${UNDER_INSTAGRAM}` : 'I put the captions back on.';
+      return { kind: 'captions-on', calls: [{ name: 'set_caption_style', args: { enabled: true } }], summary };
     }
     return null;
   }

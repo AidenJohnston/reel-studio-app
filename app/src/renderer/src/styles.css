@@ -260,10 +260,54 @@ a { color: inherit; }
 .chip:hover { border-color: var(--ink-4); color: var(--ink); }
 .chip.active { background: var(--ink); color: #fff; border-color: var(--ink); }
 .export-btn { width: 100%; max-width: 340px; }
+/* Export for Instagram plus a menu of other ways to export, as one control. */
+.split-btn { display: flex; }
+.split-btn > .btn { flex: 1; min-width: 0; border-top-right-radius: 0; border-bottom-right-radius: 0; }
+.split-btn > .more { display: flex; }
+.split-btn > .more > .btn { padding: 0 14px; border-top-left-radius: 0; border-bottom-left-radius: 0; border-left-color: rgba(255,255,255,.24); }
 .reel-right { display: flex; flex-direction: column; gap: 14px; min-height: calc(100vh - var(--titlebar) - 40px); }
 .reel-right .panel + .panel { margin-top: 0; }
 .reel-head { display: flex; align-items: flex-end; gap: 8px; }
 .reel-title { font-size: 24px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: text; }
+.rename-btn { width: 32px; height: 32px; color: var(--ink-3); }
+
+/* The version line under the title (components/VersionSwitch.tsx): quiet while it shows the latest,
+   amber while it shows an older one. Arrow keys switch versions, so the state change is instant. The menu
+   grows out of the indicator; opened from the keyboard it appears at once. */
+.vswitch { position: relative; display: flex; flex-wrap: wrap; align-items: center; gap: 2px; margin: 2px 0 0 -10px; font-size: 13.5px; color: var(--ink-2); }
+.vswitch-steps { display: flex; align-items: center; gap: 2px; white-space: nowrap; }
+.vswitch-solo { display: flex; align-items: center; min-height: 32px; padding-left: 10px; font-weight: 600; color: var(--ink-3); }
+.vswitch-step, .vswitch-current { min-height: 32px; border: 0; border-radius: 8px; background: transparent; font: inherit; color: inherit; cursor: pointer; }
+.vswitch-step { width: 32px; display: inline-grid; place-items: center; color: var(--ink-3); }
+.vswitch-step:hover:not(:disabled), .vswitch-current:hover { background: var(--soft); color: var(--ink); }
+.vswitch-step:disabled { opacity: .35; cursor: default; }
+.vswitch-current { display: inline-flex; align-items: center; gap: 6px; padding: 0 8px; }
+.vswitch-name { font-weight: 650; color: var(--ink); }
+.vswitch-state, .vswitch-current .icon { color: var(--ink-3); }
+.vswitch.older .vswitch-current { background: var(--amber-soft); color: var(--amber-ink); }
+.vswitch.older .vswitch-current :is(.vswitch-name, .vswitch-state, .icon) { color: inherit; }
+.vswitch-back { font-size: 13.5px; padding: 0 4px; margin-left: 4px; }
+/* Under ~1080 px the title column is too narrow for the step arrows beside "Edit it myself"; the menu and the
+   arrow keys still switch versions. */
+@media (max-width: 1080px) { .vswitch-step { display: none; } .vswitch { margin-left: 0; } }
+.did-scope { font-weight: 500; letter-spacing: 0; }
+.vswitch-live { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+.vmenu {
+  position: absolute; left: 0; top: calc(100% + 6px); z-index: 30; width: 340px; max-height: min(420px, 60vh); overflow-y: auto;
+  background: var(--panel); border: 1px solid var(--line); border-radius: 12px; box-shadow: 0 12px 32px rgba(0,0,0,.12); padding: 6px;
+  display: flex; flex-direction: column; gap: 2px; transform-origin: top left; transition: opacity .16s var(--ease), transform .16s var(--ease);
+}
+@starting-style { .vmenu { opacity: 0; transform: translateY(-4px) scale(.98); } }
+.vmenu[data-instant] { transition: none; }
+.vmenu-item { display: flex; flex-direction: column; gap: 2px; width: 100%; border: 0; border-radius: 8px; background: none; font: inherit; color: var(--ink); text-align: left; padding: 9px 10px 10px 12px; cursor: pointer; }
+.vmenu-item:hover, .vmenu-item:focus-visible { background: var(--soft); }
+.vmenu-item:focus-visible { outline-offset: -2px; }
+.vmenu-top { display: flex; align-items: baseline; gap: 8px; }
+.vmenu-name { font-weight: 650; }
+.vmenu-tag, .vmenu-when { font-size: 12.5px; font-weight: 600; color: var(--ink-3); }
+.vmenu-when { margin-left: auto; font-weight: 500; font-variant-numeric: tabular-nums; }
+.vmenu-check { width: 16px; align-self: center; }
+.vmenu-what { font-size: 13.5px; color: var(--ink-2); padding-right: 24px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 .notes-panel { flex: 1; min-height: 300px; display: flex; flex-direction: column; }
 /* Grows with the window; never the old ~130 px slot that clipped a reply with buttons (critique 1.7). */
 .notes-panel .chat { flex: 1; min-height: 150px; max-height: max(260px, calc(100vh - 560px)); }
@@ -379,9 +423,9 @@ select.input { -webkit-appearance: none; appearance: none; cursor: pointer; padd
 .toggle { display: flex; gap: 12px; align-items: center; cursor: pointer; font-weight: 600; min-height: 32px; }
 .slider { width: 100%; max-width: 420px; }
 .cover-img { width: 180px; border-radius: 12px; display: block; background: var(--soft); aspect-ratio: 9/16; object-fit: cover; }
-.swatches { display: flex; gap: 12px; flex-wrap: wrap; }
+.swatches { display: flex; gap: 8px; flex-wrap: wrap; }
 .swatch { border: 0; background: none; padding: 0; cursor: pointer; display: flex; flex-direction: column; align-items: center; gap: 6px; font: inherit; font-weight: 600; font-size: 14.5px; color: var(--ink-2); border-radius: 12px; }
-.swatch-frame { width: 92px; aspect-ratio: 3/4; border-radius: 12px; background: linear-gradient(170deg, #8a8178, #4a433d 70%); position: relative; overflow: hidden; outline: 2px solid transparent; outline-offset: 2px; transition: outline-color .12s; }
+.swatch-frame { width: 74px; aspect-ratio: 3/4; border-radius: 12px; background: linear-gradient(170deg, #8a8178, #4a433d 70%); position: relative; overflow: hidden; outline: 2px solid transparent; outline-offset: 2px; transition: outline-color .12s; }
 .swatch:hover .swatch-frame { outline-color: var(--line-2); }
 .swatch.on .swatch-frame { outline-color: var(--ink); }
 .swatch.on { color: var(--ink); }
@@ -390,8 +434,15 @@ select.input { -webkit-appearance: none; appearance: none; cursor: pointer; padd
 .sub-sample {
   position: absolute; left: 50%; transform: translate(-50%, -50%); max-width: 88%; width: max-content; text-align: center;
   font-family: 'Reel Subtitles', Montserrat, 'Segoe UI', sans-serif; font-weight: 600; line-height: 1.1; pointer-events: none;
-  white-space: normal; overflow-wrap: break-word; animation: fade .15s ease-out;
+  white-space: nowrap; animation: fade .15s ease-out;
 }
+/* SubtitleSample breaks the lines itself, the engine's way; the browser never wraps or splits a word. */
+.sub-sample > span { display: block; }
+/* captions.POP_IN: from 80% to full size in 120 ms, decelerating */
+@media (prefers-reduced-motion: no-preference) {
+  .sub-sample.pop { animation: fade .15s ease-out, sub-pop .12s cubic-bezier(.25, .75, .5, 1); }
+}
+@keyframes sub-pop { from { scale: .8; } }
 
 /* Instagram stand-in: faint, so you see what it would cover. */
 .ig { position: absolute; inset: 0; pointer-events: none; color: #fff; }
@@ -417,6 +468,7 @@ select.input { -webkit-appearance: none; appearance: none; cursor: pointer; padd
 .more { position: relative; }
 .more > .icon-btn { width: 44px; height: 44px; border: 1px solid var(--line-2); background: var(--panel); }
 .more-menu { position: absolute; right: 0; top: calc(100% + 6px); z-index: 30; min-width: 200px; background: var(--panel); border: 1px solid var(--line); border-radius: 12px; box-shadow: 0 12px 32px rgba(0,0,0,.12); padding: 6px; display: flex; flex-direction: column; }
+.more-menu.up { top: auto; bottom: calc(100% + 6px); }
 .more-menu button { border: 0; background: none; font: inherit; text-align: left; padding: 9px 12px; border-radius: 8px; cursor: pointer; color: var(--ink); min-height: 36px; }
 .more-menu button:hover { background: var(--soft); }
 .more-menu button.danger { color: var(--red-ink); }
@@ -427,6 +479,24 @@ select.input { -webkit-appearance: none; appearance: none; cursor: pointer; padd
 .modal { background: var(--bg); border-radius: 16px; padding: 28px; width: min(480px, 92vw); max-height: calc(100vh - 60px); overflow-y: auto; box-shadow: 0 20px 60px rgba(0,0,0,.2); display: flex; flex-direction: column; gap: 16px; }
 .modal.wide { width: min(580px, 92vw); }
 .export-head { display: flex; gap: 18px; align-items: flex-start; }
+.platform-options { border: 0; padding: 0; margin: 0; display: grid; grid-template-columns: 1fr 1fr; gap: 4px 12px; }
+.platform-options legend { font-weight: 600; margin-bottom: 8px; }
+.platform-option { display: flex; flex: none; align-items: flex-start; gap: 10px; padding: 10px 0; min-height: 44px; cursor: pointer; }
+.platform-option input { margin-top: 5px; flex: none; }
+.platform-option span { min-width: 0; }
+.platform-option small { display: block; color: var(--ink-3); font-size: 13px; margin-top: 3px; }
+.platform-cover { display: flex; gap: 16px; align-items: center; }
+.platform-cover video { width: 90px; height: 160px; object-fit: contain; background: #000; border-radius: var(--radius-sm); flex: none; }
+.platform-errors { color: var(--red-ink); font-size: 14px; }
+.platform-export { display: contents; }
+.platform-actions { position: sticky; bottom: -28px; margin: 0 -28px -28px; padding: 14px 28px 28px; background: var(--bg); border-top: 1px solid var(--line); display: flex; flex-direction: column; gap: 12px; }
+.platform-actions > .row { justify-content: flex-end; }
+.platform-warnings { display: flex; flex-direction: column; gap: 2px; margin-top: 4px; color: var(--amber-ink); font-size: 13px; }
+.platform-counts { display: flex; flex-wrap: wrap; gap: 4px 14px; font-variant-numeric: tabular-nums; }
+.platform-counts .over { color: var(--amber-ink); font-weight: 600; }
+.platform-results { display: flex; flex-direction: column; gap: 20px; }
+.platform-result { display: flex; flex-direction: column; gap: 8px; }
+.platform-result .selectable { overflow-wrap: anywhere; }
 .file-pill { display: inline-flex; align-items: center; gap: 8px; padding: 8px 12px; background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius-sm); font-weight: 600; overflow-wrap: anywhere; user-select: text; }
 .post-how { display: flex; align-items: center; gap: 14px; padding: 14px 16px; background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); }
 .post-how p { flex: 1; color: var(--ink-2); }

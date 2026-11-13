@@ -1,6 +1,7 @@
 import { app, BrowserWindow, clipboard, dialog, ipcMain, net, safeStorage, shell, type IpcMainInvokeEvent } from 'electron'
 import { existsSync, promises as fs, appendFileSync, mkdirSync, realpathSync } from 'node:fs'
 import { basename, dirname, join } from 'node:path'
+import { clipboardFiles, filesFromArgv } from './intake'
 import {
   binDir,
   engineDir,
@@ -26,7 +27,6 @@ import {
   readAppState,
   readProject,
   readWords,
-  recoverInterrupted,
   titleFromFile,
   uniqueSlug,
   updateAppState,
@@ -35,8 +35,9 @@ import {
 } from './store'
 import { addToLibrary, isVideo, listLibrary, uniqueDest } from './library'
 import { createJobManager } from './jobs'
+import { createProxyBuilds } from './proxy-builds'
 import { createLiveVideos } from './live-video'
-import { rememberQuestion, styleConsent } from './style-consent'
+import { replyChat, styleConsent, type ChatLine } from './style-consent'
 import type { AgentResult } from './ai-types'
 import { loadAI } from './ai'
 import type { AI, EngineHost } from './ai-types'
@@ -45,18 +46,22 @@ import { captureWebsite } from './capture'
 import { createModelManager } from './models'
 import { loadSettings, saveSettings } from './settings'
 import { createPidRegistry } from './orphans'
+import { settleLastRun } from './last-run'
 import { openSignInWindow, publicInfo } from './claude-signin'
 import { createVendorConnect, type CliStatus, type VendorConnect } from './vendor-connect'
 import { runInstall, runLogin, testVendorEnv, testVendorLoginEnv, type Vendor } from './vendor-setup'
 import { withUserPathKept } from './user-path'
 import { aiChoiceSaved, carryOverDecision } from './ai-carryover'
-import type { AppInfo, DropResult, ExportResult, JobEvent, ProjectJson } from '../shared/api'
+import type { AppInfo, DropResult, ExportResult, JobEvent, PlatformExportResult, ProjectJson, VersionInfo } from '../shared/api'
 import { noAiReply } from '../shared/notes'
+import { parsePlatformExportRequest } from '../shared/platforms'
+import { exportPlatforms, sweepExportStaging } from './platform-export'
 import { versionMessage } from '../shared/describe'
 import { mergeSourcesPatch } from '../shared/mirror'
 import { displayPath } from '../shared/display-path'
 import { registerPhoneIpc, stopPhoneShare } from './phone-ipc'
-import { checkNoteAttachments, forChat, pickClipboardType, registerAttachmentIpc } from './attachments'
+import { forChat, pickClipboardType, registerAttachmentIpc } from './attachments'
+import { takeNote } from './note-intake'
 import { createUpdateService } from './update-check'
 import { PROTOCOL, createUpdateKeyService } from './update-key'
 import { setupPosting } from './posting-ipc'
@@ -117,13 +122,32 @@ const runEngine: RunEngine = createEngineRunner({
   env: engineEnv,
   cwd: engineDir,
   log,
-  onSpawn: (pid) => pidRegistry?.add(pid),
+  onSpawn: (pid, project) => pidRegistry?.add(pid, project),
   onExit: (pid) => pidRegistry?.remove(pid)
 })
+// Its own runner per build, with the same engine setup, so removing a project can wait for the exit.
+const proxies = createProxyBuilds(
+  (hooks) =>
+    createEngineRunner({
+      python: pythonExe,
+      env: engineEnv,
+      cwd: engineDir,
+      log,
+      onSpawn: (pid, project) => {
+        pidRegistry?.add(pid, project)
+        hooks.onSpawn(pid)
+      },
+      onExit: (pid) => {
+        pidRegistry?.remove(pid)
+        hooks.onExit(pid)
+      }
+    }),
+  log
+)
 
 const host: EngineHost = {
   runEngine,
-  renderAnimation: (template, params, outPath) => renderAnimation(template, params, outPath),
+  renderAnimation: (template, params, outPath, fps) => renderAnimation(template, params, outPath, fps),
   captureWebsite: (url, outPath, opts) => captureWebsite(url, outPath, opts),
   reelStudioRoot
 }
@@ -268,6 +292,7 @@ async function appInfo(): Promise<AppInfo> {
       process.platform
     ),
     firstRunDone: s.firstRunDone,
+    fasterExports: s.fasterExports,
     engine: { mode: engineMode(), dir: engineDir(), python: pythonExe() },
     ai: aiSource,
     test: TEST,
@@ -275,18 +300,35 @@ async function appInfo(): Promise<AppInfo> {
   }
 }
 
+/** Engine arguments for a command a job runs: it joins the job's ownership of the project. */
+function owned(args: string[], owner: string | null): string[] {
+  return owner ? [...args, '--owner', owner] : args
+}
+
 function startFirstEdit(slug: string, initArgs: { title: string; files: string[] } | null): string {
   const dir = projectDir(slug)
-  return jobs.start(slug, 'first-edit', async (emit, signal) => {
+  return jobs.start(slug, 'first-edit', async (emit, signal, { owner }) => {
     if (initArgs && !existsSync(join(dir, 'project.json'))) {
+      const { fasterExports } = await loadSettings()
       emit({ type: 'status', message: 'Copying your video', pct: 0 })
       await runEngine(
         'init',
-        ['--project', dir, '--title', initArgs.title, '--slug', slug, ...initArgs.files],
-        (p) => emit({ type: 'status', message: 'Copying your video', pct: Math.round(p.pct * 0.01) }),
+        owned(['--project', dir, '--title', initArgs.title, '--slug', slug, ...(fasterExports ? ['--faster-exports'] : [])], owner).concat(initArgs.files),
+        // A copy is instant. A clip whose frame timing varies is re-encoded first (engine init.py says
+        // "Preparing your video"), which can take minutes: that gets its own step with its real percent.
+        (p) =>
+          emit(
+            p.message === 'Preparing your video'
+              ? { type: 'status', message: p.message, pct: Math.round(p.pct), phase: 'prepare' }
+              : { type: 'status', message: 'Copying your video', pct: Math.round(p.pct * 0.01) }
+          ),
         signal
       )
+      await updateAppState(slug, (s) => {
+        delete s.importing
+      })
     }
+    proxies.start(slug, dir, owner)
     const provider = await ai.active().catch(() => null)
     // A render event with firstLook = the quick no-AI draft is ready while the AI keeps editing; the
     // Working screen plays it (shared/live.ts) and says what it is. Once listening is done (the first
@@ -304,7 +346,8 @@ function startFirstEdit(slug: string, initArgs: { title: string; files: string[]
             .catch(() => undefined)
         }
       },
-      signal
+      signal,
+      owner ? { owner } : undefined
     )
     // Honest "What I did": only an AI that ran to the end picked the takes and wrote the caption.
     // A notice means it stopped and (usually) the simple edit stepped in, so claim nothing.
@@ -313,21 +356,19 @@ function startFirstEdit(slug: string, initArgs: { title: string; files: string[]
       s.aiEdited = aiEdited
     })
     if (r.notice?.userMessage) await addChat(slug, 'editor', r.notice.userMessage)
-    return replyAskingAboutStyle(slug, r, r.summary)
+    return replyAskingAboutStyle(r, r.summary)
   })
 }
 
 /** The editor's reply into the chat, then one "Remember this for next time?" per My style rule the AI
  * proposed or saved (a saved one is taken out again until the user says Yes): main/style-consent.ts. */
-async function replyAskingAboutStyle(slug: string, r: AgentResult, summary: string): Promise<{ summary: string; version: number; quiet: true }> {
+async function replyAskingAboutStyle(r: AgentResult, summary: string): Promise<{ summary: string; version: number; chat: ChatLine[] }> {
   const c = styleConsent(summary, r.styleRulesAdded, r.styleSuggestions)
   if (c.undo.length) {
     const rules = await ai.styleRules().catch(() => [])
     for (const rule of rules) if (c.undo.includes(rule.text)) await ai.removeStyleRule(rule.id).catch(() => undefined)
   }
-  await addChat(slug, 'editor', c.summary, r.version)
-  for (const rule of c.suggestions) await addChat(slug, 'editor', rememberQuestion(rule), undefined, ['remember-yes', 'remember-no'], rule)
-  return { summary: c.summary, version: r.version, quiet: true }
+  return { summary: c.summary, version: r.version, chat: replyChat(c, r.version) }
 }
 
 const EDITABLE: (keyof ProjectJson)[] = ['title', 'cut', 'captions', 'music', 'broll', 'zooms', 'cover', 'post']
@@ -337,7 +378,7 @@ function safeFileName(s: string): string {
   return t.slice(0, 80) || 'My video'
 }
 
-async function exportVersion(slug: string, n: number): Promise<ExportResult> {
+async function finishedExportVersion(slug: string, n: number): Promise<VersionInfo> {
   const dir = projectDir(slug)
   let versions = await listVersions(dir)
   let v = versions.find((x) => x.n === n) ?? versions[versions.length - 1]
@@ -346,23 +387,31 @@ async function exportVersion(slug: string, n: number): Promise<ExportResult> {
   if (v.draft) {
     // A preview is not the full-quality file: make it first, as a normal job (progress, Stop, and
     // nothing else can run on this video meanwhile) (review 25).
-    jobs.start(slug, 'rerender', async (emit, signal) => {
+    let stopped: AbortSignal | undefined
+    jobs.start(slug, 'rerender', async (emit, signal, { owner }) => {
+      stopped = signal
       emit({ type: 'status', message: 'Making the full-quality video', pct: 1, phase: 'final' })
       const r: any = await runEngine(
         'render',
-        ['--project', dir],
+        owned(['--project', dir], owner),
         (pr) => emit({ type: 'status', message: pr.message || 'Making the full-quality video', pct: pr.pct, phase: 'final' }),
         signal
       )
       const version = Number(r?.version ?? 0)
       emit({ type: 'render', version, draft: false })
-      return { summary: '', version, quiet: true }
+      return { summary: '', version, chat: [] }
     })
     await jobs.forSlug(slug)?.done
+    if (stopped?.aborted) throw { code: 'CANCELLED', userMessage: 'Stopped.' }
     versions = await listVersions(dir)
     v = versions[versions.length - 1]
     if (!v || v.draft) throw { code: 'EXPORT_FAILED', userMessage: 'I could not make the full-quality video. Try Export again.' }
   }
+  return v
+}
+
+async function exportVersion(slug: string, n: number): Promise<ExportResult> {
+  const v = await finishedExportVersion(slug, n)
   const p = await readProject(slug)
   const exportsDir = binDir('exports')
   await fs.mkdir(exportsDir, { recursive: true })
@@ -391,6 +440,13 @@ async function exportVersion(slug: string, n: number): Promise<ExportResult> {
 // ---- IPC ----------------------------------------------------------------------------------------
 function registerIpc(): void {
   handle('app:info', () => appInfo())
+  handle('app:setFasterExports', async (_e, on: boolean) => {
+    if (typeof on !== 'boolean') throw { code: 'BAD_INPUT', userMessage: 'Choose whether to use faster exports.' }
+    await saveSettings({ fasterExports: on })
+    return appInfo()
+  })
+  handle('app:clipboardFiles', () => clipboardFiles())
+  handle('app:takeOpenFiles', async () => (await loadSettings()).firstRunDone ? pendingOpenFiles.splice(0) : [])
   handle('app:finishFirstRun', async () => {
     await saveSettings({ firstRunDone: true })
   })
@@ -433,7 +489,7 @@ function registerIpc(): void {
     log,
     projectDir,
     readProject,
-    busy: (slug) => !!jobs.forSlug(slug),
+    reserve: (slug, fn) => jobs.share(slug, fn),
     clipboardImage: async () => {
       // Electron's async clipboard: the first item that carries a picture, as bytes
       for (const item of await clipboard.read()) {
@@ -544,24 +600,24 @@ function registerIpc(): void {
     await updateAppState(slug, (s) => {
       s.status = 'working'
       s.title = title
+      s.importing = videos
     })
     const jobId = startFirstEdit(slug, { title, files: videos })
     return { slug, jobId, skipped }
   })
   handle('projects:resume', async (_e, slug: string) => {
     const dir = projectDir(slug)
-    if (!existsSync(join(dir, 'project.json'))) {
+    if (existsSync(join(dir, 'project.json'))) return { jobId: startFirstEdit(slug, null) }
+    // Stopped while the video was still being copied or prepared: do that again from the dropped videos.
+    const { title, importing } = await readAppState(slug)
+    if (!Array.isArray(importing) || !importing.length || !importing.every((f) => typeof f === 'string')) {
       throw { code: 'CANNOT_RESUME', userMessage: 'This video never finished copying. Delete it and drop the video in again.' }
     }
-    return { jobId: startFirstEdit(slug, null) }
+    return { jobId: startFirstEdit(slug, { title: title ?? titleFromFile(importing[0]), files: importing }) }
   })
   handle('projects:note', async (_e, slug: string, text: string, attachments?: unknown) => {
-    const note = String(text ?? '').trim()
     const dir = projectDir(slug)
-    // never trust the page: every attached ref is re-read from THIS project's own sidecars
-    const files = await checkNoteAttachments(dir, attachments)
-    if (!note && !files.length) throw { code: 'EMPTY', userMessage: 'Type what you would like changed first.' }
-    if (jobs.forSlug(slug)) throw { code: 'BUSY', userMessage: 'I am still working on this video. Give me a moment, or press Stop.' }
+    const { note, files } = await takeNote(jobs, slug, text, attachments)
     await addChat(slug, 'you', note, undefined, undefined, undefined, files.map(forChat))
     const active = await ai.active().catch(() => null)
     if (!active || !active.connected || active.id === 'none') {
@@ -574,32 +630,34 @@ function registerIpc(): void {
     const jobId = jobs.start(
       slug,
       'note',
-      async (emit, signal) => {
-        const opts = files.length ? { attachments: files.map((f) => f.asset) } : undefined
+      async (emit, signal, { id, owner }) => {
+        proxies.start(slug, dir, owner) // a project from before preview copies existed gets them now
+        // the note is saved under the job's id; the app asks before anything goes into My style
+        const opts = { attachments: files.map((f) => f.asset), id, saveStyleRules: false, ...(owner ? { owner } : {}) }
         const r: AgentResult = await ai.applyNote(dir, note, (e) => emit(e), signal, opts)
         const extra = r.notice?.userMessage ? ` ${r.notice.userMessage}` : ''
-        return replyAskingAboutStyle(slug, r, r.summary + extra)
+        return { ...(await replyAskingAboutStyle(r, r.summary + extra)), made: { by: 'note', summary: note } }
       },
       { note: note || files.map((f) => f.name).join(', ') }
     )
     return { jobId }
   })
-  handle('projects:update', async (_e, slug: string, patch: Partial<ProjectJson>) => {
-    if (jobs.forSlug(slug)) throw { code: 'BUSY', userMessage: 'I am still working on this video. Give me a moment, or press Stop.' }
-    const p = await readProject(slug)
-    for (const k of Object.keys(patch ?? {}) as (keyof ProjectJson)[]) {
-      // the "Flip picture" toggle: only each take's mirror flag, never its path or size
-      if (k === 'sources') {
-        p.sources = mergeSourcesPatch(p.sources, patch.sources)
-        continue
+  handle('projects:update', (_e, slug: string, patch: Partial<ProjectJson>) =>
+    jobs.hold(slug, async () => {
+      const p = await readProject(slug)
+      for (const k of Object.keys(patch ?? {}) as (keyof ProjectJson)[]) {
+        // the "Flip picture" toggle: only each take's mirror flag, never its path or size
+        if (k === 'sources') {
+          p.sources = mergeSourcesPatch(p.sources, patch.sources)
+          continue
+        }
+        if (!EDITABLE.includes(k)) continue
+        ;(p as any)[k] = (patch as any)[k]
       }
-      if (!EDITABLE.includes(k)) continue
-      ;(p as any)[k] = (patch as any)[k]
-    }
-    await writeProject(slug, p)
-    const d = await detail(slug)
-    return d
-  })
+      await writeProject(slug, p)
+      return detail(slug)
+    })
+  )
   // `change` = what the user changed, in plain words ("bigger yellow subtitles"), for the chat and the version button.
   // A manual change is render-only (no AI), called what it is ("Updating your subtitles", never the engine's
   // own step names like "Adding pictures"), and fast to SEE: a half-size preview first (the Reel screen plays
@@ -607,35 +665,70 @@ function registerIpc(): void {
   handle('projects:rerender', async (_e, slug: string, change?: string, label?: string) => {
     const dir = projectDir(slug)
     const words = typeof label === 'string' && label.trim() ? label.trim().slice(0, 60) : 'Updating your video'
-    const jobId = jobs.start(slug, 'rerender', async (emit, signal) => {
+    const jobId = jobs.start(slug, 'rerender', async (emit, signal, { owner }) => {
       emit({ type: 'status', message: words, pct: 1, phase: 'final' })
       const look: any = await runEngine(
         'render',
-        ['--project', dir, '--draft', '--no-cover'],
+        owned(['--project', dir, '--draft', '--no-cover'], owner),
         (p) => emit({ type: 'status', message: words, pct: Math.round(p.pct * 0.3), phase: 'final' }),
         signal
       )
       emit({ type: 'render', version: Number(look?.version ?? 0), draft: true, ...(look?.file ? { file: String(look.file) } : {}) })
       const r: any = await runEngine(
         'render',
-        ['--project', dir],
+        owned(['--project', dir], owner),
         (p) => emit({ type: 'status', message: words, pct: 30 + Math.round(p.pct * 0.7), phase: 'final' }),
         signal
       )
       const version = Number(r?.version ?? (await readProject(slug)).version)
       emit({ type: 'render', version, draft: false, ...(r?.file ? { file: String(r.file) } : {}) })
-      return { summary: versionMessage(version, typeof change === 'string' ? change.slice(0, 200) : ''), version }
+      const what = typeof change === 'string' ? change.slice(0, 200) : ''
+      return { summary: versionMessage(version, what), version, made: { by: 'hand', summary: what } }
     })
     return { jobId }
   })
   handle('projects:export', (_e, slug: string, n: number) => exportVersion(slug, n))
+  handle('projects:exportPlatforms', async (_e, slug: string, n: number, value: unknown) => {
+    const request = parsePlatformExportRequest(value)
+    if (!(await listVersions(projectDir(slug))).some((v) => v.n === n)) throw { code: 'NO_VERSION', userMessage: 'Choose an available version before exporting for platforms.' }
+    const version = await finishedExportVersion(slug, n)
+    const project = await readProject(slug)
+    const chosenCover = join(dirname(version.videoPath), 'cover.png')
+    let result: PlatformExportResult | null = null
+    let failure: unknown
+    jobs.start(slug, 'export', async (emit, signal) => {
+      emit({ type: 'status', message: 'Reading the finished video', pct: 1 })
+      try {
+        result = await exportPlatforms({
+          source: version.videoPath, chosenCover: existsSync(chosenCover) ? chosenCover : null, folder: binDir('exports'),
+          name: `${safeFileName(project.title || slug)} - Version ${version.n}`, request, runEngine, signal,
+          onProgress: (message, pct) => emit({ type: 'status', message, pct })
+        })
+        return { summary: '', chat: [] }
+      } catch (e) { failure = e; throw e }
+    })
+    await jobs.forSlug(slug)?.done
+    if (failure) throw failure
+    if (!result) throw { code: 'EXPORT_FAILED', userMessage: 'The export stopped. Try Export again.' }
+    return result
+  })
   handle('projects:remove', async (_e, slug: string) => {
     const running = jobs.forSlug(slug)
     if (running) {
       jobs.cancel(running.id)
       await running.done
     }
-    await fs.rm(projectDir(slug), { recursive: true, force: true })
+    // a video kept closed stays: part of its engine may still be writing into the folder
+    jobs.refuseIfBusy(slug)
+    // The folder goes only once the preview copy build's engine has exited. One that would not stop
+    // (ENGINE_STUCK) keeps the video closed until Reel Studio restarts and reaps it, like a job's.
+    await proxies.stop(slug).catch((e) => {
+      if ((e as { code?: string })?.code === 'ENGINE_STUCK') jobs.keepClosed(slug, e as { code: string; userMessage: string })
+      throw e
+    })
+    // A cancelled engine's FFmpeg can hold its files for a moment after the cancel returns, and
+    // Windows refuses to delete an open file (EBUSY/EPERM): retry for a few seconds.
+    await fs.rm(projectDir(slug), { recursive: true, force: true, maxRetries: 8, retryDelay: 250 })
   })
 
   handle('jobs:cancel', (_e, id: string) => jobs.cancel(id))
@@ -783,16 +876,33 @@ function createWindow(): void {
   else void win.loadFile(join(__dirname, '../renderer/index.html'))
 }
 
+const pendingOpenFiles: string[] = []
+function queueOpenFiles(files: string[]): void {
+  pendingOpenFiles.push(...files)
+  // Early open-file events wait, like key links, until IPC and the app's services are ready.
+  if (!ready) return
+  if (!win || win.isDestroyed()) {
+    createWindow() // The new renderer drains pendingOpenFiles on mount.
+  } else {
+    if (win.isMinimized()) win.restore()
+    win.focus()
+    win.webContents.send('app:filesAvailable')
+  }
+}
+app.on('open-file', (event, path) => {
+  event.preventDefault()
+  queueOpenFiles([path])
+})
+if (process.platform === 'win32') queueOpenFiles(filesFromArgv(process.argv, process.cwd(), !!process.defaultApp))
+
 const gotLock = TEST || app.requestSingleInstanceLock()
 if (!gotLock) app.quit()
-app.on('second-instance', (_e, argv) => {
+app.on('second-instance', (_e, argv, cwd) => {
   // Windows: a reelstudio:// link opened while the app runs arrives as the new instance's command line.
   const link = argv.find((a) => a.toLowerCase().startsWith(`${PROTOCOL}:`))
   if (link) acceptKeyLink(link)
-  if (win) {
-    if (win.isMinimized()) win.restore()
-    win.focus()
-  }
+  // Also brings the window back (or makes a new one) when the launch opened no file.
+  queueOpenFiles(filesFromArgv(argv, cwd, !!process.defaultApp))
 })
 
 app.whenReady().then(async () => {
@@ -803,16 +913,8 @@ app.whenReady().then(async () => {
     log('[start] executable is under /AppTranslocation/ on macOS; running from a read-only Gatekeeper translocated copy')
   }
   pidRegistry = createPidRegistry(settingsDir())
-  const reaped = await pidRegistry.reap().catch(() => 0)
-  if (reaped) log(`[start] stopped ${reaped} engine process(es) left over from a crash`)
-  const settings = await loadSettings()
-  if (settings.root) setRootOverride(settings.root)
-  await ensureRoot().catch((e) => log(`[root] ${String(e)}`))
-  const recovered = await recoverInterrupted().catch((e) => {
-    log(`[recover] ${String(e)}`)
-    return []
-  })
-  if (recovered.length) log(`[recover] cleaned up ${recovered.join(', ')}`)
+  const settings = await settleLastRun(pidRegistry, (slug) => jobs.keepClosed(slug), log)
+  await sweepExportStaging(binDir('exports')).catch((e) => log(`[export] ${String(e)}`))
   const loaded = await loadAI(
     {
       host,
@@ -849,18 +951,25 @@ app.whenReady().then(async () => {
 })
 
 let quitting = false
+// killTree sends SIGKILL 1.5 s after SIGTERM (taskkill /F at once on Windows), so 2 s is enough for every
+// leftover engine to be sent it. No measurement chose the number. Without it a kill could hold quit for
+// 6.5 s (5 s on Windows) after the jobs' own 4 s.
+const QUIT_KILL_MS = 2000
 app.on('before-quit', (e) => {
   void stopPhoneShare() // the "Send to my phone" link never outlives the app
   if (quitting || !jobs.runningCount()) {
     void killAllEngines()
     return
   }
-  // Stop running work cleanly so the next start finds a tidy project.
+  // Stop running work cleanly so the next start finds a tidy project. The jobs get their 4 s (cancelAll)
+  // to clean up; one cut short leaves app.json saying it runs, which the next start cleans up
+  // (store.ts recoverInterrupted). Waiting for engines to die is cut short: one that will not stays on
+  // the engine list, and the next start stops it or keeps its video closed (orphans.ts).
   e.preventDefault()
   quitting = true
   void jobs
     .cancelAll()
-    .then(() => killAllEngines())
+    .then(() => Promise.race([killAllEngines(), new Promise((r) => setTimeout(r, QUIT_KILL_MS))]))
     .finally(() => app.quit())
 })
 

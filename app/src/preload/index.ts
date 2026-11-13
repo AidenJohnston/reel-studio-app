@@ -19,6 +19,9 @@ function on<T>(channel: string, cb: (v: T) => void): () => void {
 const api: ReelApi = {
   app: {
     info: () => call('app:info'),
+    clipboardFiles: () => call('app:clipboardFiles'),
+    takeOpenFiles: () => call('app:takeOpenFiles'),
+    onFilesAvailable: (cb) => on('app:filesAvailable', cb),
     finishFirstRun: () => call('app:finishFirstRun'),
     openFolder: (p) => call('app:openFolder', p),
     copyText: (t) => call('app:copyText', t),
@@ -26,6 +29,7 @@ const api: ReelApi = {
     pathForFile: (f) => webUtils.getPathForFile(f),
     chooseFolder: () => call('app:chooseFolder'),
     setRoot: (p) => call('app:setRoot', p),
+    setFasterExports: (on) => call('app:setFasterExports', on),
     onCommand: (cb) => on<AppCommand>('app:command', cb),
     startDrag: (file) => ipcRenderer.send('app:startDrag', file)
   },
@@ -63,6 +67,7 @@ const api: ReelApi = {
     update: (slug, patch) => call('projects:update', slug, patch),
     rerender: (slug, change, label) => call('projects:rerender', slug, change, label),
     exportVersion: (slug, n) => call('projects:export', slug, n),
+    exportPlatforms: (slug, n, request) => call('projects:exportPlatforms', slug, n, request),
     remove: (slug) => call('projects:remove', slug)
   },
   notes: {

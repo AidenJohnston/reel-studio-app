@@ -3,6 +3,10 @@
 // (`styleRulesAdded`) and announced it in its reply. Either way the app turns them into a question,
 // "Remember this for next time?", undoes any rule saved without asking, and drops the announcement.
 // Pure: no Electron, no files.
+import type { ChatMessage } from '../shared/api'
+
+/** A chat message before it gets its id and time (store.ts). */
+export type ChatLine = Omit<ChatMessage, 'id' | 'at'>
 
 export interface StyleConsent {
   /** The reply without "I also saved this to My style ..." / "I'll remember that for next time." */
@@ -26,3 +30,11 @@ export function styleConsent(summary: string, saved: string[] = [], suggested?: 
 }
 
 export const rememberQuestion = (rule: string): string => `Remember this for next time? "${rule.replace(/^"|"$/g, '')}"`
+
+/** The editor's reply into the chat, then one "Remember this for next time?" per rule. */
+export function replyChat(c: StyleConsent, version: number): ChatLine[] {
+  return [
+    { from: 'editor', text: c.summary, version },
+    ...c.suggestions.map((rule): ChatLine => ({ from: 'editor', text: rememberQuestion(rule), actions: ['remember-yes', 'remember-no'], suggestion: rule }))
+  ]
+}

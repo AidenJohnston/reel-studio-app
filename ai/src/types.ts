@@ -25,7 +25,7 @@ export interface ScriptResult { hook: string; script: string; onScreenText: stri
 export interface EngineProgress { stage: string; pct: number; message: string }
 export interface EngineHost {
   runEngine(command: string, args: string[], onProgress?: (p: EngineProgress) => void, signal?: AbortSignal): Promise<any>;
-  renderAnimation(template: string, params: Record<string, unknown>, outPath: string): Promise<string>;
+  renderAnimation(template: string, params: Record<string, unknown>, outPath: string, fps?: number): Promise<string>;
   reelStudioRoot(): string;
   /** Screenshot of a web page into outPath (PNG). Only the Electron app has one (offscreen window). */
   captureWebsite?(url: string, outPath: string, opts?: { layout?: 'phone' | 'desktop' }): Promise<CaptureResult>;
@@ -112,6 +112,7 @@ export interface ModelProvider {
   readonly model?: string;
   readonly supportsImages: boolean;
   complete(req: CompletionRequest): Promise<CompletionResponse>;
-  /** Release anything kept between turns (a live CLI session). Called when an agent run ends. */
-  dispose?(): void;
+  /** Release anything kept between turns (a live CLI session). Called when an agent run ends; the run
+   * ends only once the returned promise settles (its processes have exited). */
+  dispose?(): void | Promise<void>;
 }

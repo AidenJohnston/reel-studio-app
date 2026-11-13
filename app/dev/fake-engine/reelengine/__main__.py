@@ -6,7 +6,9 @@ transcribe: the transcript is placeholder words spread over the take.
 
 Extra test hooks (env):
   FAKE_ENGINE_SLOW=<seconds>   sleep this long inside transcribe, in small steps (cancel tests)
+  FAKE_ENGINE_SLOW_INIT=<seconds>   sleep this long inside init after copying, before project.json exists
   FAKE_ENGINE_FAIL=<command>   that command fails with a friendly error
+  FAKE_ENGINE_SLOW_RENDER=<seconds>   a full-quality render waits this long first, in small steps (Stop tests)
 """
 from __future__ import annotations
 
@@ -131,15 +133,16 @@ def take(args: list[str], flag: str) -> str | None:
     return None
 
 
-def load(proj: Path) -> dict:
-    return json.loads((proj / "project.json").read_text("utf-8"))
+def load(proj: Path, file: str | None = None) -> dict:
+    return json.loads((proj / (file or "project.json")).read_text("utf-8"))
 
 
-def save(proj: Path, data: dict) -> None:
+def save(proj: Path, data: dict, file: str | None = None) -> None:
     data["updatedAt"] = now()
-    tmp = proj / "project.json.tmp"
+    target = proj / (file or "project.json")
+    tmp = target.with_name(target.name + ".tmp")
     tmp.write_text(json.dumps(data, indent=2, ensure_ascii=False), "utf-8")
-    os.replace(tmp, proj / "project.json")
+    os.replace(tmp, target)
 
 
 def cmd_init(args: list[str]) -> dict:
@@ -165,6 +168,10 @@ def cmd_init(args: list[str]) -> dict:
         sources.append({"id": f"s{i}", "path": f"media/{dest.name}", "duration": info["duration"],
                         "fps": info.get("fps", 30), "width": info.get("width"), "height": info.get("height"),
                         "rotation": info.get("rotation", 0)})
+    slow = float(os.environ.get("FAKE_ENGINE_SLOW_INIT", "0") or 0)
+    for i in range(20 if slow else 0):     # the real engine's "Preparing your video" re-encode
+        progress("init", 100 * i / 20, "Preparing your video")
+        time.sleep(slow / 20)
     slug = proj.name
     data = {
         "schemaVersion": 1, "id": str(uuid.uuid4()), "title": title, "slug": slug,
@@ -252,12 +259,14 @@ def run_ffmpeg(cmd: list[str], total: float, stage: str, message: str, lo: float
         raise Fail("RENDER_FAILED", "I could not finish your video. Please try again.", err[-2000:])
 
 
-def write_captions(proj: Path, data: dict) -> None:
-    """work/captions.json as the real engine writes it, with simpler lines: the kept words three to a line
+def write_captions(proj: Path, vdir: Path, data: dict) -> None:
+    """captions.json beside the render, as the real engine writes it, with simpler lines: the kept words three to a line
     (one speech run), the one-word fixes applied (a word fixed to nothing keeps its place as ""), then the
     subtitle editor's split and join applied as the engine does (captions.edit_lines)."""
     cap = data.get("captions") or {}
     if cap.get("enabled") is False:
+        # no captions: an empty report, as the real engine writes, never an older render's lines
+        (vdir / "captions.json").write_text(json.dumps({"cues": []}), "utf-8")
         return
     words = json.loads((proj / "work" / "transcript.json").read_text("utf-8"))["words"]
     index = {w["id"]: i for i, w in enumerate(words)}
@@ -284,18 +293,26 @@ def write_captions(proj: Path, data: dict) -> None:
                 lines.append([])
             lines[-1].append(t)
     cues = [{"run": 0, "ids": [t["ids"][0] for t in line], "tokens": line} for line in lines if shown(line)]
-    (proj / "work" / "captions.json").write_text(json.dumps({"cues": cues}), "utf-8")
+    (vdir / "captions.json").write_text(json.dumps({"cues": cues}), "utf-8")
 
 
 def cmd_render(args: list[str]) -> dict:
     draft = "--draft" in args
     proj = Path(take(args, "--project"))
-    data = load(proj)
+    file, out = take(args, "--project-file"), take(args, "--out")
+    data = load(proj, file)
     if os.environ.get("FAKE_ENGINE_FAIL") == "render":
         raise Fail("RENDER_FAILED", "I could not finish your video. Please try again.")
-    # docs/versions.md: drafts overwrite versions/preview/; only a final makes versions/vN/.
+    slow = 0.0 if draft else float(os.environ.get("FAKE_ENGINE_SLOW_RENDER", "0") or 0)
+    for i in range(int(slow * 10)):
+        progress("render", i / slow, "Putting it all together")
+        time.sleep(0.1)
+    # docs/versions.md: a draft goes to --out (default versions/preview/); only a final makes
+    # versions/vN/, starting afresh when an earlier attempt that was never saved left one there
     n = int(data.get("version", 0)) + 1
-    vdir = proj / "versions" / ("preview" if draft else f"v{n}")
+    vdir = (proj / out if out else proj / "versions" / "preview") if draft else proj / "versions" / f"v{n}"
+    if not draft:
+        shutil.rmtree(vdir, ignore_errors=True)
     vdir.mkdir(parents=True, exist_ok=True)
     (vdir / ".rendering").write_text("", "utf-8")
     src = data["sources"][0]
@@ -317,10 +334,10 @@ def cmd_render(args: list[str]) -> dict:
     (vdir / "verify.json").write_text(json.dumps({"ok": True, "duration": dur}), "utf-8")
     (vdir / "project.json").write_text(json.dumps(data, indent=2, ensure_ascii=False), "utf-8")
     (vdir / ".rendering").unlink()
+    write_captions(proj, vdir, data)
     if not draft:
-        write_captions(proj, data)
         data["version"] = n
-        save(proj, data)
+        save(proj, data, file)
     progress("render", 100, "Done")
     return {"version": n, "path": str(vdir / name), "file": str(vdir / name), "draft": draft, "preview": draft,
             "versionDir": str(vdir)}
@@ -370,6 +387,11 @@ def cmd_attach(args: list[str]) -> dict:
     return rec
 
 
+def cmd_proxy(_args: list[str]) -> dict:
+    """The real engine makes preview copies of 4K/HDR takes; the fake one's takes are small."""
+    return {"sources": {}}
+
+
 def cmd_doctor(_args: list[str]) -> dict:
     return {"engine": "fake", "ffmpeg": shutil.which(FFMPEG) or FFMPEG, "ok": True}
 
@@ -377,7 +399,7 @@ def cmd_doctor(_args: list[str]) -> dict:
 COMMANDS = {
     "probe": cmd_probe, "classify": cmd_classify, "init": cmd_init, "transcribe": cmd_transcribe,
     "analyze": cmd_analyze, "autocut": cmd_autocut, "render": cmd_render, "doctor": cmd_doctor,
-    "download-model": cmd_download_model, "attach": cmd_attach,
+    "download-model": cmd_download_model, "attach": cmd_attach, "proxy": cmd_proxy,
 }
 
 
@@ -387,6 +409,7 @@ def main() -> int:
               "userMessage": "Reel Studio asked for something I do not know how to do."})
         return 1
     cmd, args = sys.argv[1], sys.argv[2:]
+    take(args, "--owner")       # the real engine checks it (reelengine/owner.py); the stand-in has no lock
     if os.environ.get("FAKE_ENGINE_FAIL") == cmd:
         emit({"event": "error", "code": "TEST_FAILURE", "message": "forced", "userMessage": "Test failure. Try again."})
         return 1

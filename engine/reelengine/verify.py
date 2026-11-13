@@ -28,6 +28,12 @@ IG_RIGHT_FRAC = 0.13
 IG_TOP_FRAC = 0.07
 
 
+def ig_right_limit(width: float) -> float:
+    """x past which a caption sits under the right-side action column, the like, comment and share icons.
+    captions.render_ass fits a centred line inside it, so the layout and this check share one edge."""
+    return width * (1 - IG_RIGHT_FRAC)
+
+
 def _fps(stream) -> float:
     raw = stream.get("r_frame_rate") or "0/1"
     try:
@@ -87,7 +93,7 @@ def caption_report(captions: list, fmt: tuple) -> tuple:
         x, y, w, h = c["box"]
         if x < 0 or y < 0 or x + w > W or y + h > H:
             off.append(c["text"])
-        elif y + h > H * (1 - IG_BOTTOM_FRAC) or y < H * IG_TOP_FRAC or x + w > W * (1 - IG_RIGHT_FRAC) + 40:
+        elif y + h > H * (1 - IG_BOTTOM_FRAC) or y < H * IG_TOP_FRAC or x + w > ig_right_limit(W):
             ui.append(c["text"])
     if off:
         return "FAIL", f"{len(off)} caption(s) run off the frame, e.g. {off[0]!r}"
@@ -230,8 +236,10 @@ def run(path: Path, expect_duration: Optional[float] = None, project_dir: Option
             fmt = (int(p["format"]["width"]), int(p["format"]["height"]))
         except (ValueError, KeyError):
             pass
+    if man and man.get("fps"):      # a draft renders below the project rate (render.preview_fps)
+        exp_fps = float(man["fps"])
     if project_dir is not None:
-        cj = Path(project_dir) / "work" / "captions.json"
+        cj = path.parent / "captions.json"
         if cj.exists() and fmt:
             caps = json.loads(cj.read_text(encoding="utf-8")).get("cues")
     rep = check(path, expect_duration, exp_w, exp_h, exp_fps, caps, fmt, draft)
