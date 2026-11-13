@@ -70,7 +70,8 @@ All additive (optional fields only), per docs/architecture.md section 3. Schema:
   written by `choose_music` when it picks a song (engine `analyze-music --fps`) and removed when the song changes.
   Stored rather than re-detected so the same project always lands the same edits on the same frames.
 - `music.onBeat` (array of `"cuts"`, `"zooms"`, `"broll"`, absent = none): those land on the nearest beat in
-  reach. A jump cut moves at most 0.15 s by changing only the air after the outgoing word; a zoom punches in up to
+  reach. A jump cut (between kept ranges, or where a long pause was taken out) moves at most 0.15 s by changing
+  only the silence before it; a zoom punches in up to
   0.15 s before its word or 0.06 s after; a b-roll entrance moves up to 0.15 s earlier or 0.1 s later.
 - `music.drops` (`[{from, to}]` word ids, absent = none): the music is gone 40 ms before `from` and comes back on
   the first beat within 1 s after `to` ends (0.15 s after it with no beat in reach). The song keeps running
