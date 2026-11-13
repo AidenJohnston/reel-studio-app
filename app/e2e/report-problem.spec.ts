@@ -92,39 +92,53 @@ test('Report a problem: review, send, and the way out when sending fails', async
     // The server refuses a field (400): resending the same report would fail again, so there is no Try again. Edit
     // leads, goes back to the form with the draft kept and the field marked, and sending needs a fresh review.
     fake.status.code = 400
-    fake.status.body = { error: 'longer than 5000 characters', field: 'what' }
-    await page.getByTestId('report-edit').click() // from the 500 above: back to the form, nothing marked
+    fake.status.body = { error: 'not an email address', field: 'email' }
+    // Edit from the 500 above: back to the form, nothing marked, the keyboard on "What happened?"
+    await page.getByTestId('report-edit').click()
     await expect(page.getByTestId('report-what')).toHaveValue('Second report')
+    await expect(page.getByTestId('report-what')).toBeFocused()
     await expect(page.getByTestId('report-what')).not.toHaveAttribute('aria-invalid', 'true')
+    // Back from the review step lands there too
+    await page.getByTestId('report-review').click()
+    await page.getByTestId('report-back').click()
+    await expect(page.getByTestId('report-what')).toBeFocused()
+    // The server refuses the email (stricter than the form): no Try again, Edit leads, and Edit puts the keyboard on
+    // the refused field with it marked. Sending needs a fresh review.
+    await page.getByTestId('report-email').fill('second@example.com')
     await page.getByTestId('report-review').click()
     await page.getByTestId('report-send').click()
-    await expect(page.getByTestId('report-error')).toContainText('what: longer than 5000 characters')
+    await expect(page.getByTestId('report-error')).toContainText('email: not an email address')
     await expect(page.getByTestId('report-retry')).toHaveCount(0)
     await expect(page.getByTestId('report-edit')).toHaveClass(/primary/)
     await expect(page.getByTestId('report-edit')).toBeFocused()
     await shot(page, 'report-problem-refused')
-    await page.getByTestId('report-edit').click()
-    await expect(page.getByTestId('report-what')).toHaveAttribute('aria-invalid', 'true')
-    await expect(page.getByTestId('report-field-error')).toContainText('longer than 5000 characters')
+    await page.keyboard.press('Enter') // Edit, from the keyboard
+    await expect(page.getByTestId('report-email')).toBeFocused()
+    await expect(page.getByTestId('report-email')).toHaveAttribute('aria-invalid', 'true')
+    await expect(page.getByTestId('report-what')).not.toHaveAttribute('aria-invalid', 'true')
+    await expect(page.getByTestId('report-field-error')).toContainText('not an email address')
     await expect(page.getByTestId('report-send')).toHaveCount(0) // the form has no Send: only a fresh review does
-    await page.getByTestId('report-what').fill('Second report, shorter')
+    await page.keyboard.press('Control+A')
+    await page.keyboard.type('second.try@example.com') // typed where focus landed
     fake.status.code = 201
     fake.status.body = undefined
     const before = fake.got.length
     await page.getByTestId('report-review').click()
-    await expect(page.getByTestId('report-preview')).toContainText('Second report, shorter')
+    await expect(page.getByTestId('report-preview')).toContainText('second.try@example.com')
     await page.getByTestId('report-send').click()
     await expect(page.getByTestId('report-id')).toHaveText('RS-ABCDEFGH')
     expect(fake.got.length).toBe(before + 1)
-    expect(fake.got[fake.got.length - 1].form.get('what')).toBe('Second report, shorter')
+    expect(fake.got[fake.got.length - 1].form.get('email')).toBe('second.try@example.com')
 
-    // A field the page validates itself is marked through the same IPC error path (field passes main → page).
+    // A field the page validates itself is marked and focused through the same IPC error path (field passes main → page).
     await page.getByTestId('report-done').click()
     await page.getByTestId('report-problem-open').click()
     await page.getByTestId('report-what').fill('Has a bad email')
     await page.getByTestId('report-email').fill('not an email')
+    await page.getByTestId('report-what').focus()
     await page.getByTestId('report-review').click()
     await expect(page.getByTestId('report-email')).toHaveAttribute('aria-invalid', 'true')
+    await expect(page.getByTestId('report-email')).toBeFocused()
     await expect(page.getByTestId('report-what')).not.toHaveAttribute('aria-invalid', 'true')
   } finally {
     await app.close()

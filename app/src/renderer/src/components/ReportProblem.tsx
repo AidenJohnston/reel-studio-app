@@ -20,6 +20,9 @@ type Step = { name: 'write' } | { name: 'review'; preview: SupportPreview } | { 
 /** Failures the same report would hit again: the person has to change it (a field the server refused, or too large). */
 const NEEDS_EDIT = new Set(['SUPPORT_FIELD', 'SUPPORT_TOO_BIG'])
 
+type FormField = 'what' | 'expected' | 'email'
+const isFormField = (f: unknown): f is FormField => f === 'what' || f === 'expected' || f === 'email'
+
 const kb = (n: number): string => (n >= 1024 * 1024 ? `${(n / 1024 / 1024).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1024))} KB`)
 
 export function ReportProblem({ context, screenshotAvailable, hasKey, onClose }: { context?: string; screenshotAvailable: boolean; hasKey: boolean; onClose: () => void }) {
@@ -48,7 +51,9 @@ export function ReportProblem({ context, screenshotAvailable, hasKey, onClose }:
     try {
       setStep({ name: 'review', preview: await reel.support.prepare(draft) })
     } catch (e) {
-      setFieldError({ field: (e as { field?: string })?.field, message: userMessage(e) })
+      const field = (e as { field?: string })?.field
+      setFieldError({ field, message: userMessage(e) })
+      if (isFormField(field)) setFocusField(field)
     } finally {
       setBusy(false)
     }
@@ -70,7 +75,24 @@ export function ReportProblem({ context, screenshotAvailable, hasKey, onClose }:
   const edit = (failed?: { message: string; field?: string }) => {
     setFieldError(failed ?? null)
     setStep({ name: 'write' })
+    // The form comes back inside the same Modal, whose autofocus runs only when it opens, and the button that had
+    // focus is gone: put the keyboard on the refused field, or on "What happened?".
+    setFocusField(isFormField(failed?.field) ? failed.field : 'what')
   }
+
+  const fieldRefs = {
+    what: useRef<HTMLTextAreaElement>(null),
+    expected: useRef<HTMLTextAreaElement>(null),
+    email: useRef<HTMLInputElement>(null)
+  }
+  const [focusField, setFocusField] = useState<FormField | null>(null)
+  useEffect(() => {
+    if (step.name !== 'write' || !focusField) return
+    fieldRefs[focusField].current?.focus()
+    setFocusField(null)
+    // fieldRefs is a new object each render but its refs are stable
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [step, focusField])
 
   // The failed screen is the review dialog redrawn, so Modal's autofocus (on open only) doesn't run, and the Send
   // button that had focus is gone. Put focus on the way forward: Edit after a refusal, else Try again.
@@ -99,6 +121,7 @@ export function ReportProblem({ context, screenshotAvailable, hasKey, onClose }:
             onChange={(e) => set('what', e.target.value)}
             placeholder="For example: I clicked Export and it stopped at 80%."
             aria-invalid={invalid('what')}
+            ref={fieldRefs.what}
             data-autofocus
             data-testid="report-what"
           />
@@ -107,13 +130,13 @@ export function ReportProblem({ context, screenshotAvailable, hasKey, onClose }:
           <strong>
             What did you expect? <span className="muted-sm">(optional)</span>
           </strong>
-          <textarea className="textarea" rows={3} maxLength={CAPS.expected} value={draft.expected} onChange={(e) => set('expected', e.target.value)} aria-invalid={invalid('expected')} data-testid="report-expected" />
+          <textarea className="textarea" rows={3} maxLength={CAPS.expected} value={draft.expected} onChange={(e) => set('expected', e.target.value)} aria-invalid={invalid('expected')} ref={fieldRefs.expected} data-testid="report-expected" />
         </label>
         <label className="stack" style={{ gap: 6 }}>
           <strong>
             Your email <span className="muted-sm">(optional, so we can write back)</span>
           </strong>
-          <input className="input" type="email" maxLength={CAPS.email} value={draft.email} onChange={(e) => set('email', e.target.value)} aria-invalid={invalid('email')} data-testid="report-email" />
+          <input className="input" type="email" maxLength={CAPS.email} value={draft.email} onChange={(e) => set('email', e.target.value)} aria-invalid={invalid('email')} ref={fieldRefs.email} data-testid="report-email" />
         </label>
         <div className="stack" style={{ gap: 8 }}>
           <label className="toggle" style={{ fontWeight: 400, alignItems: 'flex-start' }}>
