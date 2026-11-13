@@ -60,6 +60,7 @@ import { checkNoteAttachments, forChat, pickClipboardType, registerAttachmentIpc
 import { createUpdateService } from './update-check'
 import { PROTOCOL, createUpdateKeyService } from './update-key'
 import { setupPosting } from './posting-ipc'
+import { WINDOW_SHOWN } from '../shared/perf-marks'
 import { createJobFeedback, createMainWindow, feedbackLog, installMenu, startDragOut, titleBarOverlay, windowStateFile, type AppCommand } from './window'
 
 const TEST = process.env.REELSTUDIO_TEST === '1'
@@ -767,7 +768,10 @@ async function carryOverClaudeCode(settings: { aiAutoPicked: boolean; aiCarriedO
 function createWindow(): void {
   win = createMainWindow({ preload: join(__dirname, '../preload/index.js'), stateFile: windowStateFile(settingsDir()), test: TEST })
   installMenu(sendCommand, DEV_PROVIDERS || !app.isPackaged)
-  win.once('ready-to-show', () => win?.show())
+  win.once('ready-to-show', () => {
+    performance.mark(WINDOW_SHOWN) // app/perf times launch to here
+    win?.show()
+  })
   // Stop flashing the taskbar once the person is back.
   win.on('focus', () => win?.flashFrame(false))
   // The animation renderer keeps a hidden offscreen window; it must not keep the app alive.

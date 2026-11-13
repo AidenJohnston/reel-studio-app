@@ -3,6 +3,7 @@ import type { ProjectSummary } from '../../../shared/api'
 import { niceDate, reel } from '../api'
 import type { Go } from '../nav'
 import { Icon } from '../components/icons'
+import { HOME_REEL } from '../../../shared/perf-marks'
 
 const STATUS: Record<ProjectSummary['status'], string> = {
   new: 'Getting started',
@@ -80,7 +81,7 @@ export function Home({ go }: { go: Go }) {
                 {p.thumbnail ? <img src={p.thumbnail} alt="" /> : <Icon name="video" size={34} className="placeholder" />}
               </div>
               <div className="card-body">
-                <div className="card-title">{middle(p.title)}</div>
+                <div className="card-title" elementtiming={HOME_REEL}>{middle(p.title)}</div>
                 <div className="row" style={{ gap: 8, marginTop: 6 }}>
                   <span className={`badge ${p.status}`} data-testid="card-status">
                     {p.status === 'ready' && p.version ? `Ready · Version ${p.version}` : STATUS[p.status]}

@@ -256,8 +256,11 @@ export const createMockAI: CreateAI = ({ host }) => {
       }
     },
 
-    async applyNote(projectDir, note, onEvent, _signal, opts): Promise<AgentResult> {
+    async applyNote(projectDir, note, onEvent, signal, opts): Promise<AgentResult> {
       onEvent({ type: 'status', message: 'Reading your note', pct: 10, phase: 'edit' })
+      // app/perf: a real model takes seconds, so its status line is painted; this mock would finish first
+      const hold = Number(process.env.REELSTUDIO_MOCK_NOTE_MS || 0)
+      if (hold && !(await until(signal ?? new AbortController().signal, hold))) throw Object.assign(new Error('cancelled'), { name: 'AbortError' })
       const p = await readProject(projectDir)
       const added: string[] = []
       if (/\b(always|never|every video|from now on|in general)\b/i.test(note)) {
