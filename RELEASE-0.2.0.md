@@ -90,3 +90,17 @@ Updated as each group lands.
   - #175's fixes for #146 and #155 are ported.
   - Known issue: the version check fingerprints every re-timed animation clip on disk, so rendering a draft of another state can give an unchanged export a new version number. Frames are never wrong, and saved versions are never rewritten.
   - Known issue: `app/e2e/mirror-detect.spec.ts` still drives the old Reel screen, and CI doesn't run end-to-end specs.
+- Hardening landed (merge 717db8cf). An independent review of one writer per project, atomic notes and the updater found seven defects, three serious. Each is fixed in its own commit with a test. CI at the port's head 5e88ecdf passes every job (run 43603238309). Branch `port/0.2.0/hardening-red` holds the new tests without the fixes, and its run 43602967058 fails them on all three OSes and the engine, so each test catches the bug it was written for.
+  - A note that has published its version is never rolled back. Before, an error after saving could delete pictures the saved version used.
+  - A restart keeps a video closed while an engine from the last run that the app never recorded may still be writing in it.
+  - `work/.owner.lock` is now one exclusive claim, held by app jobs, the engine run by hand and the AI dev CLI alike. A stale or wrong token is refused (`NOT_OWNER`), and a job refuses a project a hand-run tool holds (`PROJECT_IN_USE`). Preview copies keep their own per-take lock. A test pins that a preview copy build changes nothing outside `work/proxy/`.
+  - Nothing is cleaned up while an engine of that note or hand edit may still write.
+  - A failed note's frozen pictures are never offered to later notes, and the asset ledger it created is removed.
+  - A version's `made-with.json` and `check.json` are written only by the run that made the version.
+  - On Mac, an update built for the other server (staging or production) is refused. On Windows this is a known issue. The installer's feed file sits inside its compressed archive, and the planned fix marks staging builds in the signed installer's version resource. That needs one staging packaging run to confirm which field carries the mark.
+  - Known gaps with no test yet:
+    - Power-loss durability of a whole version.
+    - A real installer failing midway.
+    - A tampered download through the real updater.
+    - Windows update mode (`--updated`).
+    - A hand-run engine killed outright leaves its lock. If its process id is reused, the video stays closed until the lock is deleted.
