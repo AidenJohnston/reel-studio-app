@@ -257,7 +257,13 @@ def reframe_filter(src: dict, out_w: int, out_h: int, face: Optional[tuple], dra
     chain = []
     if (pl["rcw"], pl["rch"]) != (pl["rw"], pl["rh"]):
         chain.append(f"crop={pl['rcw']}:{pl['rch']}:{pl['rx']}:{pl['ry']}")
-    chain.append(f"scale={pl['sw']}:{pl['sh']}:flags={'fast_bilinear' if draft else 'lanczos'}")
+    # One thread for the final, so the same project gives the same frames. The output is tagged BT.709
+    # (encoder_args), and since FFmpeg 8 this scale also converts any other colour matrix (an untagged or
+    # BT.601 take) to it, through RGB. Run in slices on several threads, that conversion gave different
+    # pixels on every render. Measured on a 60 s reel from a 4K take: FFmpeg 7.1.1 encode 72 s -> 42 s
+    # untagged, 32 s -> 34 s BT.709; FFmpeg 8.0.1 31 s -> 41 s untagged, 32 s -> 35 s BT.709. Drafts
+    # keep the threads.
+    chain.append(f"scale={pl['sw']}:{pl['sh']}:flags={'fast_bilinear' if draft else 'lanczos:threads=1'}")
     return ",".join(chain + _turn(pl["rot"]) + _mirror(src))
 
 
