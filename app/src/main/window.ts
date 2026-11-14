@@ -199,6 +199,7 @@ export function installMenu(
       role: 'help',
       submenu: [
         { label: 'Reel Studio website', click: () => void shell.openExternal(SITE_URL) },
+        { label: 'Report a Problem…', click: () => send({ type: 'report-problem' }) },
         ...(copyDiagnostics ? ([{ label: 'Copy Diagnostics', click: () => copyDiagnostics() }] as MenuItemConstructorOptions[]) : [])
       ]
     }

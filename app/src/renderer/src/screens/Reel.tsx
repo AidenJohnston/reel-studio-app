@@ -553,6 +553,7 @@ export function Reel({ slug, at, go, draft: startDraft }: { slug: string; at?: n
           ? {
               kind: 'failed',
               why: d.lastError?.userMessage ?? 'This version could not be made.',
+              code: d.lastError?.code,
               extra: d.lastError?.code === 'MODEL_MISSING' ? <ModelDownload secondary /> : undefined,
               // the file itself, or a video that was never copied in: trying again fails the same way. With no copy the
               // stage says so with the primary button, and the log's is secondary.

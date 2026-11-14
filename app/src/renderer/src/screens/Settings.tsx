@@ -22,6 +22,7 @@ import { StockKeys } from '../components/stock-keys'
 import { PostingRows } from '../components/PostingSettings'
 import { SocialRows } from '../components/SocialSettings'
 import { DevicesRows } from '../components/Devices'
+import { openReportProblem } from '../components/ReportProblem'
 
 /** Where the older section names (nav.ts) land now: a section, or one row of it. */
 const TARGET: Record<SettingsSection, SectionId | SettingId> = { ai: 'editor', listen: 'listening-model', where: 'library-folder', notify: 'notifications', privacy: 'privacy', posting: 'posting', about: 'about' }
@@ -397,7 +398,7 @@ export function Settings({ info, onInfo, section }: { info: AppInfo; onInfo: (i:
               <StockKeys />
               <Subhead ids={['easy-ai']}>Being tested</Subhead>
               <EasyAiRow onError={(m) => notify(m, 'error')} />
-              <Subhead ids={['engine-cache', 'logs', 'diagnostics', 'first-run']}>Troubleshooting</Subhead>
+              <Subhead ids={['engine-cache', 'logs', 'report-problem', 'diagnostics', 'first-run']}>Troubleshooting</Subhead>
               <CacheRow shared={sharedModel} onError={(m) => notify(m, 'error')} />
               <SettingRow
                 id="logs"
@@ -405,6 +406,15 @@ export function Settings({ info, onInfo, section }: { info: AppInfo; onInfo: (i:
                 control={
                   <button className="btn small" onClick={() => void reel.app.showLogs().catch((e) => notify(userMessage(e), 'error'))} data-testid="show-logs">
                     Show logs
+                  </button>
+                }
+              />
+              <SettingRow
+                id="report-problem"
+                line="Sends what went wrong to the Reel Studio team. You see everything before it goes."
+                control={
+                  <button className="btn small" onClick={() => openReportProblem()} data-testid="report-problem-open">
+                    Report a problem
                   </button>
                 }
               />

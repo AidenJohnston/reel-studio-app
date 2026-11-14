@@ -1,5 +1,6 @@
 import { Component, type ReactNode } from 'react'
 import { Button } from './ui'
+import { openReportProblem } from './ReportProblem'
 
 /** A bug on one screen must never leave the whole window blank. */
 export class ErrorBoundary extends Component<{ children: ReactNode; onReset: () => void; resetKey: string }, { error: Error | null }> {

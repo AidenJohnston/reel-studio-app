@@ -43,7 +43,7 @@ import {
 } from './paths'
 import { offerMoveToApplications, writeErrorCode } from './move-to-applications'
 import { runSelfTest, selfTestArgs, type SelfTestResult } from './self-test'
-import { createEngineRunner, killAllEngines, toUserError, type RunEngine } from './engine'
+import { createEngineRunner, killAllEngines, type RunEngine } from './engine'
 import { cpus, totalmem } from 'node:os'
 import {
   DIAGNOSTICS_CHECK_MS,
@@ -187,6 +187,8 @@ import { registerCompanionIpc } from './companion-ipc'
 import { insightsSummary } from './insights'
 import { timingOf, wrappedReport, type WrappedReel } from '../shared/wrapped'
 import { lanAddresses } from './phone-share'
+import { createSupport, encodeScreenshot, supportUrl } from './support'
+import { ipcErrorReply } from './ipc-error'
 
 const TEST = process.env.REELSTUDIO_TEST === '1'
 // Test builds stand in for macOS's answers (permissions.ts parseFakes), and for a Mac itself (platform=darwin), so a
@@ -696,10 +698,9 @@ function handle(channel: string, fn: Handler): void {
       validateIpcArgs(channel, args)
       return { ok: true, value: await fn(e, ...args) }
     } catch (err) {
-      const u = toUserError(err)
-      log(`[ipc ${channel}] ${u.code}: ${u.message ?? u.userMessage}`)
-      const link = (err as { link?: unknown })?.link
-      return { ok: false, error: { code: u.code, userMessage: u.userMessage, ...(typeof link === 'string' ? { link } : {}) } }
+      const { message, ...error } = ipcErrorReply(err)
+      log(`[ipc ${channel}] ${error.code}: ${message ?? error.userMessage}`)
+      return { ok: false, error }
     }
   })
 }
@@ -807,6 +808,22 @@ async function copyDiagnostics(): Promise<void> {
   await clipboard.writeText(await diagnosticsText())
   log('[diagnostics] copied to the clipboard')
 }
+
+/** "Report a problem" (main/support.ts). */
+function osLine(): string {
+  const osName = process.platform === 'darwin' ? 'macOS' : process.platform === 'win32' ? 'Windows' : process.platform
+  return `${osName} ${process.getSystemVersion()} ${process.arch}`
+}
+const support = createSupport({
+  url: supportUrl(process.env, log),
+  appVersion: app.getVersion(),
+  os: osLine(),
+  fetch: (url, init) => fetch(url, init), // Node's fetch: no Electron session, so no cookies
+  getKey: () => updateKey.get(),
+  diagnostics: diagnosticsText,
+  capture: async () => (win && !win.isDestroyed() ? encodeScreenshot(await win.webContents.capturePage()) : null),
+  log
+})
 
 async function appInfo(): Promise<AppInfo> {
   const s = await loadSettings()
@@ -1379,6 +1396,16 @@ function registerIpc(): void {
   })
   handle('app:copyText', (_e, t: string) => clipboard.writeText(String(t)))
   handle('app:copyDiagnostics', () => copyDiagnostics())
+  handle('support:capture', () => support.capture())
+  handle('support:prepare', (_e, d) => support.prepare(d))
+  handle('support:send', (_e, id: unknown) => support.send(id))
+  handle('support:discard', () => support.discard())
+  handle('support:copy', async (_e, id: unknown) => {
+    const text = support.asText(id)
+    if (!text) throw { code: 'SUPPORT_STALE', userMessage: 'Nothing to copy yet.' }
+    await clipboard.writeText(text)
+  })
+  handle('support:email', (_e, id: unknown) => shell.openExternal(support.mailto(id)))
   handle('app:legal', (_e, doc: unknown) => fs.readFile(legalFile(doc), 'utf8'))
   handle('app:showLegal', (_e, doc: unknown) => {
     const file = legalFile(doc)

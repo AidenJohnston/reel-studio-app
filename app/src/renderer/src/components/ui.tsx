@@ -162,7 +162,7 @@ export function Thinking() {
  * main column: the one marked data-toast-column (the stage beside a side panel), else the page, so it never covers a
  * panel's header. Without either (the first run) styles.css centres it on the window.
  */
-export function Toast({ text, kind, onClose }: { text: string; kind?: 'error' | 'info'; onClose: () => void }) {
+export function Toast({ text, kind, onClose, action }: { text: string; kind?: 'error' | 'info'; onClose: () => void; action?: { label: string; run: () => void } }) {
   useEffect(() => {
     if (kind === 'error') return
     const t = setTimeout(onClose, 4000)
@@ -188,6 +188,11 @@ export function Toast({ text, kind, onClose }: { text: string; kind?: 'error' | 
   return (
     <div ref={el} className={`toast${kind === 'error' ? ' error' : ''}`} role={kind === 'error' ? 'alert' : 'status'} data-testid="toast" data-over-dialogs>
       <span>{text}</span>
+      {action && (
+        <button type="button" className="toast-action" onClick={action.run} data-testid="toast-action">
+          {action.label}
+        </button>
+      )}
       {kind === 'error' && <IconButton icon="x" label="Close" onDark onClick={onClose} />}
     </div>
   )
