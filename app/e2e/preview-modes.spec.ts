@@ -9,6 +9,7 @@
 // Run: npx playwright test e2e/preview-modes.spec.ts (after npm run build).
 import { test, expect, type Locator, type Page } from '@playwright/test'
 import { join } from 'node:path'
+import { place, shapeById } from '../src/shared/phone-shapes'
 import { BASE, dropFiles, launch, makeMedia, modelReady, painted, passSample, shot, viewMenu } from './helpers'
 
 const player = (page: Page) =>
@@ -219,10 +220,20 @@ test('fails if speed, full screen or the phone shapes stop working, applying or 
       await page.getByTestId('edit-myself').click()
       await page.getByTestId('tab-captions').click()
       await expect(page.getByTestId('safe-band')).toBeVisible()
+      await page.getByTestId('cap-pos-higher').click() // 0.66 of the reel's height (caption-presets.ts rowPosition)
       for (const s of SHAPES) {
         await viewMenu(page, `shape-${s.id}`)
         const band = await rect(page, '[data-testid="safe-band"]')
         const screen = await rect(page, '.stage .phone-screen')
+        // fails if the subtitle preview leaves the spot the export burns it at: centred on the whole reel, at its
+        // position down the whole reel, trimmed parts included. The SE trims the reel's top and bottom, so the viewer's
+        // 0.66 would land a few px higher; the tall phones draw the reel wider than the screen, so a scaled-down line
+        // pulled off centre (#3, 9e2d0894, d9982758)
+        const { reel: r } = place(shapeById(s.id))
+        const shape = shapeById(s.id)
+        const line = await rect(page, '[data-testid="sub-preview"]')
+        expect(Math.abs(line.x + line.w / 2 - (screen.x + ((r.x + r.w / 2) / shape.w) * screen.w)), `${s.label}: subtitle preview x`).toBeLessThan(2)
+        expect(Math.abs(line.y + line.h / 2 - (screen.y + ((r.y + 0.66 * r.h) / shape.h) * screen.h)), `${s.label}: subtitle preview y`).toBeLessThan(2)
         expect(band.x >= screen.x - 0.5 && band.y >= screen.y - 0.5 && band.x + band.w <= screen.x + screen.w + 0.5 && band.y + band.h <= screen.y + screen.h + 0.5, `${s.label}: band on the screen`).toBe(true)
         // the whole reel's band is the engine's own (phone-shapes.test.ts); a phone's must clear what is drawn on it
         if (s.id === 'reel') continue
