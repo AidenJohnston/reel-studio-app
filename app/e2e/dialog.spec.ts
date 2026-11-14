@@ -1,4 +1,5 @@
-// The shared Modal (components/ui.tsx) makes the page behind an open dialog inert, keeps toasts usable, makes
+// The shared Modal (components/ui.tsx) makes the page behind an open dialog inert, keeps toasts usable (by mouse and,
+// through Tab, by keyboard), makes
 // what appears behind it while it is open inert too, and gives the page back when it closes.
 // The redesign opens one dialog at a time (Share and Export are popovers), so #77's nested-dialog steps have
 // no way in from the screens and are left out.
@@ -55,6 +56,26 @@ test('dialogs: the page behind is inert, toasts stay usable, the page comes back
       await expect(confirm).toContainText('Delete this reel?')
       expect(await inert(page, 'toast')).toBe(false)
       await toast.getByRole('button', { name: 'Close' }).click()
+      await expect(toast).toHaveCount(0)
+      await expect(confirm).toBeVisible()
+    })
+
+    await test.step("Tab and Shift+Tab reach the error toast's buttons and come back into the dialog (#118)", async () => {
+      await page.evaluate(() => document.body.dispatchEvent(new ClipboardEvent('paste', { bubbles: true })))
+      await expect(toast).toContainText('The pasted files could not be read.')
+      await page.getByTestId('confirm-no').focus()
+      const close = toast.getByRole('button', { name: 'Close' })
+      await page.keyboard.press('Shift+Tab')
+      await expect(close).toBeFocused()
+      await page.keyboard.press('Tab')
+      await expect(page.getByTestId('confirm-no')).toBeFocused()
+      await page.keyboard.press('Tab')
+      await expect(page.getByTestId('confirm-yes')).toBeFocused()
+      await page.keyboard.press('Tab')
+      await expect(page.getByTestId('toast-action')).toBeFocused()
+      await page.keyboard.press('Tab')
+      await expect(close).toBeFocused()
+      await page.keyboard.press('Enter')
       await expect(toast).toHaveCount(0)
       await expect(confirm).toBeVisible()
     })

@@ -663,7 +663,7 @@ describe('tool implementations', () => {
       expect([key, p.captions.style.position! <= lowestCaptionPosition(p.format, p.captions.style)]).toEqual([key, true]);
       expect([key, planFastNote('turn on captions', p)!.summary]).toEqual([key, 'I put the subtitles back on.']);
       const r = await executeTool(ctx, 'set_caption_style', { enabled: true });
-      expect([key, (r.content as any).warning]).toEqual([key, undefined]);
+      expect([key, JSON.parse(r.content).warning]).toEqual([key, undefined]);
     }
   });
 

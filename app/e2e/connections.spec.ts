@@ -54,6 +54,16 @@ test('add your own AI server from Settings', async () => {
     await page.getByTestId('own-server-toggle').click()
     const dialog = page.getByTestId('connection-dialog')
     await expect(page.getByTestId('connection-kind-openai')).toBeFocused()
+    // The kind radios are one tab stop, the checked one: Shift+Tab from it wraps inside the dialog (components/ui.tsx
+    // Modal) whichever kind is chosen (#118, c5e7f196).
+    const focusInDialog = () => dialog.evaluate((d) => d.contains(document.activeElement) && document.activeElement !== d)
+    for (const kind of ['anthropic', 'openai']) {
+      await page.getByTestId(`connection-kind-${kind}`).check()
+      await page.getByTestId(`connection-kind-${kind}`).focus()
+      await page.keyboard.press('Shift+Tab')
+      expect(await focusInDialog()).toBe(true)
+      await expect(page.getByTestId(`connection-kind-${kind}`)).not.toBeFocused()
+    }
 
     await page.getByTestId('connection-address').fill(`${origin}/v1`)
     await page.getByTestId('connection-address').blur()

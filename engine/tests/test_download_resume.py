@@ -294,3 +294,21 @@ def test_a_disk_that_fills_mid_download_says_so_instead_of_offline(env, monkeypa
         transcribe.download_model("tiny.en")
     assert e.value.code == "NO_SPACE"
     assert len(opened) == 2                                      # stopped at the full disk, no more retries
+
+
+def test_a_resumed_download_reports_from_the_bytes_it_has_and_never_goes_back(env, monkeypatch):
+    """The app shows the engine's percent: picking a stopped download up again must not send its bar to 0."""
+    d, start = env
+    start(Plan([]))
+    d.mkdir(parents=True)
+    (d / "config.json").write_bytes(CONFIG)                      # finished before the stop
+    (d / "model.bin.part").write_bytes(MODEL[:1_000_000])        # stopped partway
+    (d / "tokenizer.json.part").write_bytes(FILES["tokenizer.json"][:5])
+    seen = []
+    monkeypatch.setattr(transcribe, "progress",
+                        lambda stage, pct, message, force=False: seen.append(pct) if stage == "download" else None)
+    transcribe.download_model("tiny.en")
+    total = sum(len(b) for b in FILES.values())
+    assert seen[0] == pytest.approx((len(CONFIG) + 1_000_000 + 5) / total * 100)
+    assert seen == sorted(seen) and seen[-1] == 100
+    assert (d / "model.bin").read_bytes() == MODEL

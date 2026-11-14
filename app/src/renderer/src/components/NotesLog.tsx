@@ -8,6 +8,7 @@ import { reel, userMessage } from '../api'
 import { Icon } from './icons'
 import { Button, PickFiles } from './ui'
 import { AttachmentThumb } from './NoteAttachments'
+import { openReportProblem } from './ReportProblem'
 import { Thinking } from './ui'
 import { EditChecks } from './EditChecks'
 
@@ -59,7 +60,7 @@ export type FirstState =
   /** `why`: paused without you, and when it goes on (shared/pause.ts); null when the person pressed Stop */
   | { kind: 'paused'; why: string | null }
   /** `another`: the file is the cause (or was never copied in), so the way on is another video, not Try again */
-  | { kind: 'failed'; why: string; extra?: ReactNode; another?: 'primary' | 'secondary' }
+  | { kind: 'failed'; why: string; code?: string; extra?: ReactNode; another?: 'primary' | 'secondary' }
 
 const VIDEO_TYPES = 'video/*,.mov,.mp4,.m4v'
 
@@ -313,6 +314,9 @@ export function NotesLog({
               </Button>
             </>
           )}
+          <Button kind="tertiary" size="small" onClick={() => openReportProblem(`${f.why}${f.code ? ` (${f.code})` : ''}`)} data-testid="failed-report">
+            Report a problem
+          </Button>
         </div>
         {f.extra}
       </>

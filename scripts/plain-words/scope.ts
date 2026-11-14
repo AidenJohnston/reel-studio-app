@@ -195,6 +195,8 @@ export const scope: Scope = {
     { file: 'app/src/main/index.ts', text: 'Choose whether to make reels at 30 fps.', reason: "Settings > Advanced" },
     { file: 'app/src/main/index.ts', text: 'Wait until no reel is being made, then clear the cache.', reason: "Settings > Storage" },
     { file: 'app/src/main/index.ts', text: 'Couldn\'t open the logs folder: {}', reason: "Settings > Help, for sending a report" },
+    { file: 'app/src/main/index.ts', text: 'Claude Code app', reason: "Copy diagnostics (#174): the report a person pastes into a bug report names the app it checked" },
+    { file: 'app/src/main/index.ts', text: 'Codex app', reason: "Copy diagnostics (#174): the report a person pastes into a bug report names the app it checked" },
     { file: 'app/src/main/index.ts', text: 'Connecting your own AI server is not ready in this build yet. Your reels still work without it.', reason: "Settings > Advanced, your own AI server" },
     { file: 'app/src/main/index.ts', text: 'provider: generic\nurl: {}/u/\nupdaterCacheDirName: reel-studio-e2e-updater-{}\n', reason: "an update feed file written for tests, never shown" },
     { file: 'ai/src/index.ts', text: 'Something went wrong talking to your server. Try again.', reason: "Settings > Advanced, your own AI server" },

@@ -124,7 +124,13 @@ function zoom(w: Electron.BaseWindow | undefined, step: -1 | 0 | 1): void {
  * (pasting a key fails). Windows gets no menu bar: Ctrl+C/V work natively there and the renderer
  * handles the app shortcuts itself (and checks for updates from Settings).
  */
-export function installMenu(send: (c: AppCommand) => void, dev: boolean, toggleTimeline: (shown: boolean) => void, checkForUpdates: () => void): void {
+export function installMenu(
+  send: (c: AppCommand) => void,
+  dev: boolean,
+  toggleTimeline: (shown: boolean) => void,
+  checkForUpdates: () => void,
+  copyDiagnostics?: () => void
+): void {
   if (process.platform !== 'darwin') {
     Menu.setApplicationMenu(null)
     return
@@ -191,7 +197,11 @@ export function installMenu(send: (c: AppCommand) => void, dev: boolean, toggleT
     { role: 'windowMenu' },
     {
       role: 'help',
-      submenu: [{ label: 'Reel Studio website', click: () => void shell.openExternal(SITE_URL) }]
+      submenu: [
+        { label: 'Reel Studio website', click: () => void shell.openExternal(SITE_URL) },
+        { label: 'Report a Problem…', click: () => send({ type: 'report-problem' }) },
+        ...(copyDiagnostics ? ([{ label: 'Copy Diagnostics', click: () => copyDiagnostics() }] as MenuItemConstructorOptions[]) : [])
+      ]
     }
   ]
   Menu.setApplicationMenu(Menu.buildFromTemplate(template))
