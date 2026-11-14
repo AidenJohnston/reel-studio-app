@@ -874,6 +874,9 @@ export async function detail(slug: string): Promise<ProjectDetail> {
   const captionLines = readCaptionLines(
     (await readJson<unknown>(join(shown, 'captions.json'), null)) ?? (await readJson<unknown>(join(dir, 'work', 'captions.json'), null))
   )
+  // the engine rebuilds work/script-align.json on every transcription and caption build, and removes it with the script
+  const align = project.captions?.followScript === false ? null : await readJson<{ groups?: { ids?: unknown; words?: unknown }[] } | null>(join(dir, 'work', 'script-align.json'), null)
+  const scriptWords = align && Array.isArray(align.groups) ? scriptWordsOf(align.groups) : null
   const brollThumbs: Record<string, string> = {}
   const assets = (project.broll ?? []).map((b) => (typeof b.asset === 'string' ? b.asset : ''))
   const track = project.music?.track ?? ''
@@ -910,6 +913,7 @@ export async function detail(slug: string): Promise<ProjectDetail> {
     words,
     keptIds: kept,
     captionLines,
+    scriptWords,
     brollThumbs,
     brollCredits,
     checklist: checklist(project, words, kept, versions, !!st.aiEdited, songTitle(ledger, track)),
@@ -1037,3 +1041,15 @@ export function resolveRootPath(path: string): string {
 }
 
 export { libraryDir }
+
+/** script-align.json's groups as the script word each transcript word is drawn as: a group's words on its first id. */
+function scriptWordsOf(groups: { ids?: unknown; words?: unknown }[]): Record<string, string> {
+  const out: Record<string, string> = {}
+  for (const g of groups) {
+    if (!Array.isArray(g.ids) || !Array.isArray(g.words)) continue
+    const ids = g.ids.filter((x): x is string => typeof x === 'string')
+    const words = g.words.filter((w): w is string => typeof w === 'string').join(' ')
+    ids.forEach((id, i) => (out[id] = i === 0 ? words : ''))
+  }
+  return out
+}

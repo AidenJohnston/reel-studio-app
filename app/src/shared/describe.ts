@@ -86,6 +86,7 @@ function subtitleActs(before: ProjectJson['captions'], after: ProjectJson['capti
     const lb = look(b)
     if (lb !== look(a)) made.push(lookWord(lb))
     if (made.length) out.push(`made the subtitles ${made.join(' and ')}`)
+    if ((before?.followScript !== false) !== (after.followScript !== false)) out.push(after.followScript === false ? 'made the subtitles show what you said' : 'made the subtitles follow your script')
     // within one look (the saved name stays), a changed Spoken word colour is said on its own (#132, b48bc649)
     const hb = lit(b)
     if (hb !== lit(a)) out.push(!hb ? 'stopped the words lighting up' : LIT[hb] ? `made the words light up ${LIT[hb]}` : 'made the words light up in a new colour')

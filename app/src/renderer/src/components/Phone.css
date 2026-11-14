@@ -84,9 +84,9 @@
   position: absolute; inset: 0; z-index: 1; pointer-events: none; color: #fff;
   font-family: -apple-system, BlinkMacSystemFont, system-ui, sans-serif; font-size: calc(14 * var(--pt)); line-height: 1.2;
   text-shadow: 0 0 calc(3 * var(--pt)) rgba(0, 0, 0, .35);
-  transition: opacity 180ms cubic-bezier(.2, .8, .2, 1), visibility 0s;
+  transition: opacity 180ms var(--ease-enter), visibility 0s;
 }
-.igc.off { opacity: 0; visibility: hidden; transition: opacity 180ms cubic-bezier(.2, .8, .2, 1), visibility 0s 180ms; }
+.igc.off { opacity: 0; visibility: hidden; transition: opacity 180ms var(--ease-enter), visibility 0s 180ms; }
 @starting-style { .igc:not(.off) { opacity: 0; } }
 /* Instagram darkens the top and bottom of the reel a little so its white text reads on any picture. */
 .igc::before, .igc::after { content: ''; position: absolute; left: 0; right: 0; }
@@ -181,7 +181,7 @@
 .safe-band {
   position: absolute; left: 6.5%; right: 13%; top: 7%; bottom: 19%; z-index: 1; pointer-events: none; border-radius: 4px;
   outline: 1.5px dashed rgba(255, 255, 255, .85); outline-offset: -1px; box-shadow: 0 0 0 200cqw rgba(0, 0, 0, .22);
-  animation: safe-in 180ms cubic-bezier(.2, .8, .2, 1);
+  animation: safe-in 180ms var(--ease-enter);
 }
 .safe-band span {
   position: absolute; top: 6px; left: 6px; padding: 2px 8px; border-radius: 999px; background: rgba(0, 0, 0, .6); color: #fff;

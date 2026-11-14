@@ -2,7 +2,7 @@
    a named label beside each lane, and the lanes on one scrolling clock. Each lane has its own colour and its own name;
    the colours tell lanes apart at a glance, the labels say what they are. */
 .trk {
-  --trk-bg: #121413; --trk-lane: #191C1A; --trk-line: #2A2F2C; --trk-ink: #ECEFEC; --trk-ink-2: #A6ADA8; --trk-ink-3: #737B76;
+  --trk-bg: #121413; --trk-lane: #191C1A; --trk-line: #2A2F2C; --trk-ink: #ECEFEC; --trk-ink-2: #A6ADA8; --trk-ink-3: #808883; /* ruler times at 11 px: 5.08:1 on the panel */
   --trk-video: #2D5E50; --trk-video-hi: #4F9C84; --trk-clip: #3F4A63;
   --trk-pic: #8C6420; --trk-pic-hi: #E2A93B;
   --trk-cap: #33496B; --trk-cap-hi: #7EA2DA;
@@ -23,7 +23,7 @@
   background: #202421; color: var(--trk-ink); font: inherit; font-weight: 600; cursor: pointer; white-space: nowrap;
 }
 .trk-icon { width: 26px; padding: 0; justify-content: center; font-size: 16px; line-height: 1; }
-.trk-btn:hover:not(:disabled), .trk-icon:hover:not(:disabled) { background: #2A2F2B; }
+@media (hover: hover) and (pointer: fine) { .trk-btn:hover:not(:disabled), .trk-icon:hover:not(:disabled) { background: #2A2F2B; } }
 .trk-btn:disabled, .trk-icon:disabled { opacity: .45; cursor: default; }
 .trk-btn.danger { color: #FF9A8A; }
 html.kb .trk-btn:focus-visible, html.kb .trk-icon:focus-visible, html.kb .trk [role="button"]:focus-visible, html.kb .trk-sound:focus-visible { outline: 2px solid var(--trk-head); outline-offset: 1px; }
@@ -48,7 +48,7 @@ html.kb .trk-btn:focus-visible, html.kb .trk-icon:focus-visible, html.kb .trk [r
 
 .trk-scroll { flex: 1; min-width: 0; overflow-x: auto; overflow-y: hidden; scrollbar-width: thin; scrollbar-color: #3A403C transparent; }
 /* clip: nothing drawn past the reel's end may widen what scrolls, or the lanes could not scroll back after zooming out */
-.trk-content { position: relative; cursor: text; overflow: clip; }
+.trk-content { position: relative; cursor: default; overflow: clip; }
 .trk-content.dragging, .trk-content.dragging * { cursor: grabbing !important; }
 .trk-ruler { position: relative; height: var(--trk-ruler-h); border-bottom: 1px solid var(--trk-line); cursor: ew-resize; }
 .trk-tick { position: absolute; top: 0; bottom: 0; padding: 3px 0 0 4px; border-left: 1px solid var(--trk-line); color: var(--trk-ink-3); font-variant-numeric: tabular-nums; pointer-events: none; }
@@ -71,13 +71,14 @@ html.kb .trk-btn:focus-visible, html.kb .trk-icon:focus-visible, html.kb .trk [r
 .trk-back { position: absolute; top: 2px; transform: translateX(-50%); padding: 0 4px; border-radius: 4px; background: var(--trk-head); color: #2B2400; font-weight: 700; z-index: 2; }
 
 /* the edges a drag trims or resizes by: a grip that shows on hover, wide enough to catch */
-.trk-edge { position: absolute; top: 0; bottom: 0; width: 10px; cursor: ew-resize; z-index: 3; }
+.trk-edge { position: absolute; top: 0; bottom: 0; width: clamp(4px, 25%, 10px); /* a short picture keeps a middle to move it by */ cursor: ew-resize; z-index: 3; }
 .trk-edge.start { left: 0; }
 .trk-edge.end { right: 0; }
 .trk-edge::after { content: ''; position: absolute; top: 25%; bottom: 25%; width: 3px; border-radius: 2px; background: var(--trk-ink); opacity: 0; transition: opacity 80ms; }
 .trk-edge.start::after { left: 2px; }
 .trk-edge.end::after { right: 2px; }
-.trk-part:hover .trk-edge::after, .trk-pic:hover .trk-edge::after, .trk-pic.on .trk-edge::after, .trk-part.trimming .trk-edge::after { opacity: .9; }
+.trk-pic.on .trk-edge::after, .trk-part.trimming .trk-edge::after { opacity: .9; }
+@media (hover: hover) and (pointer: fine) { .trk-part:hover .trk-edge::after, .trk-pic:hover .trk-edge::after { opacity: .9; } }
 
 /* pictures */
 .trk-pic {
@@ -97,7 +98,7 @@ html.kb .trk-btn:focus-visible, html.kb .trk-icon:focus-visible, html.kb .trk [r
   position: absolute; top: 4px; bottom: 4px; padding: 0 6px; border-radius: 4px; display: flex; align-items: center; overflow: hidden;
   background: var(--trk-cap); box-shadow: inset 0 0 0 1px var(--trk-cap-hi); white-space: nowrap; text-overflow: ellipsis; cursor: text; outline: none;
 }
-.trk-cap:hover { background: #3E5880; }
+@media (hover: hover) and (pointer: fine) { .trk-cap:hover { background: #3E5880; } }
 .trk-cap-input {
   position: absolute; top: 2px; bottom: 2px; z-index: 4; padding: 0 6px; border: 2px solid var(--trk-head); border-radius: 4px;
   background: #0B0C0B; color: #fff; font: inherit; font-size: var(--fs-sm); outline: none;

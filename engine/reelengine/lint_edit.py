@@ -176,7 +176,9 @@ def prepare(ctx, tl):
     sfx.plan(ctx)
     cues = []
     if (ctx.project.get('captions') or {}).get('enabled', True):
-        _, cues, *_ = captions.build_for_timeline(tl, ctx.project, ctx.fmt['width'], ctx.fmt['height'])
+        # the project folder too, so a script beside project.json gives the same words the render draws (#171)
+        _, cues, *_ = captions.build_for_timeline(tl, ctx.project, ctx.fmt['width'], ctx.fmt['height'],
+                                                  project_dir=getattr(ctx, 'project_dir', None))
     # Compare against unsnapped events so an event cannot collide with its own target.
     plan = LintTimeline(tl.segments, tl.duration, visuals, zooms, ctx._lint_snap_requests, cues, ctx._lint_events,
                         getattr(tl, 'match_joins', []))
