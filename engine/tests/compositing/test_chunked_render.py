@@ -334,5 +334,26 @@ def test_a_chunk_that_fails_falls_back_to_one_pass(tmp_path, media, root, monkey
         raise RuntimeError("no chunks today")
     monkeypatch.setattr(render, "chunked_video", broken)
     mp4, res = _render(pdir, root, tmp_path / "out.mp4")
-    assert res["chunks"] is None
+    assert res["chunks"] is None and res["chunkedFallback"]
     assert len(_framemd5(mp4)) > 0
+
+
+def test_a_chunk_failure_that_passes_keeps_the_exports_bytes(tmp_path, media, root, monkeypatch):
+    # Fails if one failed chunk pass sends the export to the single pass: a passing hiccup would then give other
+    # bytes than an export of the same project with none (Astra engine review 6).
+    clean = tmp_path / "clean"
+    _busy_project(clean, media["video"])
+    expected, _ = _render(clean, root, tmp_path / "out" / "clean.mp4")
+    pdir = tmp_path / "p"
+    _busy_project(pdir, media["video"])
+    real, calls = render.chunked_video, []
+
+    def once(*args, **kwargs):
+        calls.append(1)
+        if len(calls) == 1:
+            raise RuntimeError("a passing failure")
+        return real(*args, **kwargs)
+    monkeypatch.setattr(render, "chunked_video", once)
+    got, res = _render(pdir, root, tmp_path / "out" / "retried.mp4")
+    assert got.read_bytes() == expected.read_bytes()
+    assert res["chunks"] and "chunkedFallback" not in res

@@ -1579,20 +1579,34 @@ def run(project_dir: Path, draft: bool = False, window: Optional[str] = None,
     def on_pct(p):
         progress(STAGE, 20 + 0.72 * p, "Making your video")
 
-    chunks = None
+    chunks, chunk_fallback = None, False
     if chunked and not draft and not win:
         # A final is made of cached chunks (chunked_video), so an edit re-encodes only the chunks it touched. A take
         # that can't be chunked, or anything going wrong there, falls back to the single pass below, except
         # captions in the wrong font, which the single pass would draw the same way.
-        try:
-            chunks = chunked_video(ctx, tl, segments, src_meta, src_paths, faces, layers, zooms, ass_name, font_path,
-                                   audio, out_part, rwork, on_pct, warnings)
-        except EngineError as exc:
-            if exc.code == "FONT_SUBSTITUTED":
-                raise
-            log(f"# chunked final failed, rendering it in one pass: {exc.message[-400:]}")
-        except Exception as exc:   # noqa: BLE001 -- the single pass is the fallback for any failure
-            log(f"# chunked final failed, rendering it in one pass: {exc!r}")
+        # A failure is tried once more on the same chunked path: its chunks are encoded and joined exactly as an
+        # export with no failure, so a passing hiccup never changes the bytes (Astra engine review 6). Only a second
+        # failure, or a timeout, which would only time out again, falls back to the single pass. That pass draws the
+        # same picture with one encoder, whose motion search may pick other vectors of the same cost: the same picture
+        # (PSNR >= 50 dB, test_the_one_pass_fallback_draws_the_same_picture), not the same bytes, so the result says so
+        # (`chunkedFallback`).
+        for attempt in (1, 2):
+            failed = False
+            try:
+                chunks = chunked_video(ctx, tl, segments, src_meta, src_paths, faces, layers, zooms, ass_name, font_path,
+                                       audio, out_part, rwork, on_pct, warnings)
+                break
+            except EngineError as exc:
+                if exc.code == "FONT_SUBSTITUTED":
+                    raise
+                log(f"# chunked final failed (attempt {attempt}): {exc.message[-400:]}")
+                failed = True
+                if exc.code == "TIMEOUT":
+                    break
+            except Exception as exc:   # noqa: BLE001 -- the single pass is the fallback for any failure
+                log(f"# chunked final failed (attempt {attempt}): {exc!r}")
+                failed = True
+        chunk_fallback = failed
     err = None
     if chunks is None:
         err = None
@@ -1656,6 +1670,7 @@ def run(project_dir: Path, draft: bool = False, window: Optional[str] = None,
               "size": [out_w, out_h], "videoFrom": video_from, "layers": len(layers), "zooms": len(zooms),
               "captions": len(cap_report), "warnings": warnings, "visualChanges": visual_changes,
               "chunks": chunks,    # None: not a final, or a final rendered in one pass
+              **({"chunkedFallback": True} if chunk_fallback else {}),
               "expectedSilence": ctx.expected_silence,
               "broll": [r for r in broll_report if r.get("fallback") or r.get("skipped") or r.get("remake")],
               **({"angles": angle_rows} if angle_rows else {})}
