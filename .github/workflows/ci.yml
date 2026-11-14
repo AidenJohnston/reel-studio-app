@@ -2,8 +2,10 @@ name: CI
 on:
   pull_request:
   push:
-    # redesign-beta: the fork's integration branch, which has no pull request to run on
-    branches: [main, redesign-beta]
+    # redesign-beta: the fork's integration branch, which has no pull request to run on.
+    # release/** and port/**: the 0.2.0 integration branch and the branches that port PRs onto it, so each push
+    # gets the full matrix before a pull request exists.
+    branches: [main, redesign-beta, 'release/**', 'port/**']
   workflow_dispatch:
 permissions:
   contents: read
