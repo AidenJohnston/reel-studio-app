@@ -1850,7 +1850,8 @@ def _t_wide(ctx, plan, params, kind, src, zones, face, frame):
         return [Layer(path, "image", plan["t0"], plan["t1"], 0, 0, W, H, 0.0)], {"zone": "full", "bbox": (0, 0, W, H)}
     src, cin, dur = _clip_window(ctx, src, params, plan["t1"] - plan["t0"])
     plan["t1"] = plan["t0"] + dur
-    out = layers_dir(ctx) / f"{stem}-{_key(round(cin, 3), round(dur, 3), _enc(ctx))}.mp4"
+    # the rate it is drawn at is part of the name: a 60 fps final must not reuse a 30 fps layer (Astra engine review 5)
+    out = layers_dir(ctx) / f"{stem}-{_key(round(cin, 3), round(dur, 3), *_rate_key(fps), _enc(ctx))}.mp4"
     if not out.exists():
         fc = (f"[0:v]fps={fps},setsar=1,split=2[a][b];"
               f"[a]scale={bw}:{bh}:force_original_aspect_ratio=increase,crop={bw}:{bh},boxblur={WIDE_BLUR}:2,"
