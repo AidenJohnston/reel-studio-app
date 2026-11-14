@@ -1,10 +1,9 @@
 // At startup, before any job: settles what the last run left behind. The storage root comes first,
 // because an engine list that can't be read sends the app looking for engines in the videos under
 // the root this run uses.
-import { rm } from 'node:fs/promises'
-import { basename, join } from 'node:path'
+import { basename } from 'node:path'
 import { projectFolders, type createPidRegistry } from './orphans'
-import { clearStaleLocks, OWNER_LOCK } from './owner'
+import { clearStaleLock, clearStaleLocks } from './owner'
 import { setRootOverride } from './paths'
 import { loadSettings, settleLibraryRoot, type Settings } from './settings'
 import { ensureRoot, recoverInterrupted } from './store'
@@ -39,7 +38,7 @@ export async function settleLastRun(
   }
   for (const dir of stillRunning) {
     void registry.drained(dir)?.then(async () => {
-      await rm(join(dir, OWNER_LOCK), { force: true }).catch(() => undefined)
+      await clearStaleLock(dir).catch(() => undefined)
       log(`[start] ${basename(dir)}: the engine process from the last run has exited; the video opens again`)
       reopen(basename(dir))
     })

@@ -38,9 +38,13 @@ Recommendation: close each with a comment pointing at the release PR once it mer
 | Render engine (landed) | `port/0.2.0/engine` | #124, #116, #146, #156, #151, #149, #154, #155, #172, #173, #178, #180 |
 | UI (landed) | `port/0.2.0/ui` | #3, #133 (for #4), #17, #126, #130, #131, #132, #118, #147, #134, #142, #152, #174, #185 |
 | CI, updater, packaging (landed) | `port/0.2.0/ship` | CI green on all three OSes, #120, #121, #179, #123, #125, #136, #168, #169, #177 |
-| Second wave, after notes core and engine land | to be named | #157, #150, #184, #170, #171, #182, #183 |
+| Second wave, after notes core and engine land | `port/0.2.0/notes-core` (#183, #182, Aiden's style-consent branch), `port/0.2.0/engine` (#157, #150, #184), `port/0.2.0/ui` (#171) | #157, #150, #184, #171, #182, #183 |
 
 The second wave waits because those PRs are built on the new note flow from #140 (#182 contains #140; #170 and #184 contain #157; #175 says #157 and #150 were written against the note flow #140 replaces).
+
+## Waits for 0.2.1
+
+- **#170** (notes and hand edits stop at their draft; Export makes the full-quality file once). It can't go in without breaking the rule that a saved version is never rewritten. The release's version contract (docs/versions.md rules 1 to 4, from #139) says only a final render makes `versions/vN/`. #170 saves a version from its draft, and Export later writes `export.mp4` and `render.json` into that saved folder. #175 left #143 out for the same kind of change. #170 is also built on main plus #157 without #140, and its own description lists a `begin()`/`saveNote()` rework still owed. It adds a third way of recording what a version was made from (`reads.py`, using Python's audit hooks) beside the release's render identity and asset fingerprint. Making #170 fit means redesigning when a version exists, which belongs in its own PR after 0.2.0.
 
 ## Needs Sam
 
@@ -86,3 +90,17 @@ Updated as each group lands.
   - #175's fixes for #146 and #155 are ported.
   - Known issue: the version check fingerprints every re-timed animation clip on disk, so rendering a draft of another state can give an unchanged export a new version number. Frames are never wrong, and saved versions are never rewritten.
   - Known issue: `app/e2e/mirror-detect.spec.ts` still drives the old Reel screen, and CI doesn't run end-to-end specs.
+- Hardening landed (merge 717db8cf). An independent review of one writer per project, atomic notes and the updater found seven defects, three serious. Each is fixed in its own commit with a test. CI at the port's head 5e88ecdf passes every job (run 43603238309). Branch `port/0.2.0/hardening-red` holds the new tests without the fixes, and its run 43602967058 fails them on all three OSes and the engine, so each test catches the bug it was written for.
+  - A note that has published its version is never rolled back. Before, an error after saving could delete pictures the saved version used.
+  - A restart keeps a video closed while an engine from the last run that the app never recorded may still be writing in it.
+  - `work/.owner.lock` is now one exclusive claim, held by app jobs, the engine run by hand and the AI dev CLI alike. A stale or wrong token is refused (`NOT_OWNER`), and a job refuses a project a hand-run tool holds (`PROJECT_IN_USE`). Preview copies keep their own per-take lock. A test pins that a preview copy build changes nothing outside `work/proxy/`.
+  - Nothing is cleaned up while an engine of that note or hand edit may still write.
+  - A failed note's frozen pictures are never offered to later notes, and the asset ledger it created is removed.
+  - A version's `made-with.json` and `check.json` are written only by the run that made the version.
+  - On Mac, an update built for the other server (staging or production) is refused. On Windows this is a known issue. The installer's feed file sits inside its compressed archive, and the planned fix marks staging builds in the signed installer's version resource. That needs one staging packaging run to confirm which field carries the mark.
+  - Known gaps with no test yet:
+    - Power-loss durability of a whole version.
+    - A real installer failing midway.
+    - A tampered download through the real updater.
+    - Windows update mode (`--updated`).
+    - A hand-run engine killed outright leaves its lock. If its process id is reused, the video stays closed until the lock is deleted.

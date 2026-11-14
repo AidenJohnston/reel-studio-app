@@ -35,6 +35,8 @@ export interface FrozenAsset extends Omit<AssetCandidate, 'previewPath'> {
   previewPath?: string;
   assetId: string;
   committedPath: string;
+  /** The note that froze it. Its record counts only once that note is saved in project.json (offeredAssets). */
+  note?: string;
   provenance: {
     intent: string;
     retrievedAt: string;
@@ -51,7 +53,8 @@ export interface PendingAsset {
   /** Downloads owned by this candidate, deleted once frozen or when the run ends. */
   made: string[];
 }
-export interface AssetStore { projectDir: string; root: string }
+/** `note`: the note running, whose records are written with its id and offered to it before it is saved. */
+export interface AssetStore { projectDir: string; root: string; note?: string }
 /** The AI package never reads media (CONTRIBUTING): the engine hashes and copies it. */
 export interface MediaEngine {
   /** engine freeze-asset: copies `ref` into work/assets/frozen (or reuses a file with the same bytes) */
@@ -98,6 +101,17 @@ export async function readAssets(store: AssetStore): Promise<FrozenAsset[]> {
     try { const r = JSON.parse(line); return isRecord(r) ? [r] : []; } catch { return []; }
   });
 }
+/** The records a search may offer: those of saved notes (and first edits, which have no note), and the running
+ * note's own. A note that failed takes its records back (editor.ts restoreAssets); one cut short by a crash or a
+ * power cut leaves them, never offered, since project.json never named that note. */
+export async function offeredAssets(store: AssetStore): Promise<FrozenAsset[]> {
+  const records = await readAssets(store);
+  if (!records.some((r) => r.note && r.note !== store.note)) return records;
+  const saved = await fs.readFile(path.join(store.projectDir, 'project.json'), 'utf8')
+    .then((t) => JSON.parse(t.replace(/^\uFEFF/, ''))?.notes, () => []);
+  const ids = new Set((Array.isArray(saved) ? saved : []).map((n: { id?: unknown }) => n?.id).filter((id): id is string => typeof id === 'string'));
+  return records.filter((r) => !r.note || r.note === store.note || ids.has(r.note));
+}
 async function appendRecord(store: AssetStore, asset: FrozenAsset): Promise<void> {
   const handle = await fs.open(file(store, LEDGER, true), 'a+');
   try {
@@ -114,7 +128,7 @@ async function freeze(store: AssetStore, media: MediaEngine, candidate: Omit<Ass
   const frozen = await media.freeze(candidate.localPath, candidate.kind, expectSha256);
   const asset: FrozenAsset = {
     ...candidate, sha256: frozen.sha256, mime: frozen.mime, localPath: frozen.committedPath, committedPath: frozen.committedPath,
-    assetId: `asset_${randomUUID()}`,
+    assetId: `asset_${randomUUID()}`, ...(store.note ? { note: store.note } : {}),
     provenance: { intent, retrievedAt, provider: candidate.provider,
       ...(candidate.sourceUrl ? { sourceUrl: candidate.sourceUrl } : {}), ...(candidate.landingUrl ? { landingUrl: candidate.landingUrl } : {}) },
   };

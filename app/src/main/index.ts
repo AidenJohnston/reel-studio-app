@@ -96,6 +96,7 @@ import { createJobManager } from './jobs'
 import { createPauser, pauseFor, quitQuestion } from './pause'
 import { createNoteQueue, noteOutcome, type NoteToRun, type StartHand } from './note-queue'
 import { handEditJob, HAND_MESSAGE } from './hand-edit'
+import { recordMadeWith } from './made-with'
 import { refreshMemories } from './memory-loop'
 import { parseHandEdit } from '../shared/hand-edit'
 import { learnPicker } from '../shared/style-editors'
@@ -534,7 +535,7 @@ async function startNote(slug: string, { id: noteId, text: own, attachments, mom
       // what it says back while it works reaches the progress card in the person's own words
       const aiText = [aiNoteText(own, moment), ...(steers ?? []).map((x) => aiNoteText(x.text, x.moment))].join('\n')
       const r: AgentResult = await ai.applyNote(dir, aiText, forPerson(emit, aiText, text), signal, opts)
-      await recordMadeWith(dir, r)
+      await recordMadeWith(dir, r, before).catch((e) => log(`[ai] made-with: ${String(e)}`))
       if (r.changed.length && r.version !== undefined && ai.rewordVersion) {
         void titleVersion(slug, r.version, ai.rewordVersion.bind(ai), AbortSignal.timeout(60_000)).catch((e) =>
           log(`[ai] version title: ${String(e?.message ?? e)}`)
@@ -655,7 +656,7 @@ const updates = createUpdater({
         log,
         devFeedFile: TEST_FEED ? updateConfig ?? undefined : undefined,
         onError: (e) => updates.installFailed(e),
-        install: process.platform === 'win32' ? windowsInstaller(app.getVersion()) : macBundleCheck(app.getVersion())
+        install: process.platform === 'win32' ? windowsInstaller(app.getVersion()) : macBundleCheck(app.getVersion(), siteFeed.staging)
       }),
   load: loadSettings,
   save: saveSettings,
@@ -952,6 +953,8 @@ function startFirstEdit(slug: string, initArgs: { title: string; files: string[]
     // Reel screen plays it (shared/live.ts) and says what it is. Once listening is done (the first
     // status of a later phase), the words heard go to the Reel screen ("I heard: ...").
     let heard = false
+    // a first edit run again can get its saved version back: that version's record stays (made-with.ts)
+    const before = (await readProject(slug)).version ?? 0
     const r = await ai.firstEdit(
       dir,
       (e) => {
@@ -970,7 +973,7 @@ function startFirstEdit(slug: string, initArgs: { title: string; files: string[]
     // Honest "What I did": only an AI that ran to the end picked the takes and wrote the caption.
     // A notice means it stopped and (usually) the simple edit stepped in, so claim nothing.
     const aiEdited = !!provider && provider.connected && provider.id !== 'none' && !r.notice
-    if (aiEdited) await recordMadeWith(dir, { ...r, version: r.version ?? 1 })
+    if (aiEdited) await recordMadeWith(dir, { ...r, version: r.version ?? 1 }, before).catch((e) => log(`[ai] made-with: ${String(e)}`))
     await updateAppState(slug, (s) => {
       s.aiEdited = aiEdited
     })
@@ -983,13 +986,6 @@ function startFirstEdit(slug: string, initArgs: { title: string; files: string[]
 /** A mirror question in the chat, with the takes it is about (its buttons act on those only). */
 function askMirror(slug: string, q: MirrorQuestion): Promise<void> {
   return addChat(slug, 'editor', q.text, undefined, q.actions, undefined, undefined, undefined, undefined, q.sources).then(() => undefined)
-}
-
-/** Which model made a version, beside it (`versions/vN/made-with.json`, as title.json is): its line in the notes names
- * it. A version a basic edit made has no model, and no file. */
-async function recordMadeWith(dir: string, r: AgentResult): Promise<void> {
-  if (!r.model || r.version === undefined) return
-  await writeJson(join(dir, 'versions', `v${r.version}`, 'made-with.json'), { model: r.model }).catch((e) => log(`[ai] made-with: ${String(e)}`))
 }
 
 /** The editor's reply into the chat, then one "Remember this for next time?" per My style rule (style-consent.ts). */

@@ -573,9 +573,9 @@ def cmd_reference_scan(args):
 
 # Commands that change nothing in the project, `attach`, which only adds its own uniquely named file,
 # and `proxy`, which writes only work/proxy/ under its own per-take lock (proxy.py) and outlives the job
-# that starts it: they run even while Reel Studio has the project open. Every other command given
-# --project is refused then unless Reel Studio runs it (owner.py). `score` only reads a saved version's
-# folder, which no job rewrites.
+# that starts it: they take no part in ownership and run even while Reel Studio has the project open.
+# Every other command given --project is the project's one writer while it runs (owner.py claim).
+# `score` only reads a saved version's folder, which no job rewrites.
 NOT_PROJECT_WRITES = {"probe", "doctor", "verify", "search-images", "analyze-music", "download-model",
                       "classify", "attach", "proxy", "score"}
 
@@ -796,8 +796,10 @@ def main(argv=None) -> int:
         # commands without a project (footage search, Library indexing) have nothing to own
         if getattr(args, "project", None) and args.command not in NOT_PROJECT_WRITES:
             from . import owner
-            owner.check(Path(args.project), args.owner)
-        result = args.fn(args)
+            with owner.claim(Path(args.project), args.owner):
+                result = args.fn(args)
+        else:
+            result = args.fn(args)
         proto.done(result)
         return 0
     except EngineError as exc:

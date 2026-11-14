@@ -282,7 +282,9 @@ def run(project_dir: Path, short_side: int = SHORT_SIDE) -> dict:
     leaves the others (and every render) unaffected."""
     lower_priority()
     project_dir = Path(project_dir).resolve()
-    proj = projmod.load(project_dir)
+    # Read as it is, never through projmod.load's trial recovery: a build outlives the job that started it
+    # and owns nothing but work/proxy/ (cli.py NOT_PROJECT_WRITES), so it must not finish a trial for a writer.
+    proj = projmod.load(project_dir, file=projmod.project_file(project_dir))
     sources = proj.get("sources") or []
     out = {}
     for i, src in enumerate(sources):

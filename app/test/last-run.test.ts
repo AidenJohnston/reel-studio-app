@@ -96,6 +96,40 @@ describe('the start after a crash', () => {
     }
   }, 60000)
 
+  it('fails if a readable engine list lets a video open while an engine the list never recorded still works in it', async () => {
+    setupPaths()
+    await saveSettings({ firstRunDone: true })
+    const bread = projectDir('bread')
+    mkdirSync(join(bread, 'work'), { recursive: true })
+    const lock = join(bread, OWNER_LOCK)
+    writeFileSync(lock, '{"app":"Reel Studio","token":"job-1"}')
+    // the app crashed after starting this engine and before engine.ts onSpawn recorded it: the list is valid and empty
+    mkdirSync(settingsDir(), { recursive: true })
+    writeFileSync(join(settingsDir(), 'engines.json'), '[]')
+    const left = spawn(PYTHON, ['-s', '-E', '-m', 'reelengine', 'sleep', '--project', bread], { cwd: join(APP_DIR, 'test', 'fixtures', 'sleeper'), stdio: 'ignore', windowsHide: true, detached: process.platform !== 'win32' })
+    try {
+      await once(left, 'spawn')
+      const jobs = createJobManager(() => undefined, () => undefined)
+      const note = async (): Promise<{ summary: string }> => ({ summary: 'ok' })
+      const closed: string[] = []
+      await settleLastRun(createPidRegistry(settingsDir()), (slug) => {
+        closed.push(slug)
+        jobs.keepClosed(slug)
+      }, () => undefined, (slug) => jobs.reopen(slug))
+      expect(closed).toEqual(['bread'])
+      expect(existsSync(lock)).toBe(true)
+      expect(() => jobs.start('bread', 'note', note)).toThrow(expect.objectContaining({ code: 'ENGINE_STILL_RUNNING' }))
+
+      await killTree(left.pid!)
+      for (let i = 0; i < 100 && existsSync(lock); i++) await new Promise((r) => setTimeout(r, 100))
+      expect(existsSync(lock)).toBe(false)
+      jobs.start('bread', 'note', note)
+      await jobs.forSlug('bread')?.done
+    } finally {
+      if (left.exitCode === null) await killTree(left.pid!)
+    }
+  }, 60000)
+
   it('when the engines the last run left cannot be settled, it still starts, with every video closed', async () => {
     setupPaths()
     for (const slug of ['bread', 'cake']) mkdirSync(join(projectsDir(), slug, 'work'), { recursive: true })
