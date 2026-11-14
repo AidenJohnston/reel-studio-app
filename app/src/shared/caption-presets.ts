@@ -175,11 +175,14 @@ export function colorName(hex: string): string | null {
   return l < 0.4 ? 'purple' : 'pink'
 }
 
-/** Whether a reel has a script its subtitles can follow (project.json `script`, engine scriptalign.script_text): text,
- * or the app's {hook, script} with any words in it. A script.txt beside project.json counts for the engine too, but
- * only the app's own script shows the switch. */
-export function hasScript(script: unknown): boolean {
+/** Whether a reel has a script its subtitles can follow, in the engine's order (scriptalign.script_text): the Plan
+ * document's script once the creator locked it (their rewrite, else the draft; shared/plan-doc.ts), else project.json
+ * `script`, as text or the app's {hook, script} with any words in it. A script.txt beside project.json counts for the
+ * engine too, but only the app's own script shows the switch. */
+export function hasScript(script: unknown, plan?: { script?: { locked?: unknown; rewrite?: unknown; draft?: unknown } } | null): boolean {
   const words = (v: unknown) => typeof v === 'string' && v.trim() !== ''
+  const planned = plan?.script
+  if (planned?.locked && (words(planned.rewrite) || words(planned.draft))) return true
   if (words(script)) return true
   if (!script || typeof script !== 'object') return false
   const o = script as { text?: unknown; hook?: unknown; script?: unknown }

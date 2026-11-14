@@ -102,7 +102,7 @@ export function SubtitlesTab({ now, change, next }: TabProps) {
   const setStyle = (extra: Style) => set((c) => ({ ...c, style: { ...(c.style ?? {}), ...extra } }))
   const on = captions.enabled !== false
   // the subtitles follow the reel's script (engine scriptalign.py): one from its plan or the editor's script writer
-  const scripted = hasScript(now.p.script)
+  const scripted = hasScript(now.p.script, now.p.plan)
 
   return (
     <div className="edit-stack">

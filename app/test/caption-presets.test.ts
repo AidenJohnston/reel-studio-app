@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { Measure } from '../src/shared/caption-fit'
-import { CAPTION_PRESETS, applyPreset, fitLook, lookFromStyle, presetOf, rowPosition, sampleLine, sampleLook } from '../src/shared/caption-presets'
+import { CAPTION_PRESETS, applyPreset, fitLook, hasScript, lookFromStyle, presetOf, rowPosition, sampleLine, sampleLook } from '../src/shared/caption-presets'
 
 describe('caption presets', () => {
   it('picking a look writes exactly its documented style fields', () => {
@@ -88,5 +88,19 @@ describe('caption presets', () => {
     expect(rowPosition('lower', applyPreset('clean'))).toBe(0.75)
     expect(rowPosition('lower', { color: '#FF3B30', size: 90 })).toBe(0.75) // a style that matches no look
     expect(rowPosition('higher', applyPreset('bold-pop'))).toBe(0.66)
+  })
+})
+
+// The Subtitles tab shows "Follow my script" only when hasScript says the reel has one (SubtitlesTab.tsx), in the order
+// the engine reads it (scriptalign.script_text): a locked Plan script first, then project.json `script`.
+describe('a reel with a script its subtitles follow', () => {
+  const plan = (script: { draft: string | null; rewrite: string | null; locked: boolean }) => ({ script })
+  it('fails if a reel whose only script is its locked plan hides the switch, or an unlocked plan shows it', () => {
+    expect(hasScript(undefined, plan({ draft: 'I use Neve.', rewrite: 'I use NEVE.', locked: true }))).toBe(true)
+    expect(hasScript(undefined, plan({ draft: 'I use Neve.', rewrite: null, locked: true }))).toBe(true)
+    expect(hasScript(undefined, plan({ draft: 'I use Neve.', rewrite: 'I use NEVE.', locked: false }))).toBe(false)
+    expect(hasScript(undefined, plan({ draft: null, rewrite: '  ', locked: true }))).toBe(false)
+    // project.json's own script still counts
+    expect(hasScript({ hook: 'Hi', script: 'I use Neve.' }, null)).toBe(true)
   })
 })

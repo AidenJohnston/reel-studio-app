@@ -6,6 +6,8 @@ import * as path from 'node:path';
 import { createAI, executeTool, newToolState, StyleStore, FirstEdit, Plan, PlanRow, Project, changePlan, emptyPlan, fromMarkdown, planProblems, planStage, syncPlan, toMarkdown, updatePlan, withDefaults } from '../src';
 import { afterEdit, aiUpdateRow, followBroll, followHandEdit, proposeRows, readPlan } from '../src/plan';
 import { PLAN_TOOLS } from '../src/planAgent';
+import { currentScript } from '../src/script-follow';
+import { loadProject } from '../src/project';
 import { FakeHost, ScriptedModel, call, firstVersion, makeProject, makeTranscript, SAMPLE_LINES, tinyPng, tmpDir } from './helpers';
 
 const NOW = '2026-11-12T22:00:00.000Z';
@@ -492,6 +494,25 @@ describe('plan, approve, then the first edit', () => {
     expect(planStage({ ...approved, broll: [...approved.broll, { ...HOURS }], buildProposed: true }, 'none')).toBe('approved');
     expect(planStage({ ...approved, script: { ...approved.script, locked: false } }, 'none')).toBe('edited');
     expect(planStage(null, 'running')).toBeNull();
+  });
+});
+
+// #171's captions follow the locked script (script-follow.ts currentScript, engine scriptalign.script_text): the one
+// the creator locks here, through the Plan document, and only while it is locked.
+describe('the script the subtitles follow', () => {
+  it('fails if the script the creator locks in the plan is not the one the subtitles follow', async () => {
+    const { dir, read } = await planned(emptyPlan());
+    // a reel whose only script is its plan
+    const { script: _none, ...rest } = await read();
+    await fsp.writeFile(path.join(dir, 'project.json'), JSON.stringify(rest, null, 2));
+    const followed = async () => currentScript(dir, await loadProject(dir));
+    await updatePlan(dir, { kind: 'script', draft: 'I use Neve every day.' }, NOW);
+    await updatePlan(dir, { kind: 'script', rewrite: 'I use NEVE every day.' }, NOW);
+    expect(await followed()).toBe('');
+    await updatePlan(dir, { kind: 'lock', locked: true }, NOW);
+    expect(await followed()).toBe('I use NEVE every day.');
+    await updatePlan(dir, { kind: 'lock', locked: false }, NOW);
+    expect(await followed()).toBe('');
   });
 });
 
