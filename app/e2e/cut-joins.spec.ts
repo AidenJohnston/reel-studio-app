@@ -39,6 +39,19 @@ test('transitions: picked by hand, a match kept only where it lines up, made int
 
     await page.getByRole('button', { name: 'Edit it myself' }).click()
     await page.getByRole('tab', { name: 'Cut' }).click()
+    // fails if the four-way switch is wider than the panel at the smallest window (Fable check 1, #2): each choice's
+    // words fit its segment, and the switch ends inside the panel's column
+    await page.setViewportSize({ width: 1100, height: 720 })
+    await expect
+      .poll(() => page.evaluate(() => {
+        const sw = document.querySelector('[data-testid="cut-mode"]')!
+        const col = sw.closest('.edit-b')!.getBoundingClientRect()
+        const r = sw.getBoundingClientRect()
+        const clipped = Array.from(sw.querySelectorAll('button')).filter((b) => b.scrollWidth > b.clientWidth).map((b) => b.textContent)
+        return { clipped, inside: r.left >= col.left - 0.5 && r.right <= col.right + 0.5 }
+      }), { message: 'Cut switch at 1100 x 720' })
+      .toEqual({ clipped: [], inside: true })
+    await page.setViewportSize({ width: 1280, height: 820 })
     await page.getByTestId('cut-mode-joins').click()
     const rows = page.getByTestId('join-row')
     await expect(rows).toHaveCount(2)

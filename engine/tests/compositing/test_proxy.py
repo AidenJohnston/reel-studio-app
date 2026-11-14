@@ -192,6 +192,27 @@ def test_a_take_is_copied_by_one_build_at_a_time(tmp_path):
     assert proxy.run(pdir, short_side=540)["sources"]["s1"]["status"] == "built"
 
 
+def test_fails_if_a_build_writes_anything_outside_work_proxy(tmp_path):
+    """A build takes no part in project ownership and outlives the job that starts it (cli.py
+    NOT_PROJECT_WRITES, test_owner.py), which is safe only while it writes nothing but its own copies.
+    Here a trial a writer has yet to finish (.trial-transaction.json) must be left for that writer too."""
+    take = fx.synth_video(tmp_path / "media-src" / "take.mp4", dur=3.0)
+    pdir = _project(tmp_path, take, 1080, 1920, keep=((0.5, 2.0),))
+    proj = json.loads((pdir / "project.json").read_text(encoding="utf-8"))
+    (pdir / ".trial-transaction.json").write_text(json.dumps({
+        "version": 1, "before_project": proj, "after_project": dict(proj, title="after the trial"),
+        "before_trials": [], "after_trials": []}), encoding="utf-8")
+    copies = pdir / "work" / "proxy"
+
+    def outside() -> dict:
+        return {f.relative_to(pdir).as_posix(): f.read_bytes() for f in pdir.rglob("*")
+                if f.is_file() and copies not in f.parents}
+
+    before = outside()
+    assert proxy.run(pdir, short_side=540)["sources"]["s1"]["status"] == "built"
+    assert outside() == before
+
+
 @pytest.mark.parametrize("rotation", [0, 90])
 def test_the_face_moves_with_the_copy(rotation, monkeypatch):
     src = {"id": "s1", "width": 3840, "height": 2160, "rotation": rotation}

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import type { ProjectJson, StyleRule } from '../../../../shared/api'
-import { previewText, subtitleLines } from '../../../../shared/subtitle-lines'
+import { drawnWords, previewText, subtitleLines } from '../../../../shared/subtitle-lines'
 import { reel, userMessage } from '../../api'
 import { useNotify } from '../../App'
 import { SubtitleLines } from '../../components/SubtitleLines'
@@ -35,7 +35,7 @@ export function CutTab(props: TabProps & {
   // one selector above both, so the arrow keys keep focus on it when the content under it changes
   return (
     <div className="edit-stack">
-      <Segmented testid="cut-mode" label="What to change in the cut" value={props.mode} options={MODES} onPick={props.onMode} />
+      <Segmented className="fill" testid="cut-mode" label="What to change in the cut" value={props.mode} options={MODES} onPick={props.onMode} />
       {props.mode === 'pace' ? <PaceControls {...props} /> : props.mode === 'joins' ? <JoinControls {...props} /> : <Words {...props} />}
     </div>
   )
@@ -69,7 +69,10 @@ function Words({
   const groups = useMemo(() => takes(d.words), [d.words])
   const heard = useMemo(() => new Map(d.words.map((w) => [w.id, w.w])), [d.words])
   const byId = useMemo(() => new Map(d.words.map((w) => [w.id, w])), [d.words])
-  const lines = useMemo(() => subtitleLines(d.captionLines, kept, base.p.captions, captions, heard), [d.captionLines, kept, base.p.captions, captions, heard])
+  // a word shown without a fix is the one the subtitles draw: the script's, while they follow it
+  const following = !!d.scriptWords && captions.followScript !== false
+  const drawn = useMemo(() => drawnWords(heard, following ? d.scriptWords : null), [heard, following, d.scriptWords])
+  const lines = useMemo(() => subtitleLines(d.captionLines, kept, base.p.captions, captions, drawn), [d.captionLines, kept, base.p.captions, captions, drawn])
   const firstSource = d.project.sources?.[0]?.id
   const cutNow = [...base.kept].some((id) => !kept.has(id))
   // words cut in the version on screen that this edit brings back: named, so a click on a crossed-out filler by
@@ -183,7 +186,7 @@ function Words({
       ) : (
         <>
           <p className="edit-hint">
-            Click into a line to fix its words. Enter starts a new line; Backspace at the start of a line joins it to the one before.
+            {following ? 'These lines follow your script. ' : ''}Click into a line to fix its words. Enter starts a new line; Backspace at the start of a line joins it to the one before.
           </p>
           {lines.length ? (
             <SubtitleLines
@@ -191,6 +194,7 @@ function Words({
               saved={base.p.captions?.corrections ?? []}
               corrections={captions.corrections ?? []}
               heard={heard}
+              drawn={drawn}
               onEdit={(edit) => setCaptions(edit)}
               onShow={(text, token) => {
                 const w = byId.get(token.ids[0])

@@ -1,4 +1,9 @@
 /* Report a problem (ReportProblem.tsx): a form, then exactly what will be sent, in the app's wide dialog. */
+/* One dialog for every step: the step's content fades in when it changes (opacity only; the height snaps, as sizes do
+   here), never from the keyboard. */
+.rp-step { display: flex; flex-direction: column; gap: 16px; min-height: 0; }
+.rp-step.swap { animation: fade 150ms var(--ease-out) both; }
+html.kb .rp-step.swap { animation: none; }
 .rp-field { display: flex; flex-direction: column; gap: 6px; }
 .rp-field > b { font-weight: 600; }
 .rp-field .textarea { min-height: 0; }
@@ -6,14 +11,14 @@
 .rp-ticks .toggle { align-items: flex-start; font-weight: 400; color: var(--ink-2); }
 /* the box sits on the text's first line, not its middle */
 .rp-ticks .toggle input { margin-top: 2px; flex: none; }
-.rp-ticks .toggle[aria-disabled] { color: var(--ink-4); cursor: default; }
+.rp-ticks .toggle[aria-disabled] { color: var(--ink-3); cursor: default; } /* a sentence to read: 2.6:1 at ink-4 */
 .rp-acts { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
 
-.rp-preview { display: flex; flex-direction: column; gap: 12px; margin: 0; padding: 12px 14px; border-radius: var(--r-md); background: var(--sunk-2); box-shadow: inset 0 0 0 1px var(--line); }
+.rp-preview { display: flex; flex-direction: column; gap: 12px; margin: 0; padding: 12px 16px; border-radius: var(--r-md); background: var(--sunk-2); box-shadow: inset 0 0 0 1px var(--line); }
 .rp-preview dt { color: var(--ink-3); font-size: var(--fs-sm); line-height: var(--lh-sm); }
 .rp-preview dd { margin: 0; color: var(--ink); }
 .rp-preview dd.pre { white-space: pre-wrap; overflow-wrap: anywhere; }
 .rp-preview summary { cursor: pointer; color: var(--ink-2); border-radius: 6px; }
 .rp-preview summary:focus-visible { outline: none; box-shadow: var(--focus); }
-.rp-diag { margin: 8px 0 0; max-height: 260px; overflow: auto; padding: 10px; border-radius: var(--r-sm); background: var(--surface); box-shadow: inset 0 0 0 1px var(--line); font-size: 12px; line-height: 18px; white-space: pre-wrap; word-break: break-all; }
+.rp-diag { margin: 8px 0 0; max-height: 260px; overflow: auto; padding: 8px 12px; border-radius: var(--r-sm); background: var(--surface); box-shadow: inset 0 0 0 1px var(--line); font-size: var(--fs-sm); line-height: var(--lh-sm); white-space: pre-wrap; word-break: break-all; }
 .rp-shot { display: block; max-width: 100%; margin-top: 4px; border-radius: var(--r-sm); outline: 1px solid rgba(22, 30, 26, .1); outline-offset: -1px; }

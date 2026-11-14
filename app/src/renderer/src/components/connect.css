@@ -22,7 +22,7 @@
 .pv-main > .btn.ghost.small:last-child { margin-right: -6px; }
 
 /* a status that changes (Found → Checking Claude… → Connected) settles in; the first one is just there */
-.pv-status.enter { transition: opacity 180ms cubic-bezier(.2, .8, .2, 1), transform 180ms cubic-bezier(.2, .8, .2, 1); }
+.pv-status.enter { transition: opacity 180ms var(--ease-enter), transform 180ms var(--ease-enter); }
 @starting-style { .pv-status.enter { opacity: 0; transform: translateY(3px); } }
 
 .pv-more { display: grid; gap: 8px; padding: 0 0 12px 32px; }
@@ -50,9 +50,9 @@
 .disc-h > .chev, .mstages-h > .chev { width: 20px; height: 20px; }
 @media (hover: hover) and (pointer: fine) { .disc-h:hover { color: var(--ink); } }
 .disc-hint { min-width: 0; font-size: var(--fs-sm); line-height: var(--lh-sm); font-weight: 400; color: var(--ink-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.disc .chev { flex: none; color: var(--ink-3); transition: transform 180ms cubic-bezier(.2, .8, .2, 1); }
+.disc .chev { flex: none; color: var(--ink-3); transition: transform 180ms var(--ease-enter); }
 .disc.open .chev { transform: rotate(90deg); }
-.disc-body { padding-left: 32px; transition: opacity 180ms cubic-bezier(.2, .8, .2, 1), transform 180ms cubic-bezier(.2, .8, .2, 1); }
+.disc-body { padding-left: 32px; transition: opacity 180ms var(--ease-enter), transform 180ms var(--ease-enter); }
 @starting-style { .disc-body { opacity: 0; transform: translateY(-4px); } }
 .disc.open .disc-h { color: var(--ink); }
 .disc-body > .pv { box-shadow: inset 0 1px 0 var(--line); }
@@ -67,13 +67,13 @@ html.kb .disc .chev, html.kb .disc-body, html.kb .pv-status.enter { transition: 
 /* Connect Claude / Connect ChatGPT (vendor-connect.tsx): each row sits in a wrapper that carries its step for the page
    and tests, so the hairline goes between the picker's direct children. The steps of a connect open under the row. */
 .prov > * + * { box-shadow: inset 0 1px 0 var(--line); }
-.vendor-steps { gap: 8px; transition: opacity 180ms cubic-bezier(.2, .8, .2, 1), transform 180ms cubic-bezier(.2, .8, .2, 1); }
+.vendor-steps { gap: 8px; transition: opacity 180ms var(--ease-enter), transform 180ms var(--ease-enter); }
 @starting-style { .vendor-steps { opacity: 0; transform: translateY(-4px); } }
 .vsteps { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
 .vstep { display: flex; align-items: flex-start; gap: 8px; font-size: var(--fs-sm); line-height: var(--lh-sm); }
 .vstep-mark { width: 16px; height: 18px; flex: none; display: grid; place-items: center; color: var(--green-ink); }
 .vstep-mark .spin { width: 11px; height: 11px; border-width: 1.5px; }
-.vstep.done .vstep-mark > svg { transition: opacity 160ms cubic-bezier(.2, .8, .2, 1), transform 160ms cubic-bezier(.2, .8, .2, 1); }
+.vstep.done .vstep-mark > svg { transition: opacity 160ms var(--ease-enter), transform 160ms var(--ease-enter); }
 @starting-style { .vstep.done .vstep-mark > svg { opacity: 0; transform: scale(.9); } }
 .vstep-dot { width: 7px; height: 7px; border-radius: 50%; box-shadow: inset 0 0 0 1.5px var(--ink-4); }
 .vstep-what { display: grid; gap: 1px; min-width: 0; }
@@ -96,7 +96,7 @@ html.kb .vendor-steps, html.kb .vstep.done .vstep-mark > svg { transition: none;
 
 /* ChatGPT's sign-in code (vendor-connect.tsx DeviceCodeBox): read here, typed on OpenAI's page. Large and spaced,
    in the system's fixed-width face, where 0 and O differ, and it settles in like the steps when Codex prints it. */
-.vcode-box { display: grid; justify-items: start; gap: 8px; transition: opacity 180ms cubic-bezier(.2, .8, .2, 1), transform 180ms cubic-bezier(.2, .8, .2, 1); }
+.vcode-box { display: grid; justify-items: start; gap: 8px; transition: opacity 180ms var(--ease-enter), transform 180ms var(--ease-enter); }
 @starting-style { .vcode-box { opacity: 0; transform: translateY(-4px); } }
 .vcode {
   margin: 0; padding: 8px 16px; border-radius: 8px; background: var(--surface); box-shadow: inset 0 0 0 1px var(--line);
@@ -164,7 +164,7 @@ html.kb .vcode-box { transition: none; }
 }
 .ed-lw-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ed-lw-bar { position: relative; height: 6px; border-radius: 999px; background: var(--sunk); overflow: hidden; }
-.ed-lw-bar > i { position: absolute; inset: 0; border-radius: inherit; background: var(--green); transform-origin: left center; transition: transform 200ms cubic-bezier(.2, .8, .2, 1); }
+.ed-lw-bar > i { position: absolute; inset: 0; border-radius: inherit; background: var(--green); transform-origin: left center; transition: transform 200ms var(--ease-enter); }
 .ed-lw.low .ed-lw-bar > i { background: #C48A12; }
 .ed-lw.out .ed-lw-bar { box-shadow: inset 0 0 0 1px rgba(191, 54, 38, .45); background: var(--pencil-tint); }
 .ed-lw-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -185,7 +185,7 @@ html.kb .vcode-box { transition: none; }
   font-size: var(--fs-sm); line-height: var(--lh-sm); font-weight: 600; color: var(--ink-2); cursor: pointer; min-width: 0;
 }
 @media (hover: hover) and (pointer: fine) { .mstages-h:hover { color: var(--ink); } }
-.mstages-h .chev { flex: none; color: var(--ink-3); transition: transform 180ms cubic-bezier(.2, .8, .2, 1); }
+.mstages-h .chev { flex: none; color: var(--ink-3); transition: transform 180ms var(--ease-enter); }
 .mstages.open .mstages-h .chev { transform: rotate(90deg); }
 .mstages-title { flex: none; }
 .mstages-sum { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 400; color: var(--ink-3); text-align: right; }
@@ -204,7 +204,7 @@ html.kb .vcode-box { transition: none; }
   flex: 0 1 auto; max-width: 62%; min-width: 0; height: 28px; padding: 0 8px 0 8px; display: inline-flex; align-items: center; gap: 6px;
   border: 0; border-radius: 999px; background: var(--surface); box-shadow: inset 0 0 0 1px var(--line-strong);
   font: inherit; font-size: var(--fs-sm); line-height: var(--lh-sm); font-weight: 560; color: var(--ink); cursor: pointer;
-  transition: transform 160ms cubic-bezier(.2, .8, .2, 1);
+  transition: transform 160ms var(--ease-enter);
 }
 .mchip:not(:disabled):active { transform: scale(.97); }
 @media (hover: hover) and (pointer: fine) { .mchip:not(:disabled):hover { box-shadow: inset 0 0 0 1px var(--ink-3); } }
@@ -218,7 +218,7 @@ html.kb .vcode-box { transition: none; }
 /* the picker: on the top layer, next to its chip and inside the window; grows from the chip's corner */
 .mpop {
   z-index: 60; display: flex; flex-direction: column; background: var(--surface); border-radius: var(--r-lg); box-shadow: var(--e3); overflow: hidden;
-  transform-origin: var(--o, top right); transition: opacity 160ms cubic-bezier(.2, .8, .2, 1), transform 180ms cubic-bezier(.2, .8, .2, 1);
+  transform-origin: var(--o, top right); transition: opacity 160ms var(--ease-enter), transform 180ms var(--ease-enter);
 }
 @starting-style { .mpop { opacity: 0; transform: scale(.97); } }
 .mpop-search { flex: none; display: flex; align-items: center; gap: 8px; height: 40px; padding: 0 12px; box-shadow: inset 0 -1px 0 var(--line); color: var(--ink-3); }
@@ -244,7 +244,7 @@ html.kb .vcode-box { transition: none; }
 .ed-seg { display: flex; flex-wrap: wrap; gap: 4px; }
 .ed-seg-o {
   height: 28px; min-width: 28px; padding: 0 8px; border: 0; border-radius: 999px; background: none; box-shadow: inset 0 0 0 1px var(--line-strong);
-  font: inherit; font-size: var(--fs-xs); line-height: var(--lh-xs); font-weight: 560; color: var(--ink-2); cursor: pointer; transition: transform 160ms cubic-bezier(.2, .8, .2, 1);
+  font: inherit; font-size: var(--fs-xs); line-height: var(--lh-xs); font-weight: 560; color: var(--ink-2); cursor: pointer; transition: transform 160ms var(--ease-enter);
 }
 .ed-seg-o:active { transform: scale(.97); }
 .ed-seg-o.on { background: var(--ink); color: var(--paper); box-shadow: none; }

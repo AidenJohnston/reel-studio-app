@@ -7,7 +7,7 @@ import { problemTextIssue } from '../src/checker';
 import {
   AIError, approxOutputTimes, CompletionRequest, CompletionResponse, createAI, EditFact, EngineProgress, loadProject, ModelProvider, Project, saveProject,
 } from '../src';
-import { call, FakeHost, makeProject, tmpDir, tinyPng } from './helpers';
+import { call, FakeHost, firstVersion, makeProject, tmpDir, tinyPng } from './helpers';
 
 type Calls = ReturnType<typeof call>[];
 
@@ -482,4 +482,24 @@ it('fails if "Double-check each edit" skips a direct change such as "smaller cap
   await createAI({ host, settingsDir: tmpDir('settings '), providerOverride: model }).applyNote(dir, 'smaller captions', () => {}, undefined, CHECK);
   expect(model.checkerRequests).toHaveLength(1);
   expect((await loadProject(dir)).captions.style.size).toBe(size - 20);
+});
+
+it("fails if a note that gets a saved version back rewrites that version's files, its check.json included", async () => {
+  const { root, dir } = await makeProject();
+  const host = new FakeHost(root);
+  await firstVersion(dir, host);
+  const v1 = path.join(dir, 'versions', 'v1');
+  // the check of the note that made Version 1
+  await fsp.writeFile(path.join(v1, 'check.json'), JSON.stringify({ verdict: 'pass', repairs: 0, rounds: [], by: 'the note that made v1' }));
+  const folder = () => Object.fromEntries(fs.readdirSync(v1).sort().map((f) => [f, fs.readFileSync(path.join(v1, f), 'utf8')]));
+  const before = folder();
+  // only the post caption changes: the engine gives Version 1's video back
+  const post = call('write_post', { caption: 'Bread takes patience', hashtags: ['sourdough', 'breadtok', 'baking', 'homebaker', 'slowfood'], keywords: ['bread'] });
+  const model = new Roles([[post], [call('finish', { summary_for_user: 'I wrote your caption.' })]], [pass()]);
+  const r = await createAI({ host, settingsDir: tmpDir('settings '), providerOverride: model }).applyNote(dir, 'write my caption', () => {}, undefined, { ...CHECK, id: 'caption-note' });
+  expect(r.version).toBe(1);
+  expect(model.checkerRequests).toHaveLength(1);
+  expect(folder()).toEqual(before);
+  // this note's check is kept under its own id, naming the version it ended on
+  expect(JSON.parse(await fsp.readFile(path.join(dir, 'work', 'checks', 'caption-note.json'), 'utf8'))).toMatchObject({ version: 1, verdict: 'pass' });
 });

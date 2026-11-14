@@ -194,7 +194,10 @@ export function ShowMeHow({
   // The subtitle look on the phone, on a line of the reel: in Subtitles, and while fixing words in Cut.
   const captions = now.p.captions
   const style = (captions?.style ?? {}) as Record<string, unknown>
-  const sample = useMemo(() => sampleLine(d.words, now.kept, Number(style.maxWords ?? 3)), [d.words, now.kept, style.maxWords])
+  // in the words the subtitles draw: the script's, while they follow it (a group's later words are '' and drop out)
+  const script = captions?.followScript === false ? null : d.scriptWords
+  const sampleWords = useMemo(() => (script ? d.words.map((w) => (w.id in script ? { ...w, w: script[w.id] } : w)).filter((w) => w.w !== '') : d.words), [d.words, script])
+  const sample = useMemo(() => sampleLine(sampleWords, now.kept, Number(style.maxWords ?? 3)), [sampleWords, now.kept, style.maxWords])
   const subsShown = (tab === 'captions' || (tab === 'cut' && cutMode === 'fix')) && captions?.enabled !== false
   const lookJson = JSON.stringify(style)
   useEffect(() => {

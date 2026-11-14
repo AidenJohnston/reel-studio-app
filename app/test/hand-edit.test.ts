@@ -1,9 +1,17 @@
 // An Edit it myself change kept as what changed (shared/hand-edit.ts), so it can wait behind a note and land on
 // whatever the note left. Each case below has one right answer.
 import { describe, expect, it } from 'vitest'
-import type { ProjectJson, Word } from '../src/shared/api'
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { join } from 'node:path'
+import type { RunEngine } from '../src/main/engine'
+import { handEditJob } from '../src/main/hand-edit'
+import { createJobManager } from '../src/main/jobs'
+import { OWNER_LOCK } from '../src/main/owner'
+import { projectDir } from '../src/main/store'
+import type { ProjectJson, QueuedNote, Word } from '../src/shared/api'
 import { keptIds } from '../src/shared/cut'
 import { applyHandEdit, countChanges, diffProject, parseHandEdit } from '../src/shared/hand-edit'
+import { setupPaths } from './helpers'
 
 const words: Word[] = ['so', 'my', 'cat', 'Biscuit', 'sits', 'here', 'then', 'fold'].map((w, i) => ({ id: `w${i + 1}`, w, s: i, e: i + 0.8 }))
 const ids = (from: number, to: number) => words.slice(from - 1, to).map((w) => w.id)
@@ -143,5 +151,31 @@ describe('a hand edit that sets the exposure', () => {
     const e = (value: unknown) => ({ set: [{ path: ['exposure'], value }], items: [], words: { cut: [], keep: [] }, mirror: [], joins: [] })
     expect(parseHandEdit(e(1.08)).set).toEqual([{ path: ['exposure'], value: 1.08 }])
     for (const bad of [0, 9, '1.1', null]) expect(() => parseHandEdit(e(bad)), String(bad)).toThrow()
+  })
+})
+
+describe('a hand edit whose engine would not stop', () => {
+  it('fails if its private project is removed, or the video lets go, while that engine may still write', async () => {
+    setupPaths()
+    const slug = 'stuck-hand'
+    const dir = projectDir(slug)
+    mkdirSync(join(dir, 'work'), { recursive: true })
+    const v1 = project()
+    writeFileSync(join(dir, 'project.json'), JSON.stringify(v1))
+    const edited = { ...v1, captions: { enabled: true, style: { size: 105, position: 0.66 } } }
+    const entry = { id: 'h1', text: 'subtitles up', attachments: [], seenVersion: 1, hand: { edit: diffProject(v1, edited, kept(v1), kept(v1)), changes: 1 } } as QueuedNote & { hand: NonNullable<QueuedNote['hand']> }
+    // the preview renders; the final's engine would not stop (engine.ts ENGINE_STUCK)
+    const runEngine = (async (_command: string, args: string[]) => {
+      if (args.includes('--draft')) return { version: 0 }
+      throw { code: 'ENGINE_STUCK', userMessage: "Part of Reel Studio's video engine would not stop." }
+    }) as RunEngine
+    const jobs = createJobManager(() => undefined, () => undefined)
+    jobs.start(slug, 'rerender', handEditJob(runEngine, slug, entry))
+    await jobs.forSlug(slug)?.done
+    const scratch = join(dir, 'work', 'hand', 'h1')
+    expect(existsSync(join(scratch, 'edit.json'))).toBe(true)
+    expect(JSON.parse(readFileSync(join(scratch, 'edit.json'), 'utf8')).captions.style.position).toBe(0.66)
+    expect(existsSync(join(dir, OWNER_LOCK))).toBe(true)
+    expect(() => jobs.start(slug, 'rerender', handEditJob(runEngine, slug, entry))).toThrow(expect.objectContaining({ code: 'ENGINE_STUCK' }))
   })
 })

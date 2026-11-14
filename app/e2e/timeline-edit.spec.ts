@@ -147,6 +147,21 @@ test('editing timeline: trim a cut, move, resize, frame and delete a picture, mo
   await expect(page.locator('[data-testid=track-picture][data-id=b2]')).toHaveCount(0)
   await expect(page.locator('[data-testid=track-picture][data-id=b1]')).toBeVisible()
 
+  // ---- Undo acts where the keyboard is: from the timeline, never the panel's own change; from the panel, the panel's.
+  // fails if Cmd/Ctrl+Z on the timeline takes back a word cut in the Cut tab, or gives no answer (Fable check 1, #1)
+  const undo = process.platform === 'darwin' ? 'Meta+Z' : 'Control+Z'
+  await page.getByTestId('tab-cut').click()
+  await page.locator('.word').first().click()
+  await expect(page.getByTestId('drawer-undo')).toBeVisible()
+  await track.focus()
+  await page.keyboard.press(undo)
+  // the Delete above ran at once, so it is a version now: the timeline says where to go back from
+  await expect(page.getByTestId('toast')).toContainText('That change is already a version.')
+  await expect(page.getByTestId('drawer-undo')).toBeVisible()
+  await page.locator('.edit-h h2').click()
+  await page.keyboard.press(undo)
+  await expect(page.getByTestId('drawer-undo')).toHaveCount(0)
+
   // ---- keys: L plays, K stops; Home on the ruler goes to the start ----
   // from the page itself, as after clicking the reel
   await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur())

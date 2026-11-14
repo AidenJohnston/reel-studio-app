@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import type { SupportDraft, SupportPreview } from '../../../shared/api'
 import { SUPPORT_EMAIL } from '../../../shared/config'
 import { errorCode, reel, userMessage } from '../api'
@@ -36,6 +36,7 @@ export function ReportProblem({ context, screenshotAvailable, hasKey, onClose }:
     screenshot: false,
     key: hasKey
   })
+  const start = useRef(draft)
   const [step, setStep] = useState<Step>({ name: 'write' })
   const [fieldError, setFieldError] = useState<{ field?: string; message: string } | null>(null)
   const [busy, setBusy] = useState(false)
@@ -104,9 +105,28 @@ export function ReportProblem({ context, screenshotAvailable, hasKey, onClose }:
 
   const invalid = (f: string) => (fieldError?.field === f ? true : undefined)
 
+  const kind = step.name === 'write' ? 'write' : step.name === 'sent' ? 'sent' : 'review'
+  // false until the first step change: the dialog's own entrance covers the first step
+  const swapped = useRef(false)
+  const shownKind = useRef(kind)
+  if (shownKind.current !== kind) {
+    shownKind.current = kind
+    swapped.current = true
+  }
+  const stepBody = useRef<HTMLDivElement>(null)
+  // Modal's autofocus runs once, when it opens; a new step's content takes focus here. Write and failed place their
+  // own (focusField, leadRef).
+  useEffect(() => {
+    if (swapped.current && kind !== 'write' && step.name !== 'failed') stepBody.current?.querySelector<HTMLElement>('[data-autofocus]')?.focus()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [kind])
+  // a click outside closes the form only while nothing typed or ticked would be lost (Esc still cancels)
+  const edited = JSON.stringify(draft) !== JSON.stringify(start.current)
+
+  let body: ReactNode
   if (step.name === 'write') {
-    return (
-      <Modal onClose={close} wide testid="report-problem" labelledBy="report-title">
+    body = (
+      <>
         <h2 id="report-title">Report a problem</h2>
         <p className="muted-sm">
           This goes to the Reel Studio team. You'll see exactly what is sent before it goes. For billing, email{' '}
@@ -171,14 +191,12 @@ export function ReportProblem({ context, screenshotAvailable, hasKey, onClose }:
             {busy ? 'Getting it ready…' : 'Review what will be sent'}
           </Button>
         </div>
-      </Modal>
+      </>
     )
-  }
-
-  if (step.name === 'sent') {
-    return (
-      <Modal onClose={onClose} testid="report-sent" labelledBy="report-sent-title">
-        <h2 id="report-sent-title">Thanks, your report is in</h2>
+  } else if (step.name === 'sent') {
+    body = (
+      <>
+        <h2 id="report-title">Thanks, your report is in</h2>
         <p>
           Its number is <strong className="selectable" data-testid="report-id">{step.id}</strong>. Quote it if you write to us about this.
         </p>
@@ -190,127 +208,145 @@ export function ReportProblem({ context, screenshotAvailable, hasKey, onClose }:
             Done
           </Button>
         </div>
-      </Modal>
+      </>
+    )
+  } else {
+    const p = step.preview
+    const sending = step.name === 'sending'
+    body = (
+      <>
+        <h2 id="report-title">{step.name === 'failed' ? "The report wasn't sent" : 'This is what will be sent'}</h2>
+        {step.name === 'failed' && (
+          <div className="banner error" role="alert" data-testid="report-error">
+            <span>
+              {step.message} You can also email it to <span className="selectable">{SUPPORT_EMAIL}</span>.
+            </span>
+          </div>
+        )}
+        <p className="muted-sm">
+          It goes to Reel Studio at {p.server}. Nothing else is sent.
+        </p>
+        <dl className="rp-preview" data-testid="report-preview">
+          <div>
+            <dt>What happened</dt>
+            <dd className="selectable pre">
+              {p.what}
+            </dd>
+          </div>
+          {p.expected && (
+            <div>
+              <dt>What you expected</dt>
+              <dd className="selectable pre">
+                {p.expected}
+              </dd>
+            </div>
+          )}
+          <div>
+            <dt>Your email</dt>
+            <dd>{p.email ?? 'None'}</dd>
+          </div>
+          <div>
+            <dt>App and computer</dt>
+            <dd>
+              Reel Studio {p.appVersion}, {p.os}
+            </dd>
+          </div>
+          <div>
+            <dt>Download key</dt>
+            <dd data-testid="report-preview-key">
+              {p.key ? 'Included (names your purchase, not you)' : 'Not included'}
+            </dd>
+          </div>
+          <div>
+            <dt>Diagnostics</dt>
+            <dd data-testid="report-preview-diagnostics">
+              {p.diagnostics ? (
+                <details>
+                  <summary>Included ({p.diagnostics.length.toLocaleString()} characters). Show them</summary>
+                  <pre className="selectable rp-diag">
+                    {p.diagnostics}
+                  </pre>
+                </details>
+              ) : (
+                'Not included'
+              )}
+            </dd>
+          </div>
+          <div>
+            <dt>Screenshot</dt>
+            <dd data-testid="report-preview-screenshot">
+              {p.screenshot ? (
+                <>
+                  <img className="rp-shot" src={p.screenshot.dataUrl} alt="The screenshot that will be sent" />
+                  <div className="muted-sm">
+                    {p.screenshot.width} × {p.screenshot.height}, {kb(p.screenshot.bytes)}
+                  </div>
+                </>
+              ) : (
+                'Not included'
+              )}
+            </dd>
+          </div>
+        </dl>
+        <div className="rp-acts">
+          {step.name === 'failed' ? (
+            <>
+              <Button kind="tertiary" onClick={() => void reel.support.copy(p.id).catch(() => {})} data-testid="report-copy">
+                Copy the report
+              </Button>
+              {/* The way that works while sending fails: the address is in the error line above, so the button says what it
+                  does. Refused or too large: the same report would fail again, so Edit leads and there is no Try again. */}
+              <Button kind="secondary" onClick={() => void reel.support.email(p.id).catch(() => {})} data-testid="report-email-instead">
+                Email it instead
+              </Button>
+              <Button
+                kind={NEEDS_EDIT.has(step.code ?? '') ? 'primary' : 'tertiary'}
+                onClick={() => edit(NEEDS_EDIT.has(step.code ?? '') ? { message: step.message, field: step.field } : undefined)}
+                ref={NEEDS_EDIT.has(step.code ?? '') ? leadRef : undefined}
+                data-testid="report-edit"
+              >
+                Edit the report
+              </Button>
+              {!NEEDS_EDIT.has(step.code ?? '') && (
+                <Button kind="primary" onClick={() => void send(p)} ref={leadRef} data-testid="report-retry">
+                  Try again
+                </Button>
+              )}
+            </>
+          ) : (
+            <>
+              <Button kind="tertiary" onClick={() => edit()} disabled={sending} data-testid="report-back">
+                Back
+              </Button>
+              <Button kind="primary" onClick={() => void send(p)} disabled={sending} data-autofocus data-testid="report-send">
+                {sending ? (
+                  <>
+                    <Spinner /> Sending…
+                  </>
+                ) : (
+                  'Send report'
+                )}
+              </Button>
+            </>
+          )}
+        </div>
+      </>
     )
   }
 
-  const p = step.preview
-  const sending = step.name === 'sending'
+  // One dialog for every step, so the page behind never comes back between them and the width holds; the step's
+  // content swaps in with a fade (report-problem.css .rp-step.swap), except the first, which the dialog's own
+  // entrance covers.
   return (
-    <Modal onClose={sending ? undefined : close} wide testid="report-review-step" labelledBy="report-review-title">
-      <h2 id="report-review-title">{step.name === 'failed' ? "The report wasn't sent" : 'This is what will be sent'}</h2>
-      {step.name === 'failed' && (
-        <div className="banner error" role="alert" data-testid="report-error">
-          <span>
-            {step.message} You can also email it to <span className="selectable">{SUPPORT_EMAIL}</span>.
-          </span>
-        </div>
-      )}
-      <p className="muted-sm">
-        It goes to Reel Studio at {p.server}. Nothing else is sent.
-      </p>
-      <dl className="rp-preview" data-testid="report-preview">
-        <div>
-          <dt>What happened</dt>
-          <dd className="selectable pre">
-            {p.what}
-          </dd>
-        </div>
-        {p.expected && (
-          <div>
-            <dt>What you expected</dt>
-            <dd className="selectable pre">
-              {p.expected}
-            </dd>
-          </div>
-        )}
-        <div>
-          <dt>Your email</dt>
-          <dd>{p.email ?? 'None'}</dd>
-        </div>
-        <div>
-          <dt>App and computer</dt>
-          <dd>
-            Reel Studio {p.appVersion}, {p.os}
-          </dd>
-        </div>
-        <div>
-          <dt>Download key</dt>
-          <dd data-testid="report-preview-key">
-            {p.key ? 'Included (names your purchase, not you)' : 'Not included'}
-          </dd>
-        </div>
-        <div>
-          <dt>Diagnostics</dt>
-          <dd data-testid="report-preview-diagnostics">
-            {p.diagnostics ? (
-              <details>
-                <summary>Included ({p.diagnostics.length.toLocaleString()} characters). Show them</summary>
-                <pre className="selectable rp-diag">
-                  {p.diagnostics}
-                </pre>
-              </details>
-            ) : (
-              'Not included'
-            )}
-          </dd>
-        </div>
-        <div>
-          <dt>Screenshot</dt>
-          <dd data-testid="report-preview-screenshot">
-            {p.screenshot ? (
-              <>
-                <img className="rp-shot" src={p.screenshot.dataUrl} alt="The screenshot that will be sent" />
-                <div className="muted-sm">
-                  {p.screenshot.width} × {p.screenshot.height}, {kb(p.screenshot.bytes)}
-                </div>
-              </>
-            ) : (
-              'Not included'
-            )}
-          </dd>
-        </div>
-      </dl>
-      <div className="rp-acts">
-        {step.name === 'failed' ? (
-          <>
-            <Button kind="tertiary" onClick={() => void reel.support.copy(p.id).catch(() => {})} data-testid="report-copy">
-              Copy the report
-            </Button>
-            <Button kind="tertiary" onClick={() => void reel.support.email(p.id).catch(() => {})} data-testid="report-email-instead">
-              Email {SUPPORT_EMAIL}
-            </Button>
-            {/* Refused or too large: the same report would fail again, so Edit leads and there is no Try again. */}
-            <Button
-              kind={NEEDS_EDIT.has(step.code ?? '') ? 'primary' : 'secondary'}
-              onClick={() => edit(NEEDS_EDIT.has(step.code ?? '') ? { message: step.message, field: step.field } : undefined)}
-              ref={NEEDS_EDIT.has(step.code ?? '') ? leadRef : undefined}
-              data-testid="report-edit"
-            >
-              Edit the report
-            </Button>
-            {!NEEDS_EDIT.has(step.code ?? '') && (
-              <Button kind="primary" onClick={() => void send(p)} ref={leadRef} data-testid="report-retry">
-                Try again
-              </Button>
-            )}
-          </>
-        ) : (
-          <>
-            <Button kind="tertiary" onClick={() => edit()} disabled={sending} data-testid="report-back">
-              Back
-            </Button>
-            <Button kind="primary" onClick={() => void send(p)} disabled={sending} data-autofocus data-testid="report-send">
-              {sending ? (
-                <>
-                  <Spinner /> Sending…
-                </>
-              ) : (
-                'Send report'
-              )}
-            </Button>
-          </>
-        )}
+    <Modal
+      onClose={step.name === 'sending' ? undefined : kind === 'sent' ? onClose : close}
+      backdropCloses={kind === 'sent' || (kind === 'write' && !edited)}
+      wide
+      testid={kind === 'write' ? 'report-problem' : kind === 'sent' ? 'report-sent' : 'report-review-step'}
+      labelledBy="report-title"
+    >
+      <div key={kind} ref={stepBody} className={`rp-step${swapped.current ? ' swap' : ''}`}>
+        {body}
       </div>
     </Modal>
   )

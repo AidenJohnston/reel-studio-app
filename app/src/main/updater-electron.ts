@@ -10,6 +10,9 @@ import type { PageReason, UpdateBackend } from './updater'
 /** The update feed (site worker): /u/latest.yml, /u/latest-mac.yml and the files they name. Every request needs
  * `Authorization: Bearer <download key>`. */
 export const UPDATE_FEED_URL = 'https://dl.getreelstudio.com/u/'
+/** The staging server's feed, which a build made with RS_UPDATE_HOST=dl-staging.getreelstudio.com names
+ * (packaging/make-config.js, main/update-feed.ts). */
+export const STAGING_FEED_URL = 'https://dl-staging.getreelstudio.com/u/'
 
 // A shared staging ID preserves the promise that update requests identify no individual install: electron-updater
 // would otherwise send a random ID it keeps per install.
@@ -191,8 +194,15 @@ export function electronUpdaterBackend(opts: {
   }
 }
 
-/** Squirrel.Mac installs whatever app the ZIP holds, so read its version before handing it over. */
-export function macBundleCheck(running: string): InstallStep {
+/** Whether a bundle's app-update.yml names the staging feed (true), production's (false), or neither (null). */
+function bundleIsStaging(yml: string): boolean | null {
+  const url = /^url:[ \t]*(\S+)[ \t]*$/m.exec(yml)?.[1]
+  return url === STAGING_FEED_URL ? true : url === UPDATE_FEED_URL ? false : null
+}
+
+/** Squirrel.Mac installs whatever app the ZIP holds, so read its version, and the feed it will update from, before
+ * handing it over. `staging`: this copy updates from the staging server (main/update-feed.ts). */
+export function macBundleCheck(running: string, staging = false): InstallStep {
   return {
     // packaging/sign-mac.sh writes it; the update server's latest-mac.yml names it
     fileName: (version) => `Reel-Studio-${version}-arm64-mac.zip`,
@@ -214,6 +224,16 @@ export function macBundleCheck(running: string): InstallStep {
       } finally {
         await fs.rm(dir, { recursive: true, force: true })
       }
+      // Staging and production builds of one version differ only in the app-update.yml they carry, inside the signed
+      // bundle, and that file picks the server every later update comes from: a staging build served on production's
+      // feed (or the reverse) would move this copy to the other server for good.
+      const yml = `${plists[0].slice(0, -'Contents/Info.plist'.length)}Contents/Resources/app-update.yml`
+      const { stdout: config } = await exec('/usr/bin/unzip', ['-p', zip, yml], { maxBuffer: 64 * 1024 }).catch(() => ({ stdout: '' }))
+      const bundle = bundleIsStaging(config)
+      if (bundle === null) throw new Error('The update names no known update server.')
+      if (bundle !== staging) {
+        throw new Error(`The update is a ${bundle ? 'staging' : 'production'} build, and this copy updates from ${staging ? 'staging' : 'production'}.`)
+      }
     }
   }
 }
@@ -231,6 +251,13 @@ export interface WindowsInstallerFacts {
  * app-update.yml, which an unsigned build does not. So a feed that serves a self-consistent yml could hand over any
  * installer. Here the installer itself must be signed by the same publisher as this copy, and must say it is the
  * newer version the release named: a feed labelling an older installer as newer can't downgrade the app.
+ *
+ * Known issue: unlike the Mac check, nothing here tells a staging installer from a production one of the same version
+ * and publisher. Their only difference, app-update.yml, sits inside the NSIS installer's compressed app archive, which
+ * Windows has no tool to read. The fix puts the channel in the signed installer's version resource: make-config.js
+ * marks a staging build there (electron-builder copies the app's description into the installer's FileDescription;
+ * unverified, so one staging packaging run must confirm the field), windowsInstallerFacts reads it with
+ * VersionInfo, and this refuses an installer whose channel is not this copy's.
  */
 export function installerRefusal(facts: WindowsInstallerFacts, selected: string, running: string): string | null {
   if (facts.running.status !== 'Valid' || !facts.running.subject) return 'This copy of Reel Studio is not signed, so it updates from the download page.'
