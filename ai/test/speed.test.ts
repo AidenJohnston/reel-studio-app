@@ -34,11 +34,20 @@ describe('fast notes (no model turns)', () => {
       'different music', 'add a picture of my dog', 'cut the part where I say B-flat', 'make it better',
       'captions say Oregon but I said Oregano']) expect(kind(n)).toBeNull();
     expect(planFastNote("Don't make captions smaller", p)).toBeNull();
+    expect(planFastNote('No need to make captions smaller', p)).toBeNull();
+    expect(planFastNote('no need for bigger subtitles', p)).toBeNull();
+    expect(kind('no music')).toBe('music-off');
+    expect(kind('no more music')).toBe('music-off');
     // already at the floor: the AI explains instead of a no-op
     p.captions.style = { ...(p.captions.style as any), size: 80 };
     expect(planFastNote('smaller captions', p)).toBeNull();
     p.music.level = 'quiet';
     expect(planFastNote('quieter music', p)).toBeNull();
+  });
+
+  it('"lower case captions" means the letters, so it goes to the AI instead of moving the captions down', async () => {
+    const { dir } = await setup();
+    expect(planFastNote('make the captions lower case', await loadProject(dir))).toBeNull();
   });
 
   it('fails if the negation guard sends the cannot-hear complaint to the model', async () => {
