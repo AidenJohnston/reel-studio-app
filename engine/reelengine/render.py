@@ -1904,9 +1904,10 @@ def cover_candidates(project_dir: Path, moments: list, source: Optional[str] = N
     """`cover-candidates --at t1,t2,...`: the best cover frame near each raw-take moment, as small
     stills the AI looks at before choosing (cover.candidates). `--picker` writes the app's cover
     picker stills to their own folder: every call empties its folder first, and the AI may be
-    reading its own stills at the same time."""
+    reading its own stills at the same time. project.json is read as it is, never through a trial's recovery: the
+    app's scan may run joined to a note (docs/ownership.md)."""
     project_dir = Path(project_dir).resolve()
-    proj = projmod.load(project_dir, file=project_file)
+    proj = projmod.load(project_dir, file=project_file or projmod.project_file(project_dir))
     tl = projmod.timeline(project_dir, proj)
     ctx = make_ctx(project_dir, proj, tl, True, tools.root_dir(str(root) if root else None),
                    project_dir / "work" / "render")

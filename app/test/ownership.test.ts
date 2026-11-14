@@ -128,3 +128,48 @@ describe('a lock another writer left', () => {
     expect(readFileSync(lock, 'utf8')).toBe(next)
   })
 })
+
+describe("the app's own commands outside a job", () => {
+  it('fails if they run without holding the video, or a job starts or lets go of it while one runs', async () => {
+    setupPaths()
+    const { lock } = project('pace')
+    const jobs = createJobManager(() => undefined, () => undefined)
+    // a pace preview and a match check at once, with no job: one claim, which both run under
+    let finishPace!: () => void
+    let pace = ''
+    const previewing = jobs.withOwner('pace', (token) => {
+      pace = token
+      return new Promise<void>((resolve) => (finishPace = resolve))
+    })
+    let match = ''
+    await jobs.withOwner('pace', async (token) => void (match = token))
+    expect(match).toBe(pace)
+    expect(JSON.parse(readFileSync(lock, 'utf8')).token).toBe(pace)
+    // a note sent meanwhile waits for it (BUSY, which the note queue waits out)
+    expect(() => jobs.start('pace', 'note', note)).toThrow(expect.objectContaining({ code: 'BUSY' }))
+    finishPace()
+    await previewing
+    expect(existsSync(lock)).toBe(false)
+
+    // beside a manual edit it joins, and the edit lets go only once it has ended
+    let finishScan!: () => void
+    let scan = ''
+    let edit = ''
+    let released = false
+    const holding = jobs.hold('pace', async (token) => {
+      edit = token
+      void jobs.withOwner('pace', (joined) => {
+        scan = joined
+        return new Promise<void>((resolve) => (finishScan = resolve))
+      })
+    }).then(() => void (released = true))
+    for (let i = 0; i < 50 && !finishScan; i++) await new Promise((r) => setTimeout(r, 10))
+    expect(scan).toBe(edit)
+    await new Promise((r) => setTimeout(r, 50))
+    expect(released).toBe(false)
+    expect(JSON.parse(readFileSync(lock, 'utf8')).token).toBe(edit)
+    finishScan()
+    await holding
+    expect(existsSync(lock)).toBe(false)
+  })
+})

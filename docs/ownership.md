@@ -40,6 +40,14 @@ as alive.
 3. Recovery claims each project before it cleans it (store.ts recoverInterrupted). A project it can't claim is left
    for the next start or job.
 
+## The app's own commands outside a job
+
+The edit drawer's pace and match previews and the cover picker's scan write caches and stills in the project, so they
+are writers (app/src/main/jobs.ts withOwner). Beside a job or a manual edit they join its claim, which then lets go
+only once they have ended. With neither, the app claims the project while any of them runs, and a job asked for
+meanwhile waits (a queued note starts once they end). They read project.json as it is and never finish a pending trial
+transaction (variation.py), which could replace what a note they joined publishes.
+
 ## What runs without the lock
 
 Commands that change nothing in the project, `attach`, which only adds its own uniquely named file, and `proxy`,

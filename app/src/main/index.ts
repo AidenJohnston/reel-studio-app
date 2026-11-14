@@ -157,7 +157,7 @@ import type { AppInfo, DropResult, EngineCache, ExportResult, JobEvent, ProjectD
 import { MERGE_LAYERS, MODEL_ROLES, type ModelChoice, type ModelRole } from '../shared/api'
 import { mergeWords } from '../shared/combine'
 import { COVER_SUGGESTIONS } from '../shared/cover'
-import { coverScanOwner, createCoverScans, parseCoverCandidates } from './cover-scan'
+import { createCoverScans, parseCoverCandidates } from './cover-scan'
 import { noAiReply } from '../shared/notes'
 import { aiNoteText, checkMoment, momentRoute, parseMoment, placeWords, typedMoment, type RenderSegment, forPerson, personText } from '../shared/moments'
 import type { LayerItem } from '../shared/lanes'
@@ -2003,16 +2003,14 @@ function registerIpc(): void {
   handle('projects:coverCandidates', async (_e, slug: string, moments: number[], source: string): Promise<CoverCandidate[]> => {
     const at = moments.filter((t) => Number.isFinite(t) && t >= 0).slice(0, COVER_SUGGESTIONS)
     if (!at.length) return []
-    const owner = coverScanOwner(jobs, slug)
-    const r = await coverScans.scan(slug, owned(['--project', projectDir(slug), '--at', at.join(','), '--source', source], owner))
+    const r = await jobs.withOwner(slug, (owner) => coverScans.scan(slug, owned(['--project', projectDir(slug), '--at', at.join(','), '--source', source], owner)))
     return parseCoverCandidates(r, source, projectDir(slug))
   })
   handle('projects:stopCoverCandidates', (_e, slug: string) => coverScans.stop(slug))
   // How often each pace would change the picture of this reel, from the plan a render makes (engine pace-preview), for
   // the edit drawer's Pace: shown before the version is made, so the choice isn't blind.
   handle('projects:pacePreview', async (_e, slug: string): Promise<PacePreview> => {
-    const owner = coverScanOwner(jobs, slug)
-    const r: any = await runEngine('pace-preview', owned(['--project', projectDir(slug)], owner))
+    const r: any = await jobs.withOwner(slug, (owner) => runEngine('pace-preview', owned(['--project', projectDir(slug)], owner)))
     const paces: PacePreview['paces'] = {}
     for (const [k, v] of Object.entries((r?.paces ?? {}) as Record<string, any>)) {
       if (Number.isFinite(v?.perMinute) && Number.isInteger(v?.opening) && Number.isInteger(v?.openingMax)) paces[k] = { perMinute: v.perMinute, opening: v.opening, openingMax: v.openingMax }
@@ -2023,8 +2021,7 @@ function registerIpc(): void {
   // edit drawer's Transitions. `keep`: the cut as the drawer has it, checked before it becomes a version.
   handle('projects:matchJoins', async (_e, slug: string, keep: unknown): Promise<MatchVerdict[]> => {
     if (!Array.isArray(keep) || keep.length > 2000) throw { code: 'BAD_CUT', userMessage: 'That cut could not be checked. Try again.' }
-    const owner = coverScanOwner(jobs, slug)
-    const r: any = await runEngine('match-joins', owned(['--project', projectDir(slug), '--keep', JSON.stringify(keep)], owner))
+    const r: any = await jobs.withOwner(slug, (owner) => runEngine('match-joins', owned(['--project', projectDir(slug), '--keep', JSON.stringify(keep)], owner)))
     return Array.isArray(r?.joins) ? r.joins.filter((j: any) => Number.isInteger(j?.keep) && typeof j?.matched === 'boolean')
       .map((j: any) => ({ keep: j.keep, matched: j.matched, ...(typeof j.why === 'string' ? { why: j.why } : {}) })) : []
   })

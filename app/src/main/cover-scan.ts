@@ -11,14 +11,6 @@ interface Scan {
   exited: Promise<void>
 }
 
-/** Who the scan runs as. A reel kept closed (an engine from last time, or a stuck one, may still be writing to it) is
- * refused, as a note is (#85); otherwise the scan joins the owner token of whatever job or manual edit has it open,
- * so it may run beside a note (note-atomic). */
-export function coverScanOwner(jobs: { refuseIfKeptClosed(slug: string): void; ownerToken(slug: string): string | null }, slug: string): string | null {
-  jobs.refuseIfKeptClosed(slug)
-  return jobs.ownerToken(slug)
-}
-
 export function createCoverScans(runEngine: RunEngine) {
   const running = new Map<string, Scan>()
   const stopping = new Map<string, Promise<void>>()

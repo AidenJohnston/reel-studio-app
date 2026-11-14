@@ -1,10 +1,9 @@
-// The cover picker's scan runs beside a job on the same project and joins it with the job's owner token
-// (index.ts projects:coverCandidates): the token must be the one in the project's lock while it is held.
+// A job's or manual edit's owner token, which the app's own commands beside it join (jobs.ts withOwner): it must be
+// the one in the project's lock while the project is held.
 import { expect, it } from 'vitest'
 import { spawnSync } from 'node:child_process'
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { coverScanOwner } from '../src/main/cover-scan'
 import { createJobManager } from '../src/main/jobs'
 import { clearStaleLocks, OWNER_LOCK } from '../src/main/owner'
 import { projectDir } from '../src/main/store'
@@ -27,14 +26,15 @@ it('fails if ownerToken is not the token in the lock while a project is held, or
   expect(jobs.ownerToken(slug)).toBeNull()
 })
 
-it('fails if the cover scan runs on a reel kept closed, which an engine may still be writing to', async () => {
+it('fails if the cover scan or a preview runs on a reel kept closed, which an engine may still be writing to', async () => {
   setupPaths()
   const slug = 'kept-closed'
   mkdirSync(projectDir(slug), { recursive: true })
   const jobs = createJobManager(() => undefined, () => undefined)
-  expect(coverScanOwner(jobs, slug)).toBeNull()
   jobs.keepClosed(slug)
-  expect(() => coverScanOwner(jobs, slug)).toThrow(expect.objectContaining({ code: 'ENGINE_STILL_RUNNING' }))
+  let ran = false
+  await expect(jobs.withOwner(slug, async () => void (ran = true))).rejects.toMatchObject({ code: 'ENGINE_STILL_RUNNING' })
+  expect(ran).toBe(false)
 })
 
 

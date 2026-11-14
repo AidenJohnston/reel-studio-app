@@ -19,7 +19,6 @@ from . import STARTED_AT
 from .proto import EngineError
 
 LOCK = Path("work") / ".owner.lock"
-APP_ENV = "REELENGINE_APP"
 
 
 def _token(lock: Path) -> Optional[str]:
@@ -73,9 +72,6 @@ def claim(project_dir: Path, owner: Optional[str]) -> Iterator[None]:
         if _token(lock) != owner:
             raise EngineError("NOT_OWNER", f"--owner does not match the token in {lock}",
                               "Reel Studio no longer has this video open for this step, so it stopped. Try again.")
-        yield
-        return
-    if os.environ.get(APP_ENV) == "1":
         yield
         return
     # folders this claim makes go again when the command fails: one on a mistyped path leaves nothing behind

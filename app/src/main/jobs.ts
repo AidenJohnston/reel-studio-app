@@ -339,7 +339,13 @@ export function createJobManager(
   /** The token of the job or manual edit that has each project open (`ownerToken`). */
   const tokens = new Map<string, string>()
 
-  /** Marks the project open, then finishes a job app.json still records, before anything else writes. */
+  /** The app's own commands that joined the claim a project's job or manual edit holds (withOwner). */
+  const joined = new Map<string, Set<Promise<unknown>>>()
+  /** A claim withOwner is still making, which the commands asking meanwhile join once it is made. */
+  const claiming = new Map<string, Promise<unknown>>()
+
+  /** Marks the project open, then finishes a job app.json still records, before anything else writes. Its release
+   * lets go only once every command that joined it has ended: no new one joins from then on. */
   async function enter(slug: string): Promise<ProjectOwner> {
     const claimed = await claimProject(projectDir(slug))
     tokens.set(slug, claimed.token)
@@ -347,6 +353,7 @@ export function createJobManager(
       token: claimed.token,
       release: async () => {
         if (tokens.get(slug) === claimed.token) tokens.delete(slug)
+        for (let running = joined.get(slug); running?.size; running = joined.get(slug)) await Promise.allSettled([...running])
         await claimed.release()
       }
     }
@@ -385,6 +392,47 @@ export function createJobManager(
     }
   }
 
+  /** Runs one of the app's own engine commands outside a job's work (the edit drawer's pace and match previews, the
+   * cover picker's scan) as a writer of the project, which it is: they read project.json and write caches and stills
+   * there (docs/ownership.md). It joins the claim of the job or manual edit that has the project, which lets go only
+   * after it ends; with none, it claims the project for as long as it runs, like a manual edit, and the commands
+   * asking meanwhile join that claim. A job asked for meanwhile is BUSY, which the note queue waits out. */
+  async function withOwner<T>(slug: string, fn: (owner: string) => Promise<T>): Promise<T> {
+    refuseIfKeptClosed(slug)
+    // no await unless a claim is being made: from here to claiming.set below runs in one go
+    const making = claiming.get(slug)
+    if (making) await making
+    const token = tokens.get(slug)
+    if (token) {
+      const run = fn(token)
+      const running = joined.get(slug) ?? new Set<Promise<unknown>>()
+      joined.set(slug, running)
+      running.add(run)
+      const done = (): void => {
+        running.delete(run)
+        if (!running.size && joined.get(slug) === running) joined.delete(slug)
+      }
+      run.then(done, (e) => {
+        done()
+        const err = e as { code?: string; userMessage?: string }
+        if (err?.code === 'ENGINE_STUCK') stuck.set(slug, { code: err.code, userMessage: err.userMessage ?? 'Part of Reel Studio is still working on this video, so wait a minute and try again.' })
+      })
+      return run
+    }
+    let made!: () => void
+    const pending = new Promise<void>((resolve) => (made = resolve))
+    claiming.set(slug, pending)
+    try {
+      return await hold(slug, (owner) => {
+        made()
+        return fn(owner)
+      })
+    } finally {
+      made()
+      if (claiming.get(slug) === pending) claiming.delete(slug)
+    }
+  }
+
   /** A project kept closed for a previous run's engine (keepClosed) whose engine has exited. A job's own
    * stuck engine (ENGINE_STUCK) keeps its project closed until restart. */
   function reopen(slug: string): void {
@@ -399,6 +447,7 @@ export function createJobManager(
   return {
     start,
     hold,
+    withOwner,
     /** Throws while a job runs on the project, a manual edit holds it, or it is kept closed: deleting
      * the video must wait. */
     refuseIfBusy,
@@ -407,8 +456,7 @@ export function createJobManager(
      * closed is refused instead. */
     refuseIfKeptClosed,
     isClosed,
-    /** The owner token of the job or manual edit that has `slug` open, or null. Work that runs beside it on the
-     * same project (the cover picker's scan) passes it as `--owner`, as the job's own engine commands do. */
+    /** The owner token of the job or manual edit that has `slug` open, or null. */
     ownerToken: (slug: string): string | null => tokens.get(slug) ?? null,
     keepClosed,
     reopen,

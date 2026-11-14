@@ -193,7 +193,9 @@ def cmd_match_joins(args):
     pdir = _project(args)
     # inside a note, the note's private copy of the edit (render does the same)
     note = _in_work(args, "project_file")
-    edit = project.load(pdir, file=note) if note else project.load(pdir)
+    # read as it is: a check may run joined to a note, and finishing a trial here could replace what the note
+    # publishes (docs/ownership.md)
+    edit = project.load(pdir, file=note or project.project_file(pdir))
     if args.keep is not None:
         try:
             edit["cut"]["keep"] = json.loads(args.keep)
@@ -221,7 +223,7 @@ def cmd_pace_preview(args):
     from .cut_style import CUT_STYLES, OPENING, OPENING_MAX_UNSTYLED, visual_change_meter
     from .lint_edit import prepare
     pdir = _project(args)
-    base = project.load(pdir)
+    base = project.load(pdir, file=project.project_file(pdir))     # read as it is, as match-joins does
     seed = (base.get("cutStyle") or {}).get("seed", 1)
     paces = {}
     for preset in [None, *CUT_STYLES]:

@@ -305,10 +305,7 @@ export function engineEnv(): NodeJS.ProcessEnv {
     PYTHONUNBUFFERED: '1',
     PYTHONNOUSERSITE: '1',
     REELENGINE_MODELS: modelsDir(),
-    REELENGINE_ROOT: reelStudioRoot(),
-    // The app's own commands: one run outside a job (the edit drawer's pace and match previews, a cover scan with no
-    // job) is ordered by the job lane, and never claims the project as a command run by hand does (owner.py)
-    REELENGINE_APP: '1'
+    REELENGINE_ROOT: reelStudioRoot()
   }
   // The engine's own default (tools.appdata_dir) is the stable app's folder, which neither an isolated profile nor
   // the nightly may write to.
