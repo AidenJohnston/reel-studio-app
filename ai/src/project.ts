@@ -41,7 +41,12 @@ export interface CaptionStyle {
 export interface CaptionCorrection { from: string; to: string; at?: string; through?: string }
 /** vocabulary: names/jargon the user or the AI supplies; the engine respells sound-alikes to them after
  * transcription (engine/reelengine/vocab.py). */
-export interface Captions { enabled: boolean; style: CaptionStyle; corrections: CaptionCorrection[]; hidden?: WordAnchor[]; vocabulary?: string[]; [k: string]: unknown }
+/** followScript: captions show the locked script's words where the speech follows it (engine scriptalign.py);
+ * absent = on when there is a script. */
+export interface Captions {
+  enabled: boolean; style: CaptionStyle; corrections: CaptionCorrection[]; hidden?: WordAnchor[]; vocabulary?: string[]; followScript?: boolean;
+  [k: string]: unknown;
+}
 
 export type MusicLevel = 'under-voice' | 'quiet' | 'loud-intro';
 export interface MusicAutomation { fromWord: string; toWord: string; gainDb: number }

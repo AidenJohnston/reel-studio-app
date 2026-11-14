@@ -151,6 +151,7 @@ Existing project shapes remain valid. New shapes can require a newer engine, as 
 
 ## 2026-10-23 (frozen songs)
 
+
 - `music.frozen` (object, optional): `{ "track": "Library/Music/<name>", "path": "work/assets/frozen/music/<sha256>.<ext>" }`.
   When the AI places a Library song, by its path or committed through `resolve_asset`, it freezes a copy of the
   song into the project, and `music.track` keeps the Library path, so the app's checklist and Music tab still name and check the song. The engine
@@ -257,6 +258,23 @@ Existing project shapes remain valid. New shapes can require a newer engine, as 
   the video)}, `music`, `cover` (one line each), `buildProposed` (build proposed
   rows as if approved). The engine renders only `broll`, which the AI layer derives from the rows; its edit
   signature counts only `plan.script`.
+
+
+## 2026-11-12 (captions follow the script)
+
+- `script` (text, `{text}`, or the app's `{hook, script, shots}` from a reel's plan, whose hook and lines are read as
+  one script): the locked script the take was read from. Without it, `script.txt` or `script.md` in
+  the project folder is the script. Documented now; the vocabulary pass after transcription already read it.
+- `captions.followScript` (boolean, absent = on when there is a script): captions show the script's words (names,
+  spellings, numbers and punctuation as written) wherever the speech follows the script, at the times the audio
+  says them. Where the speaker went off-script (an ad-lib, a skipped line) captions show the transcript.
+  Corrections (`captions.corrections`) still win over both. `false` turns it off for the project.
+- `work/script-align.json` (written by the engine): the mapping. `groups` (`{ids, words}`: transcript word ids drawn
+  as these script words, also where both read the same, so a number the script spells out stays spelled out),
+  `spans` (`[first id, last id]`: the stretches of speech that follow the script), the `script` it was made from,
+  and `key` (a hash of the mapping `version`, the script and the transcript words). The file is rebuilt when the
+  key no longer matches and removed when the project no longer has a script; the AI shows it only while the key
+  matches the current script. Anchors stay on transcript word ids: only the text drawn for them changes.
 
 ## 2026-11-12 (beat sync, music drops, reverb throw)
 

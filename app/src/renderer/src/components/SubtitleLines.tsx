@@ -44,6 +44,7 @@ export function SubtitleLines({
   saved,
   corrections,
   heard,
+  drawn = heard,
   onEdit,
   onShow
 }: {
@@ -51,8 +52,11 @@ export function SubtitleLines({
   /** The corrections as saved (the render drew these), and with the edits not yet made into a version. */
   saved: Correction[]
   corrections: Correction[]
-  /** What the transcript heard at each word id. */
+  /** What the transcript heard at each word id: a fix is written against these. */
   heard: Map<string, string>
+  /** What the subtitles draw at each word id before a fix (shared/subtitle-lines.ts drawnWords): what a word whose
+   * fix is taken back shows. */
+  drawn?: Map<string, string>
   /** One edit to the project's captions, as a function of their current state. */
   onEdit: (edit: (c: Captions) => Captions) => void
   /** The line (as typed so far) and the word the caret is on. */
@@ -118,7 +122,7 @@ export function SubtitleLines({
                 } else if (e.key === 'Enter') {
                   e.preventDefault()
                   const next = typed(i)
-                  const after = line.map((t) => ({ ...t, shown: shownAs(t, saved, next, heard) })).filter((t) => t.shown)
+                  const after = line.map((t) => ({ ...t, shown: shownAs(t, saved, next, drawn) })).filter((t) => t.shown)
                   const k = after.length ? breakAt(after, el.selectionStart ?? 0) : 0
                   if (k <= 0 || k >= after.length) return keepTyping(next)
                   setDraft(null)

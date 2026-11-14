@@ -245,7 +245,22 @@ function oneStopPerRadioGroup(items: HTMLElement[]): HTMLElement[] {
 
 /** A dialog. Esc and a click outside close it (when it can be closed); focus moves into it, and Tab cycles through it and
  * an error toast's buttons, never the page behind. */
-export function Modal({ children, onClose, wide, testid, labelledBy }: { children: ReactNode; onClose?: () => void; wide?: boolean; testid?: string; labelledBy?: string }) {
+export function Modal({
+  children,
+  onClose,
+  backdropCloses = true,
+  wide,
+  testid,
+  labelledBy
+}: {
+  children: ReactNode
+  onClose?: () => void
+  /** false: a click outside does nothing (a form with something typed in it); Esc still closes */
+  backdropCloses?: boolean
+  wide?: boolean
+  testid?: string
+  labelledBy?: string
+}) {
   const ref = useRef<HTMLDivElement>(null)
   // A layout effect: its cleanup runs before React removes the dialog, so holdBackground never sees a detached dialog
   // on top of the stack, and the page is inert before the first paint.
@@ -299,7 +314,7 @@ export function Modal({ children, onClose, wide, testid, labelledBy }: { childre
     return () => window.removeEventListener('keydown', key, true)
   }, [onClose])
   return (
-    <div className="modal-backdrop" onClick={onClose}>
+    <div className="modal-backdrop" onClick={backdropCloses ? onClose : undefined}>
       <div ref={ref} tabIndex={-1} className={`modal${wide ? ' wide' : ''}`} onClick={(e) => e.stopPropagation()} role="dialog" aria-modal aria-labelledby={labelledBy} data-testid={testid}>
         {children}
       </div>

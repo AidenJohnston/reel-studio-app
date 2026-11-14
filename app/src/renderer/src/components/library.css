@@ -21,7 +21,7 @@
 
 .lib-result {
   display: flex; align-items: center; gap: 8px; margin: 0 0 12px; font-size: var(--fs-base); line-height: var(--lh-base); color: var(--ink-2);
-  transition: opacity 180ms cubic-bezier(.2, .8, .2, 1);
+  transition: opacity 180ms var(--ease-enter);
   @starting-style { opacity: 0; }
 }
 .lib-result > svg { color: var(--green-ink); flex: none; }
@@ -132,7 +132,7 @@
 .mem-line {
   grid-area: 1 / 2; justify-self: start; max-width: calc(100% + 12px); margin: 0 -6px; padding: 4px 6px; border: 0; border-radius: 6px; background: none; text-align: left; cursor: pointer;
   font: inherit; font-size: var(--fs-section); line-height: var(--lh-section); font-weight: 560; color: var(--ink); overflow-wrap: anywhere;
-  text-decoration-line: underline; text-decoration-color: transparent; text-underline-offset: 4px; transition: text-decoration-color 150ms cubic-bezier(.2, .8, .2, 1);
+  text-decoration-line: underline; text-decoration-color: transparent; text-underline-offset: 4px; transition: text-decoration-color 150ms var(--ease-enter);
 }
 @media (hover: hover) and (pointer: fine) { .mem-line:hover { text-decoration-color: var(--line-strong); } }
 .mem-line:focus-visible { outline: 2px solid var(--ink); outline-offset: 0; }
@@ -144,7 +144,7 @@
 .mem-src { grid-area: 2 / 2 / 3 / -1; font-size: var(--fs-sm); line-height: var(--lh-sm); color: var(--ink-3); overflow-wrap: anywhere; }
 .mem-more {
   grid-area: 3 / 2 / 4 / -1; display: grid; gap: 2px; margin-top: 12px; padding-left: 12px; box-shadow: inset 2px 0 0 var(--line);
-  transition: opacity 160ms cubic-bezier(.2, .8, .2, 1), transform 160ms cubic-bezier(.2, .8, .2, 1);
+  transition: opacity 160ms var(--ease-enter), transform 160ms var(--ease-enter);
   @starting-style { opacity: 0; transform: translateY(-3px); }
 }
 .mem-full { color: var(--ink-2); font-size: var(--fs-base); line-height: var(--lh-base); overflow-wrap: anywhere; }
@@ -152,25 +152,25 @@
 .mem-use { display: flex; flex-wrap: wrap; align-items: center; column-gap: 6px; font-size: var(--fs-sm); line-height: var(--lh-sm); color: var(--ink-3); }
 /* with a mouse, a rule's actions show on the row you point at or reach; on a touch screen they always show */
 @media (hover: hover) and (pointer: fine) {
-  .mem .mem-acts { opacity: 0; transition: opacity 150ms cubic-bezier(.2, .8, .2, 1); }
+  .mem .mem-acts { opacity: 0; transition: opacity 150ms var(--ease-enter); }
   .mem:hover .mem-acts, .mem:focus-within .mem-acts { opacity: 1; }
 }
 /* Forget leaves Undo in the rule's place; when Undo runs out the row fades and goes (MyStyle.tsx lapse) */
 .mem.forgot {
   display: flex; align-items: center; gap: 12px; padding-left: 32px; color: var(--ink-3);
-  transition: opacity 180ms cubic-bezier(.2, .8, .2, 1);
+  transition: opacity 180ms var(--ease-enter);
   @starting-style { opacity: 0; }
 }
 .mem-said { min-width: 0; overflow-wrap: anywhere; }
 html.kb .mem-line, html.kb .mem-more, html.kb .mem.forgot, html.kb .mem .mem-acts { transition: none; }
 @media (prefers-reduced-motion: reduce) {
-  .mem-more { transition: opacity 160ms cubic-bezier(.2, .8, .2, 1); @starting-style { transform: none; } }
+  .mem-more { transition: opacity 160ms var(--ease-enter); @starting-style { transform: none; } }
 }
 
 /* What "Learn from my past edits" read, before anything is saved: one sheet you keep or cancel as a whole. */
 .lesson {
   margin: 4px 0 var(--space-s); padding: 16px 20px 16px; border-radius: var(--r-lg); background: var(--surface); box-shadow: var(--e1);
-  transition: opacity 200ms cubic-bezier(.2, .8, .2, 1), transform 200ms cubic-bezier(.2, .8, .2, 1);
+  transition: opacity 200ms var(--ease-enter), transform 200ms var(--ease-enter);
   @starting-style { opacity: 0; transform: translateY(6px); }
 }
 @media (prefers-reduced-motion: reduce) { .lesson { @starting-style { transform: none; } } }

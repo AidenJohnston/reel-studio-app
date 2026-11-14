@@ -2,8 +2,8 @@
    inset; hairlines, not boxes; green only on Make Version; marker yellow on what the person changed. */
 
 /* comes in from the right, the side it opens on, as it fades: in place it read as a cross-fade from nowhere */
-.edit { flex: 1; min-height: 0; display: flex; flex-direction: column; animation: edit-in 200ms cubic-bezier(.2, .8, .2, 1); }
-.edit.leaving { opacity: 0; transition: opacity 150ms cubic-bezier(.2, .8, .2, 1); pointer-events: none; }
+.edit { flex: 1; min-height: 0; display: flex; flex-direction: column; animation: edit-in 200ms var(--ease-enter); }
+.edit.leaving { opacity: 0; transition: opacity 150ms var(--ease-enter); pointer-events: none; }
 html.kb .edit { animation: none; }
 @keyframes edit-in { from { opacity: 0; transform: translateX(12px); } }
 @media (prefers-reduced-motion: reduce) {
@@ -122,7 +122,7 @@ html.kb .picture-row { transition: none; }
 /* Add a sound: grows from its button, in the list's flow, so nothing covers the sounds above it. */
 .sfx-picker {
   display: flex; flex-direction: column; gap: 8px; padding: 12px; border-radius: var(--r-lg); background: var(--surface); box-shadow: var(--e1);
-  transform-origin: top left; transition: opacity 180ms cubic-bezier(.2, .8, .2, 1), transform 180ms cubic-bezier(.2, .8, .2, 1);
+  transform-origin: top left; transition: opacity 180ms var(--ease-enter), transform 180ms var(--ease-enter);
 }
 @starting-style { .sfx-picker { opacity: 0; transform: translateY(-4px) scale(.98); } }
 html.kb .sfx-picker { transition: none; }
@@ -146,7 +146,7 @@ html.kb .sfx-picker { transition: none; }
 .sfx-kind-name span { color: var(--ink-3); font-size: var(--fs-sm); line-height: var(--lh-sm); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 :is(.sfx-kind-name, .sfx-variant) > input { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; opacity: 0; cursor: inherit; }
 :is(.sfx-kind-name, .sfx-variant):has(> input:focus-visible) { outline: 2px solid var(--ink); outline-offset: 2px; }
-.sfx-others .icon { transition: transform 150ms cubic-bezier(.2, .8, .2, 1); }
+.sfx-others .icon { transition: transform 150ms var(--ease-enter); }
 .sfx-others .icon.open { transform: rotate(180deg); }
 .sfx-variants { border: 0; padding: 0 0 8px; margin: 0 0 0 -10px; min-width: 0; display: flex; flex-wrap: wrap; gap: 2px; }
 .sfx-variant {
@@ -168,7 +168,7 @@ html.kb .sfx-name:focus-visible { outline: 2px solid var(--ink); outline-offset:
 .picture-thumb:disabled { cursor: default; }
 .picture-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
 .library-picks { display: grid; grid-template-columns: repeat(auto-fill, minmax(44px, 1fr)); gap: 6px; }
-.library-pick { aspect-ratio: 1; border: 0; padding: 0; border-radius: var(--r-sm); overflow: hidden; background: var(--sunk); cursor: pointer; transition: transform 120ms ease-out; }
+.library-pick { aspect-ratio: 1; border: 0; padding: 0; border-radius: var(--r-sm); overflow: hidden; background: var(--sunk); cursor: pointer; transition: transform 120ms var(--ease-out); }
 @media (hover: hover) and (pointer: fine) { .library-pick:active { transform: scale(.96); } }
 html.kb .library-pick:active { transform: none; }
 .library-pick img { width: 100%; height: 100%; object-fit: cover; display: block; }
@@ -211,12 +211,12 @@ html.kb .library-pick:active { transform: none; }
   transform: rotate(-3deg); overflow-wrap: anywhere;
 }
 .edit-cover .phone-tag { z-index: 1; }
-.edit-during { position: absolute; inset: 0; opacity: 0; transition: opacity 120ms ease-out; }
+.edit-during { position: absolute; inset: 0; opacity: 0; transition: opacity 120ms var(--ease-out); }
 .edit-during.on { opacity: 1; }
 .edit-picture { position: absolute; top: 12%; left: 22%; width: 56%; aspect-ratio: 4 / 3; object-fit: cover; border-radius: 3cqw; box-shadow: 0 2cqw 6cqw rgba(0, 0, 0, .35); }
 
 @media (prefers-reduced-motion: reduce) {
-  .sfx-picker { transition: opacity 150ms cubic-bezier(.2, .8, .2, 1); }
+  .sfx-picker { transition: opacity 150ms var(--ease-enter); }
   .sfx-others .icon { transition: none; }
   @starting-style { .sfx-picker { transform: none; } }
   .edit-during { transition: none; }

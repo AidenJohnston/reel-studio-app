@@ -75,6 +75,10 @@ class Kit(unittest.TestCase):
         self.git("config", "commit.gpgsign", "false")
         self.git("config", "user.name", "Test")
         self.git("config", "user.email", "test@example.com")
+        # A commit starts git's automatic maintenance in the background, which creates and removes
+        # .git/objects/maintenance.lock while remove_tree deletes the repo (macOS CI run 43604103434).
+        self.git("config", "maintenance.auto", "false")
+        self.git("config", "gc.auto", "0")
 
     def git(self, *args, check_ok=True, **kw) -> subprocess.CompletedProcess:
         r = subprocess.run(["git", *args], cwd=self.root, capture_output=True, text=True, **kw)

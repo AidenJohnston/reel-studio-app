@@ -5,7 +5,7 @@
 .plan {
   background: var(--surface); border-radius: var(--r-lg); box-shadow: var(--e1); padding: 12px 12px 12px;
   display: grid; gap: 4px; min-width: 0;
-  transition: opacity 180ms cubic-bezier(.2, .8, .2, 1), transform 180ms cubic-bezier(.2, .8, .2, 1);
+  transition: opacity 180ms var(--ease-enter), transform 180ms var(--ease-enter);
 }
 @starting-style { .plan { opacity: 0; transform: translateY(4px); } }
 /* under the editor's line in the chat, aligned with the line's words */
@@ -48,7 +48,7 @@
 .pl-hook.on .pl-field { color: var(--ink); font-size: var(--fs-md); line-height: var(--lh-md); font-weight: 650; padding-top: 2px; padding-bottom: 2px; }
 .pl-pick { position: relative; width: 24px; height: 24px; display: grid; place-items: center; cursor: pointer; }
 .pl-pick input { position: absolute; inset: 0; margin: 0; opacity: 0; cursor: inherit; }
-.pl-pick span { width: 14px; height: 14px; border-radius: 50%; box-shadow: inset 0 0 0 1.5px var(--ink-4); pointer-events: none; }
+.pl-pick span { width: 14px; height: 14px; border-radius: 50%; box-shadow: inset 0 0 0 1.5px var(--ink-3); pointer-events: none; }
 .pl-pick input:checked + span { box-shadow: inset 0 0 0 1.5px var(--ink), inset 0 0 0 4px var(--surface), inset 0 0 0 8px var(--ink); }
 .pl-pick input:focus-visible + span { outline: 2px solid var(--ink); outline-offset: 3px; }
 .pl-pick:has(input:disabled) { cursor: default; }
@@ -78,7 +78,7 @@
   flex: 1 1 auto; min-width: 0; min-height: 28px; display: flex; align-items: center; gap: 6px; padding: 0 4px; border: 0; border-radius: 7px; background: none;
   font: inherit; font-size: var(--fs-base); line-height: var(--lh-base); color: var(--ink); cursor: pointer; text-align: left;
 }
-.pl-fold .icon { flex: none; color: var(--ink-3); transform: rotate(-90deg); transition: transform 150ms cubic-bezier(.2, .8, .2, 1); }
+.pl-fold .icon { flex: none; color: var(--ink-3); transform: rotate(-90deg); transition: transform 150ms var(--ease-enter); }
 .pl-fold .icon.open { transform: none; }
 .pl-fold b { font-weight: 650; flex: none; }
 .pl-fold-hook { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink-2); }
@@ -122,7 +122,7 @@
 .pl-phone {
   display: grid; grid-template-columns: 112px minmax(0, 1fr); gap: 4px 12px; align-items: start; margin-top: 6px; padding: 12px; border-radius: var(--r-md);
   background: var(--sunk-2); box-shadow: inset 0 0 0 1px var(--line);
-  transition: opacity 180ms cubic-bezier(.2, .8, .2, 1), transform 180ms cubic-bezier(.2, .8, .2, 1);
+  transition: opacity 180ms var(--ease-enter), transform 180ms var(--ease-enter);
 }
 @starting-style { .pl-phone { opacity: 0; transform: translateY(-4px); } }
 .pl-qr { width: 112px; height: 112px; padding: 4px; border-radius: 8px; background: #fff; box-shadow: inset 0 0 0 1px var(--line); display: grid; place-items: center; }
@@ -133,7 +133,7 @@
 .pl-phone-done { grid-column: 2; justify-self: start; }
 
 /* the editor's words in the planning chat: they arrive the way a version's line does */
-.nt-res.pl-said { transition: opacity 180ms cubic-bezier(.2, .8, .2, 1), transform 180ms cubic-bezier(.2, .8, .2, 1); }
+.nt-res.pl-said { transition: opacity 180ms var(--ease-enter), transform 180ms var(--ease-enter); }
 @starting-style { .nt-res.pl-said { opacity: 0; transform: translateY(4px); } }
 .nt-res.pl-answering { min-height: 24px; }
 
@@ -150,7 +150,7 @@
   display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; min-width: 0;
   min-height: clamp(240px, 40vh, 380px); padding: 32px 24px; text-align: center; border-radius: var(--r-lg);
   background: var(--paper-2); box-shadow: inset 0 0 0 1px var(--line-strong);
-  transition: background-color 150ms ease, box-shadow 150ms ease, transform 180ms cubic-bezier(.2, .8, .2, 1), opacity 180ms cubic-bezier(.2, .8, .2, 1);
+  transition: background-color 150ms ease, box-shadow 150ms ease, transform 180ms var(--ease-enter), opacity 180ms var(--ease-enter);
 }
 @starting-style { .pd-drop { opacity: 0; } }
 .pd-drop > .icon { flex: none; color: var(--ink-3); margin-bottom: 0; }
@@ -218,7 +218,7 @@
 .pl-chip {
   display: inline-flex; align-items: center; gap: 8px; min-height: 32px; max-width: 100%; padding: 0 12px; border: 0; border-radius: 999px;
   background: var(--surface); box-shadow: inset 0 0 0 1px var(--line-strong); font: inherit; font-size: var(--fs-base); line-height: var(--lh-base); color: var(--ink); cursor: pointer;
-  transition: transform 120ms cubic-bezier(.2, .8, .2, 1), box-shadow 150ms ease;
+  transition: transform 120ms var(--ease-enter), box-shadow 150ms ease;
 }
 .pl-chip b { flex: none; font-weight: 650; }
 .pl-chip-n { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink-3); font-variant-numeric: tabular-nums; }

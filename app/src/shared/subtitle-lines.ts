@@ -8,6 +8,18 @@ type Correction = NonNullable<Captions['corrections']>[number]
 /** What the transcript heard at each word id. */
 type Heard = Map<string, string>
 
+/**
+ * What the subtitles draw for each transcript word before any fix: the script's word where they follow the reel's
+ * script (engine scriptalign.py, ProjectDetail.scriptWords), else the word as heard. For showing words only: a
+ * fix's `from` stays the heard word, which is what the engine matches it against.
+ */
+export function drawnWords(heard: Heard, script: Record<string, string> | null | undefined): Heard {
+  if (!script) return heard
+  const out = new Map(heard)
+  for (const [id, w] of Object.entries(script)) if (out.has(id)) out.set(id, w)
+  return out
+}
+
 /** A word of a line in the list: as the last render drew it (`w`) and as it reads now (`shown`). */
 export interface LineToken extends CaptionToken {
   shown: string

@@ -5,6 +5,7 @@ import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { TOOLS, TOOL_NAMES, executeTool, newToolState, loadProject, StyleStore, ToolContext, AgentEvent } from '../src';
 import { lowestCaptionPosition, saveProject } from '../src/project';
+import { mappingKey } from '../src/script-follow';
 import { planFastNote } from '../src/fastnote';
 import { effectiveStart, visibleChangeSinceRender } from '../src/tools';
 import { isStrict, validate } from '../src/schema';
@@ -384,6 +385,25 @@ describe('tool implementations', () => {
     const r = await executeTool(ctx, 'get_transcript', {});
     expect(r.content).toMatch(/RESPELLED FROM THE USER'S OWN WORDS[^\n]*\nw1: "Nave" -> "Neve" \[title\]/);
   });
+
+  it('get_transcript shows the locked script and where the captions draw its words', async () => {
+    const { ctx, dir } = await ctxFor();
+    const script = 'Nobody tells you this.';
+    const p = await loadProject(dir);
+    await saveProject(dir, { ...p, script });
+    const t = JSON.parse(await fsp.readFile(path.join(dir, 'work', 'transcript.json'), 'utf8'));
+    const align = { key: mappingKey(script, t.words), script, groups: [{ ids: ['w1', 'w2'], words: ['tells'] }], spans: [['w0', 'w4']] };
+    await fsp.writeFile(path.join(dir, 'work', 'script-align.json'), JSON.stringify(align));
+    const r = await executeTool(ctx, 'get_transcript', {});
+    expect(r.content).toMatch(/LOCKED SCRIPT[^\n]*\n<script_data>\nNobody tells you this\.\n<\/script_data>/);
+    expect(r.content).toMatch(/FOLLOWS THE SCRIPT: w0-w4/);
+    expect(r.content).toMatch(/CAPTIONS SHOW THE SCRIPT HERE[^\n]*\nw1-w2: "[^"\n]+" -> "tells"/);
+    // turned off for this project: the AI isn't told the captions follow it
+    expect((await executeTool(ctx, 'set_caption_style', { followScript: false })).isError).toBe(false);
+    expect((await loadProject(dir)).captions.followScript).toBe(false);
+    expect((await executeTool(ctx, 'get_transcript', {})).content).not.toMatch(/LOCKED SCRIPT/);
+  });
+
 
   it('music: list, commit, choose and automate', async () => {
     const { ctx, root, dir } = await ctxFor();
