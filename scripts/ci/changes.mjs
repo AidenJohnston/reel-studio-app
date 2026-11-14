@@ -23,6 +23,9 @@ export const JOBS = {
   node: [/^(app|ai|packaging)\//, /^package(-lock)?\.json$/],
   engine: [/^engine\//, /^packaging\/(requirements[^/]*\.txt|hash_requirements\.py)$/],
   animations: [/^templates\//],
+  // The Electron specs drive the built app on the stand-in engine (app/dev/fake-engine), so the real engine reaches
+  // them only through its sound effects, which the app reads from the repo in development (paths.ts sfxPackDir).
+  e2e: [/^(app|ai)\//, /^package(-lock)?\.json$/, /^engine\/reelengine\/sfx\//],
   none: [
     /^scripts\/leak-check\//,
     /^\.github\/workflows\/leak-check\.yml$/,
@@ -32,7 +35,7 @@ export const JOBS = {
     /^\.codex\/hooks\.json$/,
   ],
 };
-const JOB_NAMES = ["engine", "animations"];
+const JOB_NAMES = ["engine", "animations", "e2e"];
 
 export function decide(files) {
   const needed = new Set();

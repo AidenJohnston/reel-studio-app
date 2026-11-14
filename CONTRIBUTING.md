@@ -40,7 +40,7 @@ python scripts/leak-check/test_leak_check.py   # if you change the leak check or
 ```
 
 CI runs Node checks on Ubuntu, macOS, and Windows, plus engine and animation tests on Ubuntu.
-Electron e2e tests run locally with `npm run e2e`; CI does not run them.
+Electron e2e tests run locally with `npm run e2e`. CI runs them on Linux under `xvfb-run`, split across shards, whenever `app/`, `ai/` or the lockfile changes.
 
 The leak check refuses private names, personal paths, e-mail addresses, media files and anything over 5 MB.
 The only media exemption is `engine/reelengine/sfx/*.opus`, the bundled CC0 sounds listed in `engine/THIRD_PARTY.md`.

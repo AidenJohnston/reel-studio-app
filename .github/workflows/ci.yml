@@ -21,6 +21,7 @@ jobs:
     outputs:
       engine: ${{ steps.detect.outputs.engine }}
       animations: ${{ steps.detect.outputs.animations }}
+      e2e: ${{ steps.detect.outputs.e2e }}
     steps:
       - if: github.event_name == 'pull_request'
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -169,9 +170,62 @@ jobs:
         run: npx playwright install-deps chromium
       - run: npm test
 
+  e2e:
+    name: E2E / shard ${{ matrix.shard }} of 8
+    needs: changes
+    if: ${{ !cancelled() && needs.changes.outputs.e2e != 'false' }}
+    runs-on: ubuntu-24.04
+    # Specs run one at a time with a 300 s timeout each. Eight shards is a first guess, to be set from measured wall times.
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4, 5, 6, 7, 8]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: package-lock.json
+      # The stand-in engine (app/dev/fake-engine) is stdlib-only Python; the app runs it with python3 from PATH.
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: '3.11'
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        with:
+          version: '0.11.15'
+      - name: Cache Electron download
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: ~/.cache/electron
+          key: electron-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('package-lock.json') }}
+      - name: Install FFmpeg and Xvfb
+        run: sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 update && for i in 1 2 3; do timeout 300 sudo apt-get install -y --no-install-recommends -o Acquire::Retries=3 -o Acquire::http::Timeout=30 ffmpeg xvfb xauth && break; sudo dpkg --configure -a || true; sleep 10; done && command -v ffmpeg && command -v xvfb-run
+      # Ubuntu 24.04's AppArmor blocks the unprivileged user namespaces Chromium's sandbox needs, and npm leaves
+      # Electron's chrome-sandbox without its setuid bit, so Electron aborts at launch. This lets the sandbox start
+      # instead of turning it off in the app.
+      - name: Allow Electron's sandbox
+        run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+      - run: npm ci --no-audit --no-fund
+      - run: npm run build -w ai
+      - name: Run shard ${{ matrix.shard }} of 8
+        run: xvfb-run --auto-servernum --server-args='-screen 0 1920x1080x24' npm run e2e -w app -- --shard=${{ matrix.shard }}/8
+      - if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: e2e-report-shard-${{ matrix.shard }}
+          path: |
+            app/playwright-report/
+            app/test-results/
+          retention-days: 14
+          if-no-files-found: ignore
+
   ci-ok:
     name: CI ok
-    needs: [changes, node, engine, animations]
+    needs: [changes, node, engine, animations, e2e]
     if: always()
     runs-on: ubuntu-24.04
     timeout-minutes: 2
