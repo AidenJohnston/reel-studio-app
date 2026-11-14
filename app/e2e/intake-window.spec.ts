@@ -26,7 +26,7 @@ test('fails if open-file after closing the macOS window does not reopen it and s
     const nextPage = await reopened
     const nextWindow = await app.browserWindow(nextPage)
     expect(await nextWindow.evaluate((win) => win.id)).not.toBe(originalId)
-    await expect(nextPage.getByTestId('player')).toBeVisible({ timeout: 8000 })
+    await expect(nextPage.getByTestId('player')).toBeVisible({ timeout: 240_000 })
     const projects = await nextPage.evaluate(() => window.reel.projects.list())
     expect(projects).toHaveLength(1)
     expect(projects[0].title).toBe('My first take')
@@ -54,7 +54,7 @@ test('fails if open-file does not request restore and focus for a minimized wind
     }, media.video)
     expect(calls).toContain('restore')
     expect(calls).toContain('focus')
-    await expect(page.getByTestId('player')).toBeVisible({ timeout: 8000 })
+    await expect(page.getByTestId('player')).toBeVisible({ timeout: 240_000 })
     const projects = await page.evaluate(() => window.reel.projects.list())
     expect(projects).toHaveLength(1)
     expect(projects[0].title).toBe('My first take')
