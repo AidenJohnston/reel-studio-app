@@ -43,8 +43,15 @@ describe('while the library is moving', () => {
       if (moving) throw { code: 'BUSY', userMessage: 'Wait until your reels have finished moving, then try again.' }
     })
     let finish!: () => void
-    const editing = jobs.hold('a-reel', () => new Promise<void>((r) => (finish = r)))
-    await new Promise((r) => setTimeout(r, 50))
+    let began!: () => void
+    const running = new Promise<void>((r) => (began = r))
+    const editing = jobs.hold('a-reel', () => new Promise<void>((r) => {
+      finish = r
+      began()
+    }))
+    // until the edit itself runs, not a fixed 50 ms: hold() takes the project's lock first, and on a loaded Windows
+    // runner that outlasted the wait (#188's CI: "finish is not a function")
+    await running
     expect(jobs.writing()).toBe(true)
     finish()
     await editing
