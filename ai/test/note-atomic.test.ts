@@ -195,6 +195,34 @@ describe('a note that does not finish leaves the project as it was', () => {
     expect(JSON.parse(await fsp.readFile(path.join(dir, OWNER_LOCK), 'utf8')).token).toBe('job-1');
   });
 
+  it('fails if a note cleans up after a moments run whose engine says it would not stop only when the note stops it', async () => {
+    const { root, dir, host, settingsDir, read, before } = await setup();
+    await fsp.writeFile(path.join(root, 'Library', 'Images', 'bread.png'), tinyPng());
+    await fsp.writeFile(path.join(dir, OWNER_LOCK), JSON.stringify({ app: 'Reel Studio', token: 'job-1' }));
+    const run = host.runEngine.bind(host);
+    let seen: () => void = () => {};
+    const drawing = new Promise<void>((resolve) => { seen = resolve; });
+    host.runEngine = async (command, args, onProgress, signal) => {
+      if (command !== 'moments') return run(command, args, onProgress, signal);
+      if (args.includes('--mark')) return {};
+      // still drawing when the note fails; told to stop, its engine would not (engine.ts kill failed: ENGINE_STUCK)
+      seen();
+      return new Promise((_, reject) => signal?.addEventListener('abort', () => reject({ code: 'ENGINE_STUCK', userMessage: "Part of Reel Studio's video engine would not stop." }), { once: true }));
+    };
+    const m = new ScriptedModel([
+      { toolCalls: [call('add_broll', { anchor: { from: 'w29', to: 'w30' }, treatment: 'side-card', asset: 'Library/Images/bread.png', animation: null, params: {} })] },
+      async () => {
+        await drawing;
+        throw new AIError('network', 'I could not reach the AI. Check your internet and try again.');
+      },
+    ]);
+    await expect(createAI({ host, settingsDir, providerOverride: m, moments: true }).applyNote(dir, 'show my bread', () => undefined, undefined, { id: 'stop-stuck', owner: 'job-1' }))
+      .rejects.toMatchObject({ code: 'ENGINE_STUCK' });
+    expect(await read()).toBe(before);
+    expect(fs.readdirSync(path.join(dir, 'work', 'assets', 'frozen', 'image')).filter((f) => f.endsWith('.png'))).toHaveLength(1);
+    expect(fs.existsSync(path.join(dir, 'work', 'notes', 'stop-stuck'))).toBe(true);
+  });
+
   // a crash leaves a note's downloads in work/assets: only their note prefix says the note was never saved
   it.each([
     ['the engine saves', true, 'https://example.com/loaf.png'],
@@ -248,9 +276,12 @@ describe('the asset ledger after a note that was not saved', () => {
     await createAI({ host, settingsDir, providerOverride: new ScriptedModel([{ toolCalls: [place('Library/Images/loaf.png', 'w29', 'w30')] }, finish('Added the loaf.')]) })
       .applyNote(dir, 'show my loaf', () => undefined, undefined, { id: 'saved-note' });
     const loaf = JSON.parse(await read()).broll.find((b: { anchor: { from: string } }) => b.anchor.from === 'w29').asset;
-    // another note froze the bread, and the app stopped (a crash, a power cut) before project.json named that note
+    // another note froze a picture it found for "warm bread", and the app stopped (a crash, a power cut) before
+    // project.json named that note
+    host.engineAssets = true;
+    host.searchResults = [{ url: 'https://example.com/bread.png', title: 'Bread', license: 'CC BY 4.0' }];
     const crashed = toolCtx(root, dir, host, 'crashed-note');
-    const asked = await executeTool(crashed, 'resolve_asset', { kind: 'image', intent: 'Library/Images/bread.png', licensePolicy: null });
+    const asked = await executeTool(crashed, 'resolve_asset', { kind: 'image', intent: 'warm bread', licensePolicy: null });
     expect(asked.isError, asked.content).toBe(false);
     const committed = await executeTool(crashed, 'resolve_asset', { kind: 'image', intent: 'bread', phase: 'commit', candidateId: JSON.parse(asked.content).candidates[0].id });
     expect(committed.isError, committed.content).toBe(false);
@@ -260,6 +291,10 @@ describe('the asset ledger after a note that was not saved', () => {
     expect(await listed(toolCtx(root, dir, host, 'next'))).toEqual([loaf]);
     // the note running still sees what it froze itself
     expect(await listed(crashed)).toEqual([loaf, bread]);
+    // nor does a later note's search offer it for the same words (the web search finds nothing new this time)
+    host.searchResults = [];
+    const searched = await executeTool(toolCtx(root, dir, host, 'next'), 'resolve_asset', { kind: 'image', intent: 'warm bread', licensePolicy: null });
+    expect(String(searched.content)).not.toContain(bread);
   });
 });
 
