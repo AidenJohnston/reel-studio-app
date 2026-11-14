@@ -209,13 +209,17 @@ def encoders() -> set:
     return _CACHE["encoders"]
 
 
+_FILTER_FLAGS = re.compile(r"[.TSCA]{2,3}")
+
+
 def filters() -> set:
     if "filters" not in _CACHE:
         out = text_run([ffmpeg(), "-hide_banner", "-filters"], 60, "ffmpeg -filters", check=False)
         names = set()
         for line in (out.stdout or "").splitlines():
             parts = line.split()
-            if len(parts) >= 3 and len(parts[0]) == 3:
+            # The flag column is 3 characters up to FFmpeg 7 and 2 from FFmpeg 8; legend lines have "=" second.
+            if len(parts) >= 3 and _FILTER_FLAGS.fullmatch(parts[0]) and parts[1] != "=":
                 names.add(parts[1])
         _CACHE["filters"] = names
     return _CACHE["filters"]

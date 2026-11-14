@@ -8,13 +8,32 @@ on:
 permissions:
   contents: read
 concurrency:
-  group: ci-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  group: ci-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 jobs:
+  # Gated jobs run unless this says 'false', so a failed detector never skips a check.
+  changes:
+    name: Changes
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      engine: ${{ steps.detect.outputs.engine }}
+      animations: ${{ steps.detect.outputs.animations }}
+    steps:
+      - if: github.event_name == 'pull_request'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+          fetch-depth: 2 # the merge commit and its base parent
+      - name: Detect affected jobs
+        id: detect
+        if: github.event_name == 'pull_request'
+        run: node scripts/ci/changes.mjs --github
+
   node:
     name: Node / ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 15
+    timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
@@ -31,6 +50,14 @@ jobs:
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
         with:
           python-version: '3.11'
+      - name: Cache Electron download
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: |
+            ~/.cache/electron
+            ~/Library/Caches/electron
+            ~/AppData/Local/electron/Cache
+          key: electron-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('package-lock.json') }}
       - name: Install FFmpeg on Linux
         if: runner.os == 'Linux'
         run: sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 update && for i in 1 2 3; do timeout 300 sudo apt-get install -y --no-install-recommends -o Acquire::Retries=3 -o Acquire::http::Timeout=30 ffmpeg && break; sudo dpkg --configure -a || true; sleep 10; done && command -v ffmpeg
@@ -45,8 +72,11 @@ jobs:
       - run: npm run typecheck
       - run: npm test
       - run: npm run build -w app
+
   engine:
     name: Engine / Python 3.11
+    needs: changes
+    if: ${{ !cancelled() && needs.changes.outputs.engine != 'false' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     env:
@@ -85,8 +115,11 @@ jobs:
         env:
           # runner.* is not available in a job-level env, only in a step's
           REELENGINE_CACHE: ${{ runner.temp }}/reelengine-cache
+
   animations:
     name: Animation rendering
+    needs: changes
+    if: ${{ !cancelled() && needs.changes.outputs.animations != 'false' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     defaults:
@@ -103,5 +136,30 @@ jobs:
           cache-dependency-path: templates/animations/package-lock.json
       - run: sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 update && for i in 1 2 3; do timeout 300 sudo apt-get install -y --no-install-recommends -o Acquire::Retries=3 -o Acquire::http::Timeout=30 ffmpeg && break; sudo dpkg --configure -a || true; sleep 10; done && command -v ffmpeg
       - run: npm ci --no-audit --no-fund
-      - run: npx playwright install --with-deps chromium
+      - name: Cache Chromium
+        id: chromium
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('templates/animations/package-lock.json') }}
+      - name: Install Chromium
+        if: steps.chromium.outputs.cache-hit != 'true'
+        run: npx playwright install --with-deps chromium
+      - name: Install Chromium's system libraries
+        if: steps.chromium.outputs.cache-hit == 'true'
+        run: npx playwright install-deps chromium
       - run: npm test
+
+  ci-ok:
+    name: CI ok
+    needs: [changes, node, engine, animations]
+    if: always()
+    runs-on: ubuntu-24.04
+    timeout-minutes: 2
+    steps:
+      - name: Every needed job passed
+        env:
+          RESULTS: ${{ toJSON(needs.*.result) }}
+        run: |
+          echo "$RESULTS"
+          if echo "$RESULTS" | grep -qE '"(failure|cancelled)"'; then exit 1; fi

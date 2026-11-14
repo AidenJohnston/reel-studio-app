@@ -68,7 +68,7 @@ PLAIN = [("local path", re.compile(r"c:[\\/]+dev(?![a-z])", re.I))]
 BIN_PATH = re.compile(rb"c:[\\/]+dev(?![a-z])", re.I)
 
 EMAIL_RE = re.compile(r"[A-Za-z0-9._%+\-]+@[A-Za-z0-9\-]+(?:\.[A-Za-z0-9\-]+)*\.[A-Za-z]{2,}\b")  # "pkg@1.2.3" is not one
-EMAIL_OK_VALUES = re.compile(r"^(?:[^@]+@example\.(?:com|org|net)|YOU@icloud\.com|noreply@example\.com)$", re.I)
+EMAIL_OK_VALUES = re.compile(r"^(?:[^@]+@example\.(?:com|org|net)|YOU@icloud\.com|noreply@example\.com|support@getreelstudio\.com)$", re.I)
 EMAIL_OK_PATHS = re.compile(
     r"^(?:packaging/licenses/|packaging/fonts/.*\.txt$|engine/reelengine/fonts/.*\.txt$|templates/fonts/.*\.txt$|"
     r"THIRD_PARTY\.md$|engine/THIRD_PARTY\.md$|LICENSE$)|(?:^|/)package-lock\.json$")

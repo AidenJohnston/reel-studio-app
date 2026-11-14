@@ -65,6 +65,8 @@ PRs are squash-merged. The PR title becomes the single commit on main, so use Co
 * Never commit your own videos, songs or other media, and never commit API keys or tokens.
 * New dependencies need a permissive license (MIT, BSD, Apache-2.0, ISC or similar) and, if they ship in the installer, an entry in
   `THIRD_PARTY.md`.
+* How a PR moves from draft to merged, who is asked to review, branch names and the daily queues:
+  [docs/pull-requests.md](docs/pull-requests.md).
 
 Reel Studio is released under the [GNU AGPL v3 only](LICENSE); see [NOTICE.md](NOTICE.md). Before a pull request of
 yours can merge, you accept the [Contributor License Agreement](CLA.md) by commenting one sentence on it. The `CLA` check on
