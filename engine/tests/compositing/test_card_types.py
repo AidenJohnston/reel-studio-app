@@ -147,6 +147,19 @@ def test_wide_clip_keeps_its_framing_over_a_blur_and_skips_a_cut_in_its_first_se
     assert sharp > 4 * blurred and g[50:fy - 50].std() > 3               # a blurred copy of itself, not a flat colour
 
 
+def test_a_wide_clip_drawn_at_one_frame_rate_is_never_reused_at_another(tmp_path, media):
+    # Fails if the wide clip's layer is named without the rate it is drawn at: after the project goes from 30 to
+    # 60 fps the final reuses the 30 fps layer and shows every frame twice (Astra engine review 5).
+    ctx = _ctx(tmp_path, media)
+    at30 = _build(ctx, _item(ctx, 1, 2.0, 4.0, "wide-clip", media["clip"]))[0]
+    ctx.fmt = dict(ctx.fmt, fps=60)
+    at60 = broll.build_layers(ctx)
+    clip = next(L for L in at60 if str(L.path).endswith(".mp4"))
+    rate = subprocess.run([fx.FFPROBE, "-v", "error", "-select_streams", "v:0", "-show_entries", "stream=avg_frame_rate",
+                           "-of", "csv=p=0", str(clip.path)], capture_output=True, text=True, check=True).stdout.strip()
+    assert rate == "60/1", (rate, [str(L.path) for L in at30])
+
+
 def test_receipt_carries_a_small_label_naming_its_source(tmp_path, media):
     ctx = _ctx(tmp_path, media)
     layers, recs = _build(ctx, _item(ctx, 1, 2.0, 4.0, "receipt", media["screenshot"], text="Example News"))

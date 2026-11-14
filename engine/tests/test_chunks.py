@@ -47,18 +47,19 @@ def test_a_file_is_known_by_its_content_not_its_time(tmp_path):
     assert chunks.file_identity(a) != chunks.file_identity(b)
 
 
-def test_a_large_file_is_sampled_through_its_middle(tmp_path, monkeypatch):
-    monkeypatch.setattr(chunks, "PART_HASH_LIMIT", 1 << 10)
-    monkeypatch.setattr(chunks, "SAMPLE_EDGE", 1 << 10)
-    monkeypatch.setattr(chunks, "SAMPLE_BLOCK", 1 << 8)
-    data = bytearray(64 << 10)
-    a = tmp_path / "a.mp4"
+def test_a_large_file_changed_anywhere_has_another_identity(tmp_path):
+    # Fails if a large take is identified by samples: pixels changed between them, the length and the
+    # modification time kept, let old chunks play over the new picture (Astra engine review 2). 70 MiB, over the
+    # 64 MiB the sampling started at, with 4 KiB changed at 5.5 MiB, between two of its samples.
+    a = tmp_path / "take.mp4"
+    data = bytearray(70 << 20)
     a.write_bytes(bytes(data))
+    st = a.stat()
     first = chunks.file_identity(a)
-    data[31 << 10:33 << 10] = bytes([1]) * (2 << 10)    # 2 KiB in the middle, the same size: a sampled block
+    data[(11 << 19):(11 << 19) + 4096] = bytes([7]) * 4096
     a.write_bytes(bytes(data))
+    os.utime(a, ns=(st.st_atime_ns, st.st_mtime_ns))
     assert chunks.file_identity(a) != first
-
 
 def test_the_cache_keeps_this_renders_chunks_and_the_newest_others(tmp_path, monkeypatch):
     cache = chunks.Cache(tmp_path / "chunks")
