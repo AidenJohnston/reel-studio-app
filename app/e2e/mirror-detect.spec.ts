@@ -1,6 +1,7 @@
 // A mirrored take found at import (engine mirror_detect.py): the editor says it flipped it, and "Undo
-// flip" puts it back; a take that only looks mirrored is asked about, and "Flip it" flips it. Each answer
-// makes a new version, and the buttons go.
+// flip" puts it back; a take that only looks mirrored is asked about, and "Flip it" flips it. Each answer is a
+// button under the editor's line in the Notes panel, queued as a change made by hand (main mirror:answer), so it
+// makes a new version, the buttons go, and Edit it myself > Cover's "Flip the picture" shows the same state.
 //
 // Run: npx playwright test e2e/mirror-detect.spec.ts (after npm run build). The stand-in engine decides
 // from the file's name ("...mirrored..." / "...maybe-mirrored..."); with REELSTUDIO_ENGINE_DIR set to the
@@ -9,7 +10,7 @@
 import { test, expect, type Page } from '@playwright/test'
 import { copyFileSync, mkdirSync, readdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { BASE, SHOTS, launch, makeMedia, passFirstRun, root } from './helpers'
+import { BASE, SHOTS, launch, makeMedia, makeReel, passFirstRun, root } from './helpers'
 
 const OUT = process.env.REELSTUDIO_E2E_SHOTS ?? SHOTS
 
@@ -19,10 +20,14 @@ function newest(): any {
   return p.sort((a, b) => String(a.createdAt).localeCompare(String(b.createdAt))).pop()
 }
 
-async function makeReel(page: Page, file: string): Promise<void> {
-  await page.getByTestId('new-video').click()
-  await page.getByTestId('file-input').setInputFiles([file])
-  await expect(page.getByTestId('player')).toBeVisible({ timeout: 15 * 60_000 })
+/** Edit it myself > Cover's "Flip the picture", as the panel shows it now; the panel closes again. */
+async function flipShown(page: Page): Promise<boolean> {
+  await page.getByTestId('edit-myself').click()
+  await page.getByTestId('tab-cover').click()
+  const on = await page.getByTestId('mirror-on').isChecked()
+  await page.getByTestId('drawer-close').click()
+  await expect(page.getByTestId('drawer')).toHaveCount(0)
+  return on
 }
 
 test('a mirrored take comes in flipped, says so, and Undo flip puts it back', async () => {
@@ -33,19 +38,18 @@ test('a mirrored take comes in flipped, says so, and Undo flip puts it back', as
   if (!process.env.REELSTUDIO_E2E_MIRRORED) copyFileSync(media.video, take)
   const { app, page } = await launch()
   await passFirstRun(page)
-  await makeReel(page, take)
+  await makeReel(page, take, 15 * 60_000)
   expect(newest().sources[0]).toMatchObject({ mirror: true, mirrorCheck: { verdict: 'mirrored' } })
   await expect(page.getByText('I flipped your video: it looked mirrored (the writing behind you reads backwards).')).toBeVisible()
-  await expect(page.getByTestId('did-mirror')).toContainText('Flipped the picture (it was mirrored)')
-  await expect(page.getByTestId('undo-flip')).toBeVisible()
-  await page.waitForTimeout(400)
+  await expect(page.getByTestId('action-mirror-undo')).toHaveText('Undo flip')
+  expect(await flipShown(page)).toBe(true)
   await page.screenshot({ path: join(OUT, 'mirror-detect-01-flipped.png') })
 
   await page.getByTestId('action-mirror-undo').click()
-  await expect(page.getByTestId('versions').getByText('Version 2')).toBeVisible({ timeout: 10 * 60_000 })
+  await expect(page.getByTestId('log-play-2')).toBeVisible({ timeout: 10 * 60_000 })
   await expect(page.getByText('Done: it is back the way you filmed it.')).toBeVisible()
   await expect(page.getByTestId('action-mirror-undo')).toHaveCount(0)
-  await expect(page.getByTestId('did-mirror')).toHaveCount(0)
+  expect(await flipShown(page)).toBe(false)
   const s = newest().sources[0]
   expect('mirror' in s).toBe(false)
   expect(s.mirrorCheck.answer).toBe('undone')
@@ -60,19 +64,20 @@ test('a take that only looks mirrored is asked about, and Flip it flips it', asy
   copyFileSync(media.video, take)
   const { app, page } = await launch()
   await passFirstRun(page)
-  await makeReel(page, take)
+  await makeReel(page, take, 15 * 60_000)
   expect('mirror' in newest().sources[0]).toBe(false)
   await expect(page.getByText('Your video looks mirrored (some writing behind you seems to read backwards). Flip it?')).toBeVisible()
-  await expect(page.getByTestId('action-mirror-keep')).toBeVisible()
-  await page.waitForTimeout(400)
+  await expect(page.getByTestId('action-mirror-flip')).toHaveText('Flip it')
+  await expect(page.getByTestId('action-mirror-keep')).toHaveText('Keep as filmed')
+  expect(await flipShown(page)).toBe(false)
   await page.screenshot({ path: join(OUT, 'mirror-detect-03-asked.png') })
 
   await page.getByTestId('action-mirror-flip').click()
-  await expect(page.getByTestId('versions').getByText('Version 2')).toBeVisible({ timeout: 10 * 60_000 })
+  await expect(page.getByTestId('log-play-2')).toBeVisible({ timeout: 10 * 60_000 })
   await expect(page.getByText('Flipped. The writing behind you reads the right way now.')).toBeVisible()
   await expect(page.getByTestId('action-mirror-keep')).toHaveCount(0)
   expect(newest().sources[0]).toMatchObject({ mirror: true, mirrorCheck: { verdict: 'maybe-mirrored', answer: 'flipped' } })
-  await expect(page.getByTestId('did-mirror')).toBeVisible()
+  expect(await flipShown(page)).toBe(true)
   await page.screenshot({ path: join(OUT, 'mirror-detect-04-flipped-on-answer.png') })
   await app.close()
 })
@@ -84,7 +89,7 @@ test('two quick answers settle once: the first wins, the second changes nothing'
   copyFileSync(media.video, take)
   const { app, page } = await launch()
   await passFirstRun(page)
-  await makeReel(page, take)
+  await makeReel(page, take, 15 * 60_000)
   const slug = newest().slug
   // both answers at once, straight to the main process (as a double click or two buttons would)
   const got = await page.evaluate(async (slug) => {
