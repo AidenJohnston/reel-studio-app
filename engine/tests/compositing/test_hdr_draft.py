@@ -113,7 +113,8 @@ def test_sdr_draft_decodes_on_the_gpu_with_the_retrys_graph(tmp_path, monkeypatc
 @pytest.mark.parametrize("platform", ["win32", "darwin"])
 def test_final_tonemaps_first_and_decodes_in_software(tmp_path, monkeypatch, platform):
     cmd, graph = _graph(tmp_path, monkeypatch, draft=False, platform=platform)
-    assert (f"setpts=PTS-STARTPTS,{render.HDR_CHAIN},scale=1080:1920:flags=lanczos,format=yuv420p,setsar=1[v0]"
+    # the final scales on one thread (render.reframe_filter, #186): the same project gives the same frames
+    assert (f"setpts=PTS-STARTPTS,{render.HDR_CHAIN},scale=1080:1920:flags=lanczos:threads=1,format=yuv420p,setsar=1[v0]"
             in graph)
     assert "-hwaccel" not in cmd
 
