@@ -23,7 +23,7 @@ import { CheckRecord, CheckRound, MAX_REPAIRS, askChecker, askHarnessChecker, ch
 import { writeAiRun, writeKeptAiRun } from './provenance';
 import * as fsp from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
-import { refuseIfOpen } from './owner';
+import { assertOwner, refuseIfOpen } from './owner';
 import { MergeRequest, MergeResult } from './version-merge';
 import type { NoteSteer } from './steer';
 import type { Helper } from './helpers';
@@ -998,7 +998,7 @@ async function saveNote(deps: EditorDeps, ctx: ToolContext, base: Buffer, baseVe
     await writeFileAtomic(live, bytes, undefined, async () => {
       const stuck = deps.stuck?.();
       if (stuck) throw stuck;
-      if (!deps.owner) refuseIfOpen(ctx.projectDir);
+      if (deps.owner) assertOwner(ctx.projectDir, deps.owner); else refuseIfOpen(ctx.projectDir);
       await unchanged();
       if (ctx.signal?.aborted) throw new AIError('cancelled', 'Stopped.');
     });
