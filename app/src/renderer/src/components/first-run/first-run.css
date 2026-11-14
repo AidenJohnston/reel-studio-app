@@ -11,7 +11,7 @@
   position: absolute; inset: 0; z-index: 2; background: var(--paper); display: flex; flex-direction: column; align-items: center; justify-content: center;
   text-align: center; padding: var(--titlebar) 24px 32px;
 }
-.fr-welcome.leaving { opacity: 0; pointer-events: none; transition: opacity 200ms cubic-bezier(.2, .8, .2, 1); }
+.fr-welcome.leaving { opacity: 0; pointer-events: none; transition: opacity 200ms var(--ease-enter); }
 .fr-welcome.flying .reels img:nth-child(2) { visibility: hidden; }
 .fr .w-logo {
   width: 72px; height: 72px; border-radius: 20px; background: var(--ink); color: #fff; display: grid; place-items: center; margin-bottom: 16px;
@@ -37,7 +37,7 @@
 }
 .fr-welcome.over::after { opacity: 1; }
 @keyframes fr-rise { from { opacity: 0; transform: translateY(10px); } }
-.fr-welcome > * { animation: fr-rise 220ms cubic-bezier(.2, .8, .2, 1) both; }
+.fr-welcome > * { animation: fr-rise 220ms var(--ease-enter) both; }
 .fr-welcome h1 { animation-delay: 50ms; }
 .fr-welcome .w-lead { animation-delay: 100ms; }
 .fr-welcome .reels { animation-delay: 150ms; }
@@ -54,11 +54,11 @@
 .fr-stage > .reel-b { flex: 1; min-height: 0; grid-template-columns: minmax(0, 1fr) var(--fr-col); }
 @keyframes fr-in { from { opacity: 0; } }
 @keyframes fr-up { from { opacity: 0; transform: translateY(8px); } }
-.fr-stage.on .stage { animation: fr-in 220ms cubic-bezier(.2, .8, .2, 1) both; }
+.fr-stage.on .stage { animation: fr-in 220ms var(--ease-enter) both; }
 /* backwards, not both: a transform animation still in effect makes its element the containing block of fixed
    descendants, and the server form's dialog (Connections.tsx Modal) then opened inside the column, cut off by it */
-.fr-stage.on .fr-col { animation: fr-up 220ms 160ms cubic-bezier(.2, .8, .2, 1) backwards; }
-.fr-stage.leaving { opacity: 0; transition: opacity 200ms cubic-bezier(.2, .8, .2, 1); }
+.fr-stage.on .fr-col { animation: fr-up 220ms 160ms var(--ease-enter) backwards; }
+.fr-stage.leaving { opacity: 0; transition: opacity 200ms var(--ease-enter); }
 
 /* The title-bar row, in the body's two columns: the sample's name centred over the phone (the window buttons sit
    left of it at every size), the version hanging after it so its arrival moves nothing. */
@@ -97,7 +97,7 @@ html.kb .fr-tr-row .pp:active { transform: none; }
    reel box over it, with the scrim, the tag and the hold area on the whole screen (Phone.tsx Phone). */
 .fr-over { z-index: 2; pointer-events: none; }
 /* pressed slowly enough to see, let go at once */
-.fr-stage .phone { transition: transform 100ms cubic-bezier(.2, .8, .2, 1); }
+.fr-stage .phone { transition: transform 100ms var(--ease-enter); }
 .fr-stage .phone.fr-held { transform: scale(.985); transition-duration: 160ms; }
 .fr-stage.leaving .phone { transform: scale(.97); transition-duration: 200ms; }
 .fr-landing .fr-v { visibility: hidden; }
@@ -111,15 +111,15 @@ html.kb .fr-tr-row .pp:active { transform: none; }
 }
 .fr-subs span { display: inline-block; }
 .fr-subs em, .fr-cover .cover-t em { font-style: normal; background: var(--marker); color: #111; -webkit-text-stroke: 0; padding: 0 1.2cqw; border-radius: 1.2cqw; text-shadow: none; }
-.fr-tag { z-index: 2; opacity: 0; transition: opacity 160ms cubic-bezier(.2, .8, .2, 1); }
+.fr-tag { z-index: 2; opacity: 0; transition: opacity 160ms var(--ease-enter); }
 .fr-tag.show { opacity: 1; }
-.fr-scrim { position: absolute; inset: 0; z-index: 2; background: rgba(10, 12, 11, .55); opacity: 0; pointer-events: none; transition: opacity 200ms cubic-bezier(.2, .8, .2, 1); }
+.fr-scrim { position: absolute; inset: 0; z-index: 2; background: rgba(10, 12, 11, .55); opacity: 0; pointer-events: none; transition: opacity 200ms var(--ease-enter); }
 .fr-scrim.show { opacity: 1; }
 /* three frames, centred: each 26% of the picture wide, 4% apart (demo.ts pickCover grows the cover from the third) */
 .fr-cands { position: absolute; left: 7%; width: 86%; top: 37%; z-index: 2; display: flex; justify-content: space-between; pointer-events: none; }
 .fr-cands img {
   width: 30.2326%; aspect-ratio: 9 / 16; object-fit: cover; border-radius: 2.4cqw; opacity: 0;
-  box-shadow: 0 0 0 1px rgba(255, 255, 255, .25), 0 8px 20px rgba(0, 0, 0, .35); transition: opacity 200ms cubic-bezier(.2, .8, .2, 1), transform 220ms cubic-bezier(.2, .8, .2, 1);
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, .25), 0 8px 20px rgba(0, 0, 0, .35); transition: opacity 200ms var(--ease-enter), transform 220ms var(--ease-enter);
 }
 .fr-cands.show img { opacity: 1; }
 .fr-cands.picked img:not([data-pick]) { opacity: .3; }
@@ -138,7 +138,7 @@ html.kb .fr-tr-row .pp:active { transform: none; }
 /* a quiet caption on its own line; its line is kept while the sample is made, so the phone never changes size */
 .fr-hint {
   margin: 0; min-height: var(--lh-sm); text-align: center; font-size: var(--fs-sm); line-height: var(--lh-sm); color: var(--ink-3); text-wrap: balance;
-  opacity: 0; transition: opacity 200ms cubic-bezier(.2, .8, .2, 1);
+  opacity: 0; transition: opacity 200ms var(--ease-enter);
 }
 .fr-hint.show { opacity: 1; }
 
@@ -170,14 +170,14 @@ html.kb .fr-tr-row .pp:active { transform: none; }
 .fr-words .fr-seg.gone, .fr-words .tk.pic.gone { display: none; }
 .fr-words .tk {
   display: inline-block; position: relative; margin: 0 -2px; padding: 0 2px; border-radius: 4px; opacity: 0; transform: translateY(3px);
-  transition: opacity 200ms cubic-bezier(.2, .8, .2, 1), transform 200ms cubic-bezier(.2, .8, .2, 1);
+  transition: opacity 200ms var(--ease-enter), transform 200ms var(--ease-enter);
 }
 .fr-words .tk.in { opacity: 1; transform: none; }
 .fr-words .tk.now { background: var(--marker); }
 .fr-words .tk.cut { color: var(--ink-3); }
 .fr-words .tk::after {
   content: ''; position: absolute; left: 0; right: -2px; top: 54%; height: 2px; border-radius: 1px; background: var(--pencil);
-  transform: scaleX(0); transform-origin: 0 50%; transition: transform 240ms cubic-bezier(.2, .8, .2, 1);
+  transform: scaleX(0); transform-origin: 0 50%; transition: transform 240ms var(--ease-enter);
 }
 .fr-words .tk.cut::after { transform: scaleX(1); }
 .fr-words .tk.pz {
@@ -192,7 +192,7 @@ html.kb .fr-tr-row .pp:active { transform: none; }
    heard, and goes when the cut pauses do, as the words close up, so it never names a box no longer there. */
 .fr-key {
   margin-top: 6px; padding-left: 24px; font-size: var(--fs-sm); line-height: var(--lh-subhead); color: var(--ink-3);
-  opacity: 0; transition: opacity 200ms cubic-bezier(.2, .8, .2, 1);
+  opacity: 0; transition: opacity 200ms var(--ease-enter);
 }
 .fr-words:has(.tk.pz.in) + .fr-key { opacity: 1; }
 .fr-words:not(:has(.fr-seg:not(.gone) .tk.pz)) + .fr-key { display: none; }
@@ -202,7 +202,7 @@ html.kb .fr-tr-row .pp:active { transform: none; }
 }
 
 /* the editor's picker: the column's full width, scrolled by the column */
-.fr-pick { min-width: 0; animation: fr-up 220ms cubic-bezier(.2, .8, .2, 1) backwards; }
+.fr-pick { min-width: 0; animation: fr-up 220ms var(--ease-enter) backwards; }
 
 .fr-foot { flex: none; display: flex; align-items: center; gap: 12px; min-height: 50px; padding: 12px 24px 0; }
 .fr-foot .sp { flex: 1; }
@@ -225,9 +225,9 @@ html.kb :is(.fr-stage.on .stage, .fr-stage.on .fr-col, .fr-pick, .shell.arriving
   @keyframes fr-rise { from { opacity: 0; } }
   @keyframes fr-up { from { opacity: 0; } }
   .fr-stage .phone, .fr-stage .phone.fr-held, .fr-stage.leaving .phone, .fr-tr-row .pp:active { transform: none; transition: none; }
-  .fr-words .tk { transform: none; transition: opacity 200ms cubic-bezier(.2, .8, .2, 1); }
+  .fr-words .tk { transform: none; transition: opacity 200ms var(--ease-enter); }
   .fr-words .tk::after { transition: none; }
-  .fr-cands img { transition: opacity 200ms cubic-bezier(.2, .8, .2, 1); }
+  .fr-cands img { transition: opacity 200ms var(--ease-enter); }
   .fr-cands.picked img[data-pick] { transform: none; }
 }
 
@@ -237,6 +237,6 @@ html.kb :is(.fr-stage.on .stage, .fr-stage.on .fr-col, .fr-pick, .shell.arriving
    animation in effect for the rest of the session. On .main that made a stacking context, which drew the sidebar and
    title bar over full screen (FullStage.tsx; e2e/preview-modes.spec.ts reads the pixels); on .side the transform made
    the sidebar the containing block of its fixed popovers (the update offer). */
-.shell.arriving > .side { animation: fr-side 220ms cubic-bezier(.2, .8, .2, 1) backwards; }
-.shell.arriving > .titlebar, .shell.arriving > .main { animation: fr-in 220ms 60ms cubic-bezier(.2, .8, .2, 1) backwards; }
+.shell.arriving > .side { animation: fr-side 220ms var(--ease-enter) backwards; }
+.shell.arriving > .titlebar, .shell.arriving > .main { animation: fr-in 220ms 60ms var(--ease-enter) backwards; }
 @media (prefers-reduced-motion: reduce) { @keyframes fr-side { from { opacity: 0; } } }

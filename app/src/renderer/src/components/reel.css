@@ -46,7 +46,7 @@
 }
 
 /* A version landing: the new video crosses over the old in 200 ms, with a 2 px blur bridging the two (B section 9). */
-.phone.landing .phone-screen > video.layer { transition: opacity 200ms cubic-bezier(.2, .8, .2, 1), filter 200ms cubic-bezier(.2, .8, .2, 1); }
+.phone.landing .phone-screen > video.layer { transition: opacity 200ms var(--ease-enter), filter 200ms var(--ease-enter); }
 .phone.landing .phone-screen > video.layer.loading { filter: blur(2px); }
 
 /* a mirrored take plays flipped before Version 1, as the engine will render it */
@@ -114,7 +114,7 @@
 .spot {
   position: absolute; width: 24px; height: 24px; margin: -24px 0 0 -2px; border-radius: 50% 50% 50% 2px; background: var(--marker); color: var(--marker-ink);
   font-size: var(--fs-sm); line-height: var(--lh-sm); font-weight: 760; display: grid; place-items: center; box-shadow: 0 4px 14px rgba(0, 0, 0, .35), 0 0 0 2px #fff; pointer-events: none;
-  transition: opacity 180ms cubic-bezier(.2, .8, .2, 1), transform 180ms cubic-bezier(.2, .8, .2, 1);
+  transition: opacity 180ms var(--ease-enter), transform 180ms var(--ease-enter);
 }
 @starting-style { .spot.pending { opacity: 0; transform: translateY(-6px) scale(.9); } }
 .spot.away { opacity: 0; transform: scale(.9); }
@@ -249,7 +249,7 @@ html.kb .tl-song-ring { outline: 2px solid var(--ink); outline-offset: 1px; }
 .tl-sound.on .tl-sound-word { color: var(--ink); }
 .tl-sound > svg {
   position: absolute; left: 7px; top: 1px; width: 10px; height: 12px; overflow: visible; transform-origin: 50% 0;
-  transition: transform 150ms cubic-bezier(.2, .8, .2, 1);
+  transition: transform 150ms var(--ease-enter);
 }
 .tl-sound path { fill: var(--ink-3); stroke: var(--paper); stroke-width: 2; paint-order: stroke; transition: fill 150ms ease; }
 .tl-sound.off path { fill: var(--paper); stroke: var(--ink-3); stroke-width: 1.25; }
@@ -388,7 +388,7 @@ html.kb .tl-sound:focus-visible { outline: 2px solid var(--ink); outline-offset:
 .nt-acts { display: flex; gap: 8px; padding-left: 24px; }
 .reply { align-items: flex-start; }
 .reply-acts { display: flex; flex-wrap: wrap; gap: 4px 12px; margin-top: 4px; }
-.nt-res.enter { animation: line-in 180ms cubic-bezier(.2, .8, .2, 1) both; }
+.nt-res.enter { animation: line-in 180ms var(--ease-enter) both; }
 @keyframes line-in { from { opacity: 0; transform: translateY(4px); } }
 .heard { padding-left: 24px; font-size: var(--fs-base); line-height: var(--lh-base); color: var(--ink-2); overflow-wrap: anywhere; }
 .heard b { color: var(--ink); font-weight: 620; }
