@@ -1,5 +1,7 @@
 import { test, expect, type ElectronApplication, type Page } from '@playwright/test'
-import { expectViewport, launch, makeMedia, makeReel, passFirstRun } from './helpers'
+import { writeFileSync } from 'node:fs'
+import { join } from 'node:path'
+import { expectViewport, launch, makeMedia, makeReel, passFirstRun, root } from './helpers'
 
 const SIZES: [number, number][] = [
   [1100, 720],
@@ -130,6 +132,39 @@ test("fails if a toast covers the screen's main action or its side panel, or is 
         await page.getByTestId('nav-home').click()
         await page.getByTestId('new-reel').click()
       }
+    }
+  } finally {
+    await app.close()
+  }
+})
+
+// The runner's J9 by chat (2026-11-13): Version 5's line read "Longethe Codex app'…", its few words printed over the
+// name of the model that made it. Fails if a version's words and the model's name overlap, or the words are cut.
+test("fails if a version line's few words and the model that made it print over each other", async () => {
+  const media = makeMedia()
+  const { app, page } = await launch({}, { realViewport: true })
+  try {
+    await passFirstRun(page)
+    await makeReel(page, media.video)
+    const slug = (await page.locator('.reel-page').getAttribute('data-slug'))!
+    writeFileSync(join(root(), 'Projects', slug, 'versions', 'v1', 'made-with.json'), JSON.stringify({ model: "the Codex app's own model on your ChatGPT plan, gpt-6.1" }))
+    await page.getByTestId('nav-home').click()
+    await page.locator(`[data-slug="${slug}"] [data-testid=project-card]`).click()
+    await expect(page.getByTestId('version-model-1')).toBeVisible()
+    for (const size of [[1440, 900], [1100, 720]] as [number, number][]) {
+      await setSize(app, page, size)
+      const problems = () =>
+        page.evaluate(() => {
+          const fact = document.querySelector('[data-testid=version-fact-1]')!
+          const by = document.querySelector('[data-testid=version-model-1]')!
+          const f = fact.getBoundingClientRect()
+          const b = by.getBoundingClientRect()
+          const out: string[] = []
+          if (f.right > b.left + 0.5 && f.bottom > b.top && f.top < b.bottom) out.push(`the words end ${Math.round(f.right - b.left)} px into the model's name`)
+          if (fact.scrollWidth > fact.clientWidth + 1) out.push('the words run past their box')
+          return out
+        })
+      await expect.poll(problems, { message: `${size[0]}x${size[1]}` }).toEqual([])
     }
   } finally {
     await app.close()
