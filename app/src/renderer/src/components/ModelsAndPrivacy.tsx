@@ -58,7 +58,7 @@ export function Privacy({ info, onInfo, onError }: { info: AppInfo; onInfo: (i: 
   )
 }
 
-const JOB_WORDS: Record<JobKind, string> = { 'first-edit': 'First edit', note: 'Note', rerender: 'New version', export: 'Export', script: 'Plan', propose: 'Reel ideas' }
+const JOB_WORDS: Record<JobKind, string> = { 'first-edit': 'First edit', note: 'Note', rerender: 'New version', export: 'Export', script: 'Plan', propose: 'Reel ideas', plan: 'Picture plan' }
 const OUTCOME_WORDS = { done: 'finished', failed: 'failed', cancelled: 'stopped' } as const
 const PLATFORM_WORDS = { instagram: 'Instagram', tiktok: 'TikTok', youtube: 'YouTube', facebook: 'Facebook' } as const
 
