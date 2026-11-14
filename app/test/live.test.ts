@@ -161,6 +161,35 @@ describe('job manager (main): the contract on the wire', () => {
     expect(await readAppState(slug)).toMatchObject({ chat: [], lastError: null })
   })
 
+  it('a stopped job starts no queued picture copy and ends only after the one copying', async () => {
+    // Fails if a copy of a change's picture starts after Stop, or the job ends while one is still copying:
+    // removing the project could then race the copy (#184, its review fixes).
+    setupPaths()
+    const slug = 'stopped-copying'
+    mkdirSync(projectDir(slug), { recursive: true })
+    const started: number[] = []
+    const finished: number[] = []
+    let release = (): void => undefined
+    const slow = new Promise<void>((r) => (release = r))
+    const jobs = createJobManager(() => undefined, () => undefined, undefined, undefined, undefined, undefined, undefined, async (_s, e) => {
+      const t = e.kind === 'still' ? e.t : e.from
+      started.push(t)
+      if (t === 1) await slow
+      finished.push(t)
+      return `reel-media://f/${t}`
+    })
+    jobs.start(slug, 'note', async (emit) => {
+      emit({ type: 'moment', kind: 'still', t: 1, file: 'a.png', run: 1 })
+      emit({ type: 'moment', kind: 'still', t: 2, file: 'b.png', run: 1 })
+      setTimeout(release, 30)
+      throw { code: 'CANCELLED', userMessage: 'Stopped.' }
+    })
+    await jobs.forSlug(slug)?.done
+    expect(finished).toEqual([1])   // the copy under way was waited for
+    await new Promise((r) => setTimeout(r, 30))
+    expect(started).toEqual([1])    // the queued one never started
+  })
+
   it('fails if pictures of a change arrive out of order, after their draft, or after Stop', async () => {
     setupPaths()
     const slug = 'stopped'

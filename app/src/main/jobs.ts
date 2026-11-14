@@ -244,7 +244,8 @@ export function createJobManager(
           else if (e.type === 'moment') {
             if (!slug || !toMoment) return
             const m = e
-            moments = moments.then(() => toMoment(slug, m).catch(() => null)).then((url) => {
+            // once the job has ended (Stop included) a queued copy never starts; the job waits for the one copying
+            moments = moments.then(() => (open && !abort.signal.aborted ? toMoment(slug, m).catch(() => null) : null)).then((url) => {
               // Stop pressed: the engine may still write a line before it is gone, and the job has not ended yet
               if (!url || !open || abort.signal.aborted) return
               send(m.kind === 'still'

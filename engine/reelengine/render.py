@@ -29,12 +29,13 @@ import os
 import shutil
 import time
 import uuid
+from fractions import Fraction
 from pathlib import Path
 from typing import Optional
 
 import reelengine
 
-from . import anim_timing, captions as capmod, cut as cutmod, project as projmod, proxy as proxymod, render_identity, rule_checks, safepath, tools
+from . import anim_timing, captions as capmod, chunks as chunkmod, cut as cutmod, project as projmod, proxy as proxymod, render_identity, rule_checks, safepath, tools
 from .cut_style import visual_change_meter
 from .proto import EngineError, log, progress
 from .render_ctx import Layer, RenderCtx, Segment, ZoomSpan
@@ -557,14 +558,49 @@ def build_audio(ctx: RenderCtx, segments: list, src_paths: dict, rwork: Path, wa
 
 # --- video graph --------------------------------------------------------------------------------
 
-def _layer_chain(idx: int, layer: Layer, f: float, fps: float, t_shift: float, dur: float):
-    """(chain, x, y, t0, t1) for one overlay layer, or None when it falls outside the render."""
+def _frames_between(lo: float, hi: float, fps: float) -> tuple:
+    """(first, last) output frames whose time FFmpeg's `between(t, lo, hi)` admits. Frame n's time is n
+    times the time base the `fps` filter sets, the inverse of the rate it parses from `fps` (29.97 is
+    2997/100), as a double; comparing those exactly needs no tolerance."""
+    rate = Fraction(fps).limit_denominator(1001000)
+    step = rate.denominator / rate.numerator
+    first = max(0, math.floor(lo / step) - 1)
+    while first * step < lo:
+        first += 1
+    last = math.floor(hi / step) + 1
+    while last >= 0 and last * step > hi:
+        last -= 1
+    return first, last
+
+
+def _layer_chain(idx: int, layer: Layer, f: float, fps: float, t_shift: float, dur: float,
+                 video_dur: Optional[float] = None):
+    """(chain, x, y, t0, t1, seek, lead) for one overlay layer, or None when it falls outside the render.
+
+    `seek` is where to start reading a video layer's input, `lead` how many seconds of it the chain
+    reads and trims before the render's first frame. `video_dur` is the whole video's length: a window
+    or still (any render but the full one) draws each layer frame the full render draws at that moment,
+    with the same fade, counted in frames as the full render counts them."""
+    full_render = t_shift == 0 and (video_dur is None or abs(dur - video_dur) < 1e-6)
     t0, t1 = layer.t0 - t_shift, layer.t1 - t_shift
-    if t1 <= 0 or t0 >= dur or t1 - t0 < 1e-3:
+    if full_render and (t1 <= 0 or t0 >= dur or t1 - t0 < 1e-3):
         return None
     skip = max(0.0, -t0)
     t0 = max(0.0, t0)
     t1 = min(dur, t1)
+    if not full_render:
+        # The output frames the full render's enable (below) admits, moved onto this window's frames.
+        vd = layer.t1 if video_dur is None else video_dur
+        c0, c1 = max(0.0, layer.t0), min(layer.t1, vd)
+        if c1 <= 0 or c0 >= vd or layer.t1 - layer.t0 < 1e-3:
+            return None
+        k0 = round(t_shift * fps)                              # as the caption track maps a window
+        first, last = _frames_between(float(_f(c0)), float(_f(c1)), fps)
+        first, last = first - k0, last - k0
+        if last < 0 or first > round(dur * fps) - 1 or last < first:
+            return None
+        # enable at half-frame midpoints: it admits exactly those frames, whatever the rounding
+        t0, t1 = max(0.0, (first - 0.5) / fps), (last + 0.5) / fps
     w, h = max(2, int(round(layer.w * f / 2)) * 2), max(2, int(round(layer.h * f / 2)) * 2)
     parts = []
     if layer.kind == "video":
@@ -579,20 +615,59 @@ def _layer_chain(idx: int, layer: Layer, f: float, fps: float, t_shift: float, d
         rh = abs(w * math.sin(a)) + abs(h * math.cos(a))
         x -= (rw - w) / 2
         y -= (rh - h) / 2
-    span = t1 - t0
-    if layer.fade_in > 0 and skip <= 0:
-        parts.append(f"fade=t=in:st=0:d={_f(min(layer.fade_in, span / 2))}:alpha=1")
-    if layer.fade_out > 0 and layer.t1 - t_shift <= dur + 1e-6:
-        fo = min(layer.fade_out, span / 2)
-        parts.append(f"fade=t=out:st={_f(max(0.0, span - fo))}:d={_f(fo)}:alpha=1")
+    if full_render:
+        span = t1 - t0
+        if layer.fade_in > 0 and skip <= 0:
+            parts.append(f"fade=t=in:st=0:d={_f(min(layer.fade_in, span / 2))}:alpha=1")
+        if layer.fade_out > 0 and layer.t1 - t_shift <= dur + 1e-6:
+            fo = min(layer.fade_out, span / 2)
+            parts.append(f"fade=t=out:st={_f(max(0.0, span - fo))}:d={_f(fo)}:alpha=1")
+        pad, seek, trim = None, skip, 0
+    else:
+        # What the full render draws: the layer's input seeked past the video's start, `pad` transparent
+        # frames (tpad rounds its duration to the nearest frame), then layer frame j at output frame
+        # pad + j with its fades timed from frame 0. Output frame k0 starts this window.
+        span = c1 - c0
+        fi = min(layer.fade_in, span / 2) if layer.fade_in > 0 and layer.t0 >= 0 else 0.0
+        fo = min(layer.fade_out, span / 2) if layer.fade_out > 0 and layer.t1 <= vd + 1e-6 else 0.0
+        pad_full = math.floor(float(_f(c0)) * fps + 0.5) if c0 > 0 else 0
+        j0 = k0 - pad_full                                     # the layer frame at this window's frame 0
+        if j0 < 0 or layer.kind == "image":
+            js = 0                                             # an image input can't be seeked
+        elif fi > 0 and j0 < fi * fps:
+            js = 0                                             # inside the fade-in: read from its start
+        elif fo > 0 and j0 > (span - fo) * fps:
+            js = math.floor((span - fo) * fps)                 # inside the fade-out: from where it began
+        else:
+            js = j0
+        if fi > 0 and js == 0:
+            parts.append(f"fade=t=in:st=0:d={_f(fi)}:alpha=1")
+        if fo > 0:
+            parts.append(f"fade=t=out:st={_f(span - fo - js / fps)}:d={_f(fo)}:alpha=1")
+        trim = max(0, j0 - js)
+        if trim:
+            parts.append(f"trim=start_frame={trim}")
+        pad, seek = max(0, -j0), max(0.0, -layer.t0) + js / fps
     # Start the layer at t0 with transparent padding frames, NOT by shifting its timestamps: overlay
     # waits for the first frame of each input, so a layer whose first frame is at 66 s made ffmpeg
     # queue every main frame before it (GBs of full-resolution frames on a long take, and a render
     # 5-10x slower). The overlay's `enable` window still decides when it shows.
     parts.append("setpts=PTS-STARTPTS")
-    if t0 > 0:
+    if pad is None and t0 > 0:
         parts.append(f"fps={fps},tpad=start_duration={_f(t0)}:color=0x00000000")   # tpad needs the fps timebase
-    return ",".join(parts), int(round(x)), int(round(y)), t0, t1, skip
+    elif pad:
+        parts.append(f"fps={fps},tpad=start={pad}:color=0x00000000")
+    return ",".join(parts), int(round(x)), int(round(y)), t0, t1, seek, trim / fps
+
+
+def _zoom_frames(z: ZoomSpan, fps: float, video_dur: float) -> Optional[tuple]:
+    """[first, end) frames of the full video a zoom punches in on: those starting in [t0, t1). A window or a
+    chunk zooms these same frames, counted on its own (video_graph)."""
+    if z.scale <= 1.001:
+        return None
+    first = max(0, int(math.ceil(z.t0 * fps - 1e-6)))
+    end = min(int(round(video_dur * fps)), int(math.ceil(z.t1 * fps - 1e-6)))
+    return (first, end) if end > first else None
 
 
 SHUTTER = 0.5        # of a frame: the film camera's 180-degree shutter
@@ -612,13 +687,14 @@ def _snap_chain(zi: int, z: ZoomSpan, k0: int, k1: int, crop: tuple, scale_chain
     itself zoomed in about the fixed point (zooming in never needs pixels outside the frame). Held
     frames use the plain crop and scale, unblurred."""
     from .zoom import progress
+    k_shift = round(t_shift * fps)      # frame k here is the full video's frame k + k_shift (video_graph)
     cw, ch, x, y = crop
     s_end = out_w / cw
     fx, fy = x / (1 - cw / out_w), y / (1 - ch / out_h)
     reach = max(math.hypot(cx - fx, cy - fy) for cx in (0, out_w) for cy in (0, out_h))
 
     def scale(k, u):    # the zoom's scale u of the way through frame k's shutter
-        return 1 + (s_end - 1) * progress(z, k / fps + t_shift + u * SHUTTER / fps, fps)
+        return 1 + (s_end - 1) * progress(z, (k + k_shift) / fps + u * SHUTTER / fps, fps)
 
     def shutter(k):     # (doublings, smallest tap's scale, scale ratio between taps); None = held
         a, b = scale(k, 0), scale(k, 1)
@@ -688,11 +764,12 @@ def _ramp_chain(zi: int, z: ZoomSpan, k0: int, k1: int, crop: tuple, fps: float,
     # fractional source coordinates because zoompan rounds size and origin
     # separately, reversing slow motion by more than a pixel in rendered tests.
     cw, ch, x, y = crop
+    k_shift = round(t_shift * fps)      # frame k here is the full video's frame k + k_shift (video_graph)
 
     def zoom_scale(frame0: int) -> str:
         # perspective counts its first input as 1, whereas zoompan uses PTS.
         clock = "in_time" if draft else f"(in-1)/{_f(fps)}"
-        t = f"({clock}+{_f(frame0 / fps + t_shift)})"
+        t = f"({clock}+{_f((frame0 + k_shift) / fps)})"
 
         def ramp(start: float, frames: int) -> str:
             u = f"clip(({t}-{_f(start)})/{_f(frames / fps)},0,1)"
@@ -716,7 +793,7 @@ def _ramp_chain(zi: int, z: ZoomSpan, k0: int, k1: int, crop: tuple, fps: float,
     # fractional warp; a full-length drift remains one moving run.
     runs = []
     for k in range(k0, k1):
-        t = k / fps + t_shift
+        t = (k + k_shift) / fps
         moving = ((z.ramp_in and t < z.t0 + z.ramp_in / fps) or
                   (z.ramp_out and t > z.t1 - z.ramp_out / fps))
         if runs and runs[-1][0] == bool(moving):
@@ -755,6 +832,41 @@ def build_video_cmd(ctx: RenderCtx, segments: list, src_meta: dict, src_paths: d
     draft path from before hardware decode: no -hwaccel, and an HDR source tonemapped before the
     crop and scale. render.run retries a failed draft that way. Finals always decode in software.
     audio=None is a still (stills()): one PNG frame, with no sound and no encoder."""
+    fps = float(ctx.fmt.get("fps") or 30)
+    cmd, chains, k = video_graph(ctx, segments, src_meta, src_paths, faces, out_w, out_h, layers, zooms, ass_name,
+                                 dur, t_shift, encoder, fast)
+    write_graph(chains, graph_file)
+    if audio is None:       # a still (stills()): the one frame as a PNG, with no sound and no encode
+        return cmd + [*tools.filter_script_args(graph_file.name), "-map", "[vout]", "-frames:v", "1",
+                      "-c:v", "png", "-f", "image2", "-update", "1", str(out_part)]
+    if audio_seek > 0:
+        cmd += ["-ss", _f(audio_seek)]
+    cmd += ["-t", _f(dur + 0.05), "-i", str(audio)]
+    audio_idx = k
+    cmd += [*tools.filter_script_args(graph_file.name), "-map", "[vout]", "-map", f"{audio_idx}:a",
+            "-af", "apad"]
+    cmd += encoder_args(encoder, ctx.draft, fps)
+    cmd += ["-r", _f(fps), *AUDIO_ARGS,
+            "-t", _f(dur), "-movflags", "+faststart", "-progress", "pipe:1", "-nostats",
+            "-f", "mp4", str(out_part)]
+    return cmd
+
+
+AUDIO_ARGS = ["-c:a", "aac", "-b:a", "192k", "-ar", "48000", "-ac", "2"]
+
+
+def write_graph(chains: list, graph_file: Path) -> None:
+    with open(graph_file, "w", encoding="utf-8", newline="\n") as fh:
+        fh.write(";\n".join(chains))
+
+
+def video_graph(ctx: RenderCtx, segments: list, src_meta: dict, src_paths: dict, faces: dict,
+                out_w: int, out_h: int, layers: list, zooms: list, ass_name: Optional[str],
+                dur: float, t_shift: float, encoder: Optional[str] = None, fast: bool = True) -> tuple:
+    """(command up to and with its inputs, filter chains ending in [vout], the next input's index) for the
+    picture of output seconds [t_shift, t_shift + dur): the whole video, a window, a chunk or a still. A
+    window or chunk draws the frames the whole video draws there (zooms, layers, mattes and captions are
+    placed on the full video's frame clock), which chunked_video relies on."""
     fps = float(ctx.fmt.get("fps") or 30)
     f = out_w / float(ctx.fmt.get("width") or out_w)
     lanes = video_lanes(segments)
@@ -864,38 +976,42 @@ def build_video_cmd(ctx: RenderCtx, segments: list, src_meta: dict, src_paths: d
             qcur = f"qb{mi}"
         k += 1
 
+    k_shift = round(t_shift * fps)
+
     def zoom_lane(cur: str, tag: str) -> str:
         """The zoom chains on `cur`; labels start with `tag`. Returns the zoomed label."""
         for zi, z in enumerate(zooms or []):
-            t0, t1 = z.t0 - t_shift, z.t1 - t_shift
-            if t1 <= 0 or t0 >= dur or z.scale <= 1.001:
+            span = _zoom_frames(z, fps, max(ctx.duration or 0.0, t_shift + dur))   # the whole video's length
+            if span is None:
                 continue
-            t0, t1 = max(0.0, t0), min(dur, t1)
+            # counted in frames of the full video: frame k here is its frame k + k_shift, as the caption track
+            # maps a window, so a window or a chunk (chunked_video) zooms exactly the frames the full render does
+            k0, k1 = max(0, span[0] - k_shift), min(n_frames, span[1] - k_shift)
+            if k1 <= k0:
+                continue
             cw = int(round(out_w / z.scale / 2)) * 2
             ch = int(round(out_h / z.scale / 2)) * 2
             cx, cy = z.cx * f, z.cy * f
             x = int(min(max(0, cx - cw / 2), out_w - cw))
             y = int(min(max(0, cy - ch / 2), out_h - ch))
             chains.append(f"[{cur}]split=2[{tag}m{zi}][{tag}s{zi}]")
-            # padded from 0 (see _layer_chain): the overlay never waits for the zoom's first frame. The
-            # base is on the fps grid, so start on a frame: trim and padding then agree to the frame.
-            k0 = int(math.ceil(t0 * fps - 1e-6))
-            t0 = k0 / fps
+            # padded from 0 (see _layer_chain): the overlay never waits for the zoom's first frame. The trim and
+            # the padding count frames, and `enable` sits on half-frame midpoints, so all three agree on exactly
+            # frames k0..k1-1 whatever the rounding of their times.
             pad = f",fps={fps},tpad=start={k0}" if k0 > 0 else ""
             scale_chain = (f"crop={cw}:{ch}:{x}:{y},scale={out_w}:{out_h}:flags={'fast_bilinear' if ctx.draft else 'lanczos'},"
                            f"setsar=1")
-            k1 = int(math.ceil(t1 * fps - 1e-6))
             # a crop rounded to the full width or height has no fixed point to grow from
-            if (z.ramp_in or z.ramp_out) and cw < out_w and ch < out_h and k1 > k0:
+            if (z.ramp_in or z.ramp_out) and cw < out_w and ch < out_h:
                 if z.blur:
                     chains.extend(_snap_chain(zi, z, k0, k1, (cw, ch, x, y), scale_chain, fps, t_shift, out_w, out_h,
                                               ctx.draft, tag))
                 else:
                     chains.append(_ramp_chain(zi, z, k0, k1, (cw, ch, x, y), fps, t_shift, out_w, out_h, ctx.draft, tag))
             else:
-                chains.append(f"[{tag}s{zi}]trim=start={_f(t0)}:end={_f(t1)},setpts=PTS-STARTPTS,{scale_chain}{pad}[{tag}z{zi}]")
+                chains.append(f"[{tag}s{zi}]trim=start_frame={k0}:end_frame={k1},setpts=PTS-STARTPTS,{scale_chain}{pad}[{tag}z{zi}]")
             chains.append(f"[{tag}m{zi}][{tag}z{zi}]overlay=0:0:eof_action=pass:repeatlast=0:"
-                          f"enable='between(t,{_f(t0)},{_f(t1)})'[{tag}b{zi}]")
+                          f"enable='between(t,{_f(max(0.0, (k0 - 0.5) / fps))},{_f((k1 - 0.5) / fps)})'[{tag}b{zi}]")
             cur = f"{tag}b{zi}"
         return cur
 
@@ -923,17 +1039,17 @@ def build_video_cmd(ctx: RenderCtx, segments: list, src_meta: dict, src_paths: d
                           f"enable='between(t,{_f(t0)},{_f(t1)})'[o{li}]")
             cur = f"o{li}"
             continue
-        lc = _layer_chain(li, layer, f, fps, t_shift, dur)
+        lc = _layer_chain(li, layer, f, fps, t_shift, dur, ctx.duration)
         if lc is None:
             continue
-        chain, x, y, t0, t1, skip = lc
-        span = t1 - t0 + 0.1
+        chain, x, y, t0, t1, seek, lead = lc
+        span = lead + t1 - t0 + 0.1
         p = Path(layer.path)
         if layer.kind == "image":
             layer_inputs += ["-loop", "1", "-framerate", _f(fps), "-t", _f(span), "-i", str(p)]
         else:
-            if skip > 0:
-                layer_inputs += ["-ss", _f(skip)]
+            if seek > 0:
+                layer_inputs += ["-ss", _f(seek)]
             layer_inputs += ["-t", _f(span), "-i", str(p)]
         chains.append(f"[{k}:v]{chain}[l{li}]")
         chains.append(f"[{cur}][l{li}]overlay={x}:{y}:eof_action=pass:repeatlast=0:"
@@ -952,30 +1068,16 @@ def build_video_cmd(ctx: RenderCtx, segments: list, src_meta: dict, src_paths: d
         chains.append(f"[{cur}]{to_full}subtitles=filename={ass_name}:fontsdir=fonts{from_full}[capd]")
         cur = "capd"
     chains.append(f"[{cur}]format=yuv420p[vout]")
-    with open(graph_file, "w", encoding="utf-8", newline="\n") as fh:
-        fh.write(";\n".join(chains))
-    cmd += layer_inputs
-    if audio is None:       # a still (stills()): the one frame as a PNG, with no sound and no encode
-        return cmd + [*tools.filter_script_args(graph_file.name), "-map", "[vout]", "-frames:v", "1",
-                      "-c:v", "png", "-f", "image2", "-update", "1", str(out_part)]
-    if audio_seek > 0:
-        cmd += ["-ss", _f(audio_seek)]
-    cmd += ["-t", _f(dur + 0.05), "-i", str(audio)]
-    audio_idx = k
-    cmd += [*tools.filter_script_args(graph_file.name), "-map", "[vout]", "-map", f"{audio_idx}:a",
-            "-af", "apad"]
-    cmd += encoder_args(encoder, ctx.draft, fps)
-    cmd += ["-r", _f(fps), "-c:a", "aac", "-b:a", "192k", "-ar", "48000", "-ac", "2",
-            "-t", _f(dur), "-movflags", "+faststart", "-progress", "pipe:1", "-nostats",
-            "-f", "mp4", str(out_part)]
-    return cmd
+    return cmd + layer_inputs, chains, k
 
 
-# Final x264 preset. Instagram re-encodes every upload, so the export only has to be a clean master at
-# CRF 18. Measured on a 1:34 take (status/wire.md): encode 30-41 s vs `medium` 88-100 s, file 53.6 MB vs
+# Final x264 preset. Instagram re-encodes every upload, so the export only has to be a clean master (CRF 18
+# then, a constant QP 18 since chunked finals, #184). Measured on a 1:34 take (status/wire.md): encode 30-41 s vs `medium` 88-100 s, file 53.6 MB vs
 # 64.6 MB, SSIM 0.993 against the `medium` file (`faster`: 45-48 s, 64.3 MB, the same SSIM). Same bytes
 # per project still holds (software encoder, fixed args).
 FINAL_PRESET = "veryfast"
+FINAL_QP = 18
+X264_THREADS = 8
 
 
 def encoder_args(encoder: str, draft: bool, fps: float) -> list:
@@ -988,8 +1090,15 @@ def encoder_args(encoder: str, draft: bool, fps: float) -> list:
         return ["-c:v", "libx264", "-preset", "ultrafast", "-crf", "24", "-pix_fmt", "yuv420p"] + tags
     # A keyframe every second: the player seeks by decoding from the keyframe before the target, and x264's
     # default allows 250 frames between them (over 8 s at 30 fps). Measured on 60 s reels, files grew 5-9%.
-    return ["-c:v", "libx264", "-preset", FINAL_PRESET, "-crf", "18", "-profile:v", "high",
-            "-g", str(round(fps)), "-pix_fmt", "yuv420p"] + tags
+    # A chunked final (chunked_video) is joined from chunks each encoded alone, so nothing may carry across a
+    # keyframe: a constant QP (CRF's rate control carries frame complexity over; 180 of 240 frames differed
+    # chunked), a closed GOP with no scene-cut keyframes, and a fixed thread count (x264's frame threads change
+    # its decisions). #184 measured QP 18 at CRF 18's PSNR with a smaller file on synthetic takes; real phone
+    # takes are unmeasured.
+    gop = str(round(fps))
+    return ["-c:v", "libx264", "-preset", FINAL_PRESET, "-qp", str(FINAL_QP), "-profile:v", "high",
+            "-g", gop, "-keyint_min", gop, "-sc_threshold", "0", "-flags", "+cgop", "-threads", str(X264_THREADS),
+            "-pix_fmt", "yuv420p"] + tags
 
 
 # --- cover --------------------------------------------------------------------------------------
@@ -1125,6 +1234,108 @@ def read_rules(path: Optional[str]) -> Optional[tuple]:
     return rule_checks.parse_rules(text)
 
 
+def font_check(err: str, font_path, warnings: list) -> None:
+    """Stop on captions drawn in another font (libass's fontselect lines in `err`); warn when libass said nothing."""
+    bad = check_fontselect(err, Path(font_path))
+    if bad:
+        raise EngineError("FONT_SUBSTITUTED", f"libass used a different font: {bad}",
+                          "Your captions came out in the wrong font, so I stopped. Please "
+                          "reinstall Reel Studio.")
+    if "fontselect:" not in err:
+        warnings.append("libass did not report its font choice; caption font unverified")
+
+
+def _chunk_window(segments: list, duration: float, f0: int, f1: int, n_frames: int, fps: float) -> tuple:
+    """(segments, dur, t_shift) for output frames [f0, f1); the whole cut's own when that is all of it."""
+    if f0 == 0 and f1 == n_frames:
+        return segments, duration, 0.0
+    return cutmod.window_segments(segments, f0 / fps, f1 / fps), (f1 - f0) / fps, f0 / fps
+
+
+def chunked_video(ctx: RenderCtx, tl, segments: list, src_meta: dict, src_paths: dict, faces: dict, layers: list,
+                  zooms: list, ass_name: Optional[str], font_path, audio: Path, out_part: Path, rwork: Path, on_pct,
+                  warnings: list) -> Optional[dict]:
+    """A final export as a row of cached ~2 s chunks (chunks.py). Chunks with no file under their key are encoded,
+    one FFmpeg pass per run of consecutive missing chunks, each chunk by an encoder of its own; then every chunk is
+    joined by the concat demuxer, copying the picture, and the sound is encoded whole beside it as the single pass
+    encodes it. `segments` is the picture's timeline (a camera choice included, use_angles).
+    -> {total, encoded: [indices of the chunks encoded]}, or None when a take's frames are unevenly spaced
+    (chunks.even_frames): that final is rendered in one pass."""
+    cache = chunkmod.Cache(rwork / chunkmod.DIR)
+    timing = cache.dir / "frame-timing.json"
+    if not all(chunkmod.even_frames(ctx.ffprobe, src_paths[sid], timing) for sid in {seg.source for seg in segments}):
+        log("# a take's frames are unevenly spaced: the final is rendered in one pass")
+        return None
+    fps = float(ctx.fmt["fps"])
+    W, H = int(ctx.fmt["width"]), int(ctx.fmt["height"])
+    n_frames = max(1, int(round(tl.duration * fps)))
+    spans = chunkmod.plan(n_frames, fps)
+    enc = encoder_args("libx264", False, fps)
+    ass = (rwork / ass_name).read_text(encoding="utf-8") if ass_name else None
+    font = chunkmod.file_identity(font_path) if font_path else None
+    build = chunkmod.ffmpeg_build(ctx.ffmpeg)
+
+    def picture(f0: int, f1: int) -> tuple:
+        segs, dur, shift = _chunk_window(segments, tl.duration, f0, f1, n_frames, fps)
+        cmd, chains, _ = video_graph(ctx, segs, src_meta, src_paths, faces, W, H, layers, zooms, ass_name, dur, shift,
+                                     "libx264", False)
+        return cmd, chains, dur, shift
+
+    keys, known = [], {}
+    for f0, f1 in spans:
+        cmd, chains, dur, shift = picture(f0, f1)
+        keys.append(chunkmod.chunk_key({
+            "ffmpeg": build, "frames": f1 - f0, "command": chunkmod.command_identity(cmd, rwork, known),
+            "graph": chains, "encoder": enc, "font": font,
+            "captions": chunkmod.caption_events(ass, shift, shift + dur) if ass else None}))
+    missing = [i for i, key in enumerate(keys) if not cache.has(key)]
+    todo = sum(spans[i][1] - spans[i][0] for i in missing)
+    made_dir, graph = cache.dir / "new", rwork / "graph_chunk.txt"
+    done = 0
+    for run in chunkmod.runs(missing, chunkmod.ENCODERS_PER_PASS):
+        # One pass draws the run's frames; each chunk gets its own encoder, which starts fresh on the chunk's first
+        # frame (chunks.py), so how runs are split never changes a chunk. The first output only counts frames.
+        f0, f1 = spans[run[0]][0], spans[run[-1]][1]
+        cmd, chains, dur, shift = picture(f0, f1)
+        chains.append(f"[vout]split={len(run) + 1}[count]" + "".join(f"[c{j}]" for j in range(len(run))))
+        for j, i in enumerate(run):
+            a, b = spans[i][0] - f0, spans[i][1] - f0
+            chains.append(f"[c{j}]trim=start_frame={a}:end_frame={b},setpts=PTS-STARTPTS[p{j}]")
+        write_graph(chains, graph)
+        shutil.rmtree(made_dir, ignore_errors=True)
+        made_dir.mkdir()
+        cmd += [*tools.filter_script_args(graph.name), "-progress", "pipe:1", "-nostats",
+                "-map", "[count]", "-f", "null", "-"]
+        for j in range(len(run)):
+            cmd += ["-map", f"[p{j}]", *enc, "-r", _f(fps), "-f", "mp4", str(made_dir / f"{j:05d}.mp4")]
+
+        def run_pct(p, base=done, frames=f1 - f0):
+            on_pct(90 * (base + frames * p / 100) / todo)
+        err = tools.ffmpeg_progress(cmd, dur, run_pct, timeout=max(600, dur * 40), what="chunk render", cwd=rwork,
+                                    frames=f1 - f0)
+        if font_path is not None and chunkmod.caption_events(ass, shift, shift + dur)[1]:
+            font_check(err, font_path, warnings)
+        for j, i in enumerate(run):
+            cache.put(made_dir / f"{j:05d}.mp4", keys[i])
+        done += f1 - f0
+    shutil.rmtree(made_dir, ignore_errors=True)
+
+    listing = chunkmod.concat_list([cache.path(key).name for key in keys], cache.dir / "export.ffconcat")
+    dur = tl.duration
+    cmd = [ctx.ffmpeg, "-y", "-nostdin", "-hide_banner", "-f", "concat", "-i", str(listing),
+           "-t", _f(dur + 0.05), "-i", str(audio), "-map", "0:v", "-map", "1:a", "-c:v", "copy", "-af", "apad",
+           *AUDIO_ARGS, "-t", _f(dur), "-movflags", "+faststart", "-progress", "pipe:1", "-nostats",
+           "-f", "mp4", str(out_part)]
+    tools.ffmpeg_progress(cmd, dur, lambda p: on_pct(90 + p / 10 if todo else p), timeout=max(300, dur * 4),
+                          what="chunk join")
+    got = tools.text_run([ctx.ffprobe, "-v", "error", "-select_streams", "v:0", "-show_entries",
+                          "stream=nb_frames", "-of", "csv=p=0", str(out_part)], 60, "chunk join check").stdout
+    if got.strip() != str(n_frames):
+        raise RuntimeError(f"the joined chunks have {got.strip() or 'no'} frames, not {n_frames}")
+    cache.prune(keys)
+    return {"total": len(spans), "encoded": missing}
+
+
 def check_fontselect(stderr: str, font_path: Path) -> Optional[str]:
     """libass logs which file it actually used. Anything other than our font = silent substitution."""
     hits = [ln for ln in stderr.splitlines() if "fontselect:" in ln]
@@ -1156,7 +1367,7 @@ def run(project_dir: Path, draft: bool = False, window: Optional[str] = None,
         root: Optional[Path] = None, verify: bool = True, first_look: bool = False,
         music: Optional[str] = None, cover: bool = True, project_file: Optional[Path] = None,
         out: Optional[Path] = None, job_id: Optional[str] = None, parent: Optional[int] = None,
-        merge_parent: Optional[int] = None, rules: Optional[str] = None) -> dict:
+        merge_parent: Optional[int] = None, rules: Optional[str] = None, chunked: bool = True) -> dict:
     t_start = time.time()
     checks = read_rules(rules)
     project_dir = Path(project_dir).resolve()
@@ -1335,63 +1546,73 @@ def run(project_dir: Path, draft: bool = False, window: Optional[str] = None,
     def on_pct(p):
         progress(STAGE, 20 + 0.72 * p, "Making your video")
 
+    chunks = None
+    if chunked and not draft and not win:
+        # A final is made of cached chunks (chunked_video), so an edit re-encodes only the chunks it touched. A take
+        # that can't be chunked, or anything going wrong there, falls back to the single pass below, except
+        # captions in the wrong font, which the single pass would draw the same way.
+        try:
+            chunks = chunked_video(ctx, tl, segments, src_meta, src_paths, faces, layers, zooms, ass_name, font_path,
+                                   audio, out_part, rwork, on_pct, warnings)
+        except EngineError as exc:
+            if exc.code == "FONT_SUBSTITUTED":
+                raise
+            log(f"# chunked final failed, rendering it in one pass: {exc.message[-400:]}")
+        except Exception as exc:   # noqa: BLE001 -- the single pass is the fallback for any failure
+            log(f"# chunked final failed, rendering it in one pass: {exc!r}")
     err = None
-    try:
-        err = tools.ffmpeg_progress(cmd, dur, on_pct, timeout=max(600, dur * 40), what="video render",
-                                    cwd=rwork, user_message="I couldn't finish making your video. "
-                                                            "Please try again.")
-    except EngineError as exc:
-        if not draft:
-            raise
-        if vpaths != src_paths:
-            # A damaged copy fails whatever encodes it: read the originals with the same encoder first,
-            # so a bad copy costs one retry and never marks a working encoder as failed.
-            log(f"# draft from the preview copies failed, retrying from the originals: {exc.message[-400:]}")
-            video_from = {sid: "original" for sid in src_meta}
-            cmd = build_video_cmd(ctx, segments, src_meta, src_paths, faces, out_w, out_h, layers, zooms,
-                                  ass_name, audio, audio_seek, dur, t_shift, encoder, out_part, graph)
-            try:
-                err = tools.ffmpeg_progress(cmd, dur, on_pct, timeout=max(600, dur * 40), what="video render",
-                                            cwd=rwork)
-            except EngineError as again:
-                exc = again
-        if err is None:
-            log(f"# hardware draft path failed, retrying in software: {exc.message[-400:]}")
-            warnings.append("The fast preview path didn't work on this computer, so I used the slower one.")
-            # the originals too: a damaged preview copy must cost speed, never the preview
-            video_from = {sid: "original" for sid in src_meta}
-
-            def slow(enc: str) -> str:
-                return tools.ffmpeg_progress(build_video_cmd(ctx, segments, src_meta, src_paths, faces, out_w,
-                                                             out_h, layers, zooms, ass_name, audio, audio_seek,
-                                                             dur, t_shift, enc, out_part, graph, fast=False),
-                                             dur, on_pct, timeout=max(600, dur * 40), what="video render",
-                                             cwd=rwork)
-            # Hardware decode AND a GPU encoder: either may have failed, so keep the encoder first and a
-            # decoder that can't open this file doesn't get a working encoder marked as failed for days.
-            # Not after a timeout: a third full timeout would leave the user waiting half an hour.
-            both_gpu = encoder != "libx264" and "-hwaccel" in cmd
-            if both_gpu and exc.code != "TIMEOUT":
+    if chunks is None:
+        err = None
+        try:
+            err = tools.ffmpeg_progress(cmd, dur, on_pct, timeout=max(600, dur * 40), what="video render",
+                                        cwd=rwork, user_message="I couldn't finish making your video. "
+                                                                "Please try again.")
+        except EngineError as exc:
+            if not draft:
+                raise
+            if vpaths != src_paths:
+                # A damaged copy fails whatever encodes it: read the originals with the same encoder first,
+                # so a bad copy costs one retry and never marks a working encoder as failed.
+                log(f"# draft from the preview copies failed, retrying from the originals: {exc.message[-400:]}")
+                video_from = {sid: "original" for sid in src_meta}
+                cmd = build_video_cmd(ctx, segments, src_meta, src_paths, faces, out_w, out_h, layers, zooms,
+                                      ass_name, audio, audio_seek, dur, t_shift, encoder, out_part, graph)
                 try:
-                    err = slow(encoder)
-                except EngineError as exc2:
-                    log(f"# software decode with {encoder} failed too: {exc2.message[-400:]}")
+                    err = tools.ffmpeg_progress(cmd, dur, on_pct, timeout=max(600, dur * 40), what="video render",
+                                                cwd=rwork)
+                except EngineError as again:
+                    exc = again
             if err is None:
-                failed_encoder, encoder = encoder, "libx264"
-                err = slow(encoder)
-                if failed_encoder != "libx264" and not (both_gpu and exc.code == "TIMEOUT"):
-                    # Software worked where the GPU encoder did not: stop trying that encoder for a few days.
-                    # (After a timeout with hardware decode, nothing showed the encoder was at fault.)
-                    tools.mark_encoder_failed(failed_encoder)
+                log(f"# hardware draft path failed, retrying in software: {exc.message[-400:]}")
+                warnings.append("The fast preview path didn't work on this computer, so I used the slower one.")
+                # the originals too: a damaged preview copy must cost speed, never the preview
+                video_from = {sid: "original" for sid in src_meta}
+
+                def slow(enc: str) -> str:
+                    return tools.ffmpeg_progress(build_video_cmd(ctx, segments, src_meta, src_paths, faces, out_w,
+                                                                 out_h, layers, zooms, ass_name, audio, audio_seek,
+                                                                 dur, t_shift, enc, out_part, graph, fast=False),
+                                                 dur, on_pct, timeout=max(600, dur * 40), what="video render",
+                                                 cwd=rwork)
+                # Hardware decode AND a GPU encoder: either may have failed, so keep the encoder first and a
+                # decoder that can't open this file doesn't get a working encoder marked as failed for days.
+                # Not after a timeout: a third full timeout would leave the user waiting half an hour.
+                both_gpu = encoder != "libx264" and "-hwaccel" in cmd
+                if both_gpu and exc.code != "TIMEOUT":
+                    try:
+                        err = slow(encoder)
+                    except EngineError as exc2:
+                        log(f"# software decode with {encoder} failed too: {exc2.message[-400:]}")
+                if err is None:
+                    failed_encoder, encoder = encoder, "libx264"
+                    err = slow(encoder)
+                    if failed_encoder != "libx264" and not (both_gpu and exc.code == "TIMEOUT"):
+                        # Software worked where the GPU encoder did not: stop trying that encoder for a few days.
+                        # (After a timeout with hardware decode, nothing showed the encoder was at fault.)
+                        tools.mark_encoder_failed(failed_encoder)
     timings["encode"] = round(time.time() - t, 2)
-    if font_path is not None:
-        bad = check_fontselect(err, Path(font_path))
-        if bad:
-            raise EngineError("FONT_SUBSTITUTED", f"libass used a different font: {bad}",
-                              "Your captions came out in the wrong font, so I stopped. Please "
-                              "reinstall Reel Studio.")
-        if "fontselect:" not in err:
-            warnings.append("libass did not report its font choice; caption font unverified")
+    if font_path is not None and chunks is None:      # a chunked final checked each pass that drew captions
+        font_check(err, font_path, warnings)
     os.replace(out_part, out)
 
     visual_changes = visual_change_meter(dur, segments, raw_broll, zooms, visual_offset=t_shift, fps=fps)
@@ -1401,6 +1622,7 @@ def run(project_dir: Path, draft: bool = False, window: Optional[str] = None,
               "duration": round(dur, 3), "segments": len(segments), "encoder": encoder,
               "size": [out_w, out_h], "videoFrom": video_from, "layers": len(layers), "zooms": len(zooms),
               "captions": len(cap_report), "warnings": warnings, "visualChanges": visual_changes,
+              "chunks": chunks,    # None: not a final, or a final rendered in one pass
               "expectedSilence": ctx.expected_silence,
               "broll": [r for r in broll_report if r.get("fallback") or r.get("skipped") or r.get("remake")],
               **({"angles": angle_rows} if angle_rows else {})}
@@ -1798,6 +2020,8 @@ def stills(project_dir: Path, times: list, width: int, root: Optional[Path] = No
             on_still(out[-1])
         progress("frames", 100 * (n + 1) / len(times), "Looking at your video")
     return {"frames": out, "animationsSampledAtEnd": moved, "warnings": warnings,
+            # pictures shown differently or skipped, and animations to remake, as render_draft reports them
+            "broll": [r for r in broll_report if r.get("fallback") or r.get("skipped") or r.get("remake")],
             "timings": timings,
             # per take: what every still read, or "mixed" when a slow retry read the original for some
             "videoFrom": {sid: (vals.pop() if len(vals) == 1 else "mixed")

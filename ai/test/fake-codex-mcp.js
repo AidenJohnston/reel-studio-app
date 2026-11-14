@@ -1,10 +1,13 @@
 'use strict';
 const fs = require('node:fs');
+// Whole or absent: a Stop can kill this process while it starts, and a reader must never find the file empty
+// (a plain writeFileSync creates it before it writes). A temporary name in the same folder, then a rename.
+const writeWhole = (file, text) => { fs.writeFileSync(file + '.part', text); fs.renameSync(file + '.part', file); };
 const { spawn } = require('node:child_process');
 const argv = process.argv.slice(2);
 const arg = (k) => argv[argv.indexOf(k) + 1];
 const scenario = JSON.parse(fs.readFileSync(arg('--scenario'), 'utf8'));
-if (scenario.argvFile) fs.writeFileSync(scenario.argvFile, JSON.stringify(argv));
+if (scenario.argvFile) writeWhole(scenario.argvFile, JSON.stringify(argv));
 const config = new Map();
 for (let i = 0; i < argv.length; i++) if (argv[i] === '-c') {
   const v = argv[++i]; const eq = v.indexOf('=');
@@ -12,7 +15,7 @@ for (let i = 0; i < argv.length; i++) if (argv[i] === '-c') {
 }
 const out = (m) => process.stdout.write(JSON.stringify(m) + '\n');
 const relay = spawn(config.get('mcp_servers.reelstudio.command'), config.get('mcp_servers.reelstudio.args'), { env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' }, stdio: ['pipe', 'pipe', 'inherit'] });
-fs.writeFileSync(scenario.pidFile, JSON.stringify({ codex: process.pid, relay: relay.pid }));
+writeWhole(scenario.pidFile, JSON.stringify({ codex: process.pid, relay: relay.pid }));
 const closed = new Promise((r) => relay.once('close', r));
 let id = 0, buf = '';
 const waiting = new Map();
