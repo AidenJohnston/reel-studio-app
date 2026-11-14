@@ -167,7 +167,40 @@
           }
         },
         "fadeIn": { "type": "number", "minimum": 0, "maximum": 30, "description": "seconds the song takes to come in (absent = 0.6, or 0.05 with level loud-intro)" },
-        "fadeOut": { "type": "number", "minimum": 0, "maximum": 30 }
+        "fadeOut": { "type": "number", "minimum": 0, "maximum": 30 },
+        "beats": {
+          "type": "object",
+          "description": "the song's beat grid, stored once when the song is chosen: each beat a whole frame of song time at fps, measured on the file whose SHA-256 it names (another file's grid is ignored)",
+          "required": ["fps", "frames", "seconds", "sha256"],
+          "properties": {
+            "fps": { "type": "number", "exclusiveMinimum": 0 },
+            "frames": { "type": "array", "items": { "type": "integer", "minimum": 0 } },
+            "seconds": { "type": "number", "minimum": 0, "description": "the song's length" },
+            "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+          }
+        },
+        "onBeat": {
+          "type": "array",
+          "description": "what lands on the song's beats: jump cuts, zoom punch-ins, b-roll entrances",
+          "items": { "enum": ["cuts", "zooms", "broll"] },
+          "uniqueItems": true
+        },
+        "drops": {
+          "type": "array",
+          "description": "lines the music drops out for: gone just before `from`, back on the first beat after `to`",
+          "items": {
+            "type": "object",
+            "required": ["from", "to"],
+            "properties": { "from": { "$ref": "#/$defs/wordId" }, "to": { "$ref": "#/$defs/wordId" } }
+          }
+        }
+      }
+    },
+    "voice": {
+      "type": "object",
+      "description": "effects on the voice",
+      "properties": {
+        "reverbThrow": { "type": "boolean", "description": "an echo tail on the last word: the voice's final 0.7 s rings out" }
       }
     },
     "broll": {

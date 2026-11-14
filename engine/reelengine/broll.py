@@ -49,7 +49,7 @@ import re
 from pathlib import Path
 from typing import Optional
 
-from . import anim_timing, placement, project as projmod
+from . import anim_timing, beats, placement, project as projmod
 from .compose_util import (EngineError, _get, any_mirrored, ffmpeg_bin, fmt_of, kind_of, layers_dir, load_font, log,
                            open_image, probe, reframe_rect, reframe_vf, report, resolve_asset, run, source_mirrored,
                            source_path, source_spans, word_end, word_ids_between, word_start)
@@ -77,6 +77,7 @@ except ImportError:  # pragma: no cover - only before A1's render_ctx exists
 
 VERSION = 8                    # bump when drawing code changes so cached files are redrawn
 LEAD = 0.13
+BEAT_EARLY, BEAT_LATE = 0.15, 0.10   # an entrance on the beat moves at most this much (beats.py)
 MIN_GAP = 0.22
 MIN_HOLD = 2.0                 # every card holds this long, however soon the next one comes
 MIN_WINDOW = 0.05
@@ -205,6 +206,7 @@ def plan_windows(ctx) -> list[dict]:
     """[{id, index, treatment, t0, t1, words, item}] for every broll item whose anchor is in the cut,
     in start order, with hold, handoff and gap rules applied. Cheap: renders nothing."""
     items = list((ctx.project or {}).get("broll") or [])
+    grid = beats.ctx_synced(ctx, "broll")     # music.onBeat "broll": entrances land on beats
     anchored = []
     for i, it in enumerate(items):
         anc = it.get("anchor") or {}
@@ -223,7 +225,7 @@ def plan_windows(ctx) -> list[dict]:
             log(f"broll {it.get('id', i)}: anchor {a}..{b} is not in the cut; skipped")
             continue
         lead = float(it.get("leadIn", LEAD) if it.get("leadIn") is not None else LEAD)
-        anchored.append((max(0.0, s - lead), i, it, a, b, e))
+        anchored.append((max(0.0, beats.snap(s - lead, grid, BEAT_EARLY, BEAT_LATE)), i, it, a, b, e))
     anchored.sort(key=lambda row: (row[0], row[1]))
     plans = []
     for k, (t0, i, it, a, b, e) in enumerate(anchored):

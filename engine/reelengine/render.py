@@ -1037,7 +1037,7 @@ def make_ctx(project_dir: Path, proj: dict, tl, draft: bool, root: Path, rwork: 
     if decisions is None:
         effective = proj
     # Seeded offsets must reach the audio planner, not only the render metadata.
-    resolved_tl = projmod.timeline(project_dir, effective, tl.words)
+    resolved_tl = projmod.timeline(project_dir, effective, tl.words, root=root)
     tl.segments[:] = resolved_tl.segments
     def _progress(stage, pct, message):
         progress(stage or STAGE, pct, message)
@@ -1180,7 +1180,7 @@ def run(project_dir: Path, draft: bool = False, window: Optional[str] = None,
     # Taken before anything is read: a file changed during the render can only make the key older than
     # the picture, so frames then draws stills instead of trusting this render (current_render).
     pkey = picture_key(project_dir, proj, root)
-    tl = edit_timeline(project_dir, proj)
+    tl = edit_timeline(project_dir, proj, root)
     win = parse_window(window, tl.duration)
     if win:
         draft = True        # a window is a preview: always the fast encoder
@@ -1480,9 +1480,10 @@ def copy_whole(src: Path, dst: Path) -> None:
         part.unlink(missing_ok=True)
 
 
-def edit_timeline(project_dir: Path, proj: dict):
-    """The project's cut on the output clock, refusing an empty cut."""
-    tl = projmod.timeline(project_dir, proj)
+def edit_timeline(project_dir: Path, proj: dict, root: Optional[Path] = None):
+    """The project's cut on the output clock, refusing an empty cut. `root` finds a Library song whose beats
+    land the cuts (project.timeline)."""
+    tl = projmod.timeline(project_dir, proj, root=root)
     if tl.duration < 0.3 or not tl.segments:
         raise EngineError("EMPTY_CUT", "the cut is empty", "There's nothing left in the edit. Undo the last change.")
     return tl
@@ -1608,8 +1609,11 @@ def picture_key(project_dir: Path, proj: dict, root: Optional[Path] = None) -> s
     and where cards go) and the app's rendered animations (a remade one keeps its id and file name). The
     engine is its version plus its code and bundled fonts, as cover_key keys on cover code (a dev build
     changes them without a new version). A render whose manifest carries the key a project has now shows
-    that project's frames (current_render)."""
-    silent = dict(proj, music=None)
+    that project's frames (current_render). When cuts, zooms, b-roll or cards land on the song's beats
+    (music.onBeat, or a cut style's beat accents), the song moves the picture, so the music stays in."""
+    from .cut_style import beat_accents_on
+    on_beat = beat_accents_on(proj) or bool((proj.get("music") or {}).get("onBeat"))
+    silent = proj if on_beat else dict(proj, music=None)
     try:
         transcript = hashlib.sha256(projmod.transcript_path(project_dir, proj).read_bytes()).hexdigest()
     except OSError:
@@ -1718,7 +1722,7 @@ def stills(project_dir: Path, times: list, width: int, root: Optional[Path] = No
     project_dir = Path(project_dir).resolve()
     proj = projmod.load(project_dir, file=project_file)
     root = tools.root_dir(str(root) if root else None)
-    tl = edit_timeline(project_dir, proj)
+    tl = edit_timeline(project_dir, proj, root)
     rwork = project_dir / "work" / "render"
     rwork.mkdir(parents=True, exist_ok=True)
     out_dir = Path(out_dir) if out_dir else project_dir / "work" / "frames"   # with a render's frames (frames.py), never in a version

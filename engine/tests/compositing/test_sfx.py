@@ -122,6 +122,17 @@ def test_two_effects_closer_than_the_limit_play_once(tmp_path, take):
     assert sfx.peak_loudness(seconds(out, t2 - 0.1, t2 + 0.4)) < -70
 
 
+def test_effects_stay_sparse_however_many_are_asked_for(tmp_path, take):
+    # a 9.5 s video has room for two (one, plus one per 8 s): a third, though 2.5 s clear, is left out
+    ctx = project(tmp_path, take)
+    asked = [{"at": {"word": fx.word_near(ctx, t)}, "sound": "pop-plop"} for t in (1.0, 3.5, 6.0)]
+    fx.set_project(ctx, sfx=asked)
+    placed, left = sfx.plan(ctx)
+    assert sfx.max_effects(ctx.duration) == 2
+    assert [p["at"] for p in placed] == [a["at"] for a in asked[:2]]
+    assert [r["at"] for r in left] == [asked[2]["at"]] and "room for 2" in left[0]["skipped"]
+
+
 def test_effects_that_cannot_play_cleanly_are_left_out(tmp_path, take):
     pdir = tmp_path / "proj"
     fx.make_project(pdir, take, keep=((0.05, 3.0), (4.0, 6.0), (7.0, 9.6)))

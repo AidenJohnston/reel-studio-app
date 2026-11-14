@@ -9,6 +9,8 @@ pipeline's zooms.py, keeping its rules:
   * release invisibly: if a zoom would end while a face-hiding b-roll is up, it holds until that
     b-roll's exit cut instead of visibly snapping back
   * zooms never overlap: a later zoom cuts the earlier one short (a hard punch to the new framing)
+  * with music.onBeat "zooms", the punch-in lands on the nearest beat up to BEAT_EARLY before its
+    word or BEAT_LATE after it (beats.py)
 
 `style: "snap"` eases the punch in and the release back out instead of cutting. Motion never runs
 across a cut: a release that would is made on the cut instead, the way a b-roll exit hides one.
@@ -21,6 +23,7 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass
 
+from . import beats
 from .compose_util import fmt_of, log, word_end, word_start
 
 try:
@@ -46,6 +49,8 @@ NAMED_SCALES = {name: spec["framingPair"][1] for name, spec in CUT_STYLES.items(
 MAX_SCALE = 2.0
 TAIL = 0.05           # hold a hair past the last word so the release is not on a syllable
 EYE_BIAS = 0.12       # centre this fraction of a face-height above the face's middle
+BEAT_EARLY = 0.15     # a zoom on the beat may punch in this much before its word...
+BEAT_LATE = 0.06      # ...or this much after it (later reads as a missed hit)
 SNAP_IN = 0.22        # judged by eye on rendered frames between 0.18 and 0.26 s, no measurement behind it
 SNAP_OUT = 0.30       # slower than the punch: the release should not draw the eye
 SPRING = 7.0          # stiffness per ramp length, also judged by eye
@@ -101,6 +106,7 @@ def face_drift(scale: float, cx: float, cy: float, eyes: tuple, W: int, H: int) 
 def _anchored(ctx, fps: float):
     """(index, t0, t1, scale, kind, last word's end) for every zoom that draws, before the spans meet
     each other: from its first word to the end of its last word plus TAIL, on the output clock, unrounded."""
+    grid = beats.ctx_synced(ctx, "zooms")
     for i, z in enumerate((ctx.project or {}).get("zooms") or []):
         anc = z.get("anchor") or {}
         a, b = anc.get("from"), anc.get("to") or anc.get("from")
@@ -111,6 +117,7 @@ def _anchored(ctx, fps: float):
             continue
         last_word_end = t1
         t1 += TAIL
+        t0 = beats.snap(t0, grid, BEAT_EARLY, BEAT_LATE)
         raw_kind = z.get("kind")
         kind = raw_kind if raw_kind in {"punch", "snap", "drift"} else ("snap" if z.get("style") == "snap" else "punch")
         cut_style = (ctx.project or {}).get("cutStyle")

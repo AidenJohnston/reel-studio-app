@@ -246,3 +246,30 @@ Existing project shapes remain valid. New shapes can require a newer engine, as 
 - `music.fadeIn` (number, 0 to 30 seconds, absent = 0.6, or 0.05 with `level: "loud-intro"`): how long the song takes
   to come in. Below 0.01 s it is 0.01 s, so the first sample never clicks. Until now the fade-in was fixed; `fadeOut`
   was already a field. Set by "Edit it myself" (0 to 2 seconds there).
+
+## 2026-11-12 (beat sync, music drops, reverb throw)
+
+- `music.beats` (`{fps, frames, seconds, sha256}`, absent = none): the song's beat grid, each beat a whole frame
+  of SONG time, with the song's length and the SHA-256 of the file it was measured on. Written by `choose_music`
+  when it picks a song (engine `analyze-music --fps`) and replaced when the song changes. Stored rather than
+  re-detected so the same project always lands the same edits on the same frames. A grid whose hash isn't the
+  playing file's (the song was swapped by hand) is ignored, and the AI measures the song again when asked for
+  the beat. A `startAt` less than 1 s from the song's end plays the song from the top, and the grid is read from
+  there too (`beats.effective_start`, one rule for the mixer and the beats).
+- `music.onBeat` (array of `"cuts"`, `"zooms"`, `"broll"`, absent = none): those land on the nearest beat in
+  reach. A jump cut (between kept ranges, or where a long pause was taken out) moves at most 0.15 s by changing
+  only the silence before it; a zoom punches in up to
+  0.15 s before its word or 0.06 s after; a b-roll entrance moves up to 0.15 s earlier or 0.1 s later.
+- `music.drops` (`[{from, to}]` word ids, absent = none): the music is gone 40 ms before `from` and comes back on
+  the first beat within 1 s after `to` ends (0.15 s after it with no beat in reach). The song keeps running
+  underneath. Remapped after a re-transcription like the other anchors.
+- `voice.reverbThrow` (boolean, absent = false): an echo tail on the word the video ends on (the last word of
+  its last segment, so a word kept twice echoes at the end), from that word's final 0.7 s at most. It peaks 8 dB
+  under that word and fades out if it is still ringing when the video ends. The tail depends only on that word's
+  samples, so a preview window or an earlier edit gives the same tail.
+- All three are written by the AI's `set_sound_moments`; turning one off removes its field.
+- Sound effects: at most one, plus one per 8 seconds of video, play; the earliest play and the rest are left
+  out with a render warning.
+- `analyze-music` now suggests a start on the song's first attack after the calm bar (`suggestedStartAt`).
+  The fade-in default is unchanged on release/0.2.0 (0.6 s, `fadeIn` sets it; `fadeIn: 0` starts the song
+  on that hit). The beat tracker is release/0.2.0's (beat phase fix of 2026-10-23), not #178's.
