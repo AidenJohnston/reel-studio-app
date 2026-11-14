@@ -1953,6 +1953,7 @@ def build_layers(ctx) -> list:
     the per-item record (zone, opaque bbox, fallbacks, skips) that verify and the AI can read."""
     plans = plan_windows(ctx)
     out, records, placed = [], [], {}
+    anim_starts = None          # where each animation comes on, on the project's clock (anim_timing.starts)
     for k, plan in enumerate(plans):
         it = plan["item"]
         tname = plan["treatment"]
@@ -1988,7 +1989,9 @@ def build_layers(ctx) -> list:
                                   "This spot is set to show an animation but its file isn't one, so make the animation again.")
             retime = None
             if tname == "animation":
-                src, retime = _current_animation(ctx, it, src, plan["t0"])
+                if anim_starts is None:
+                    anim_starts = anim_timing.starts(ctx)
+                src, retime = _current_animation(ctx, it, src, anim_starts.get(plan["id"], plan["t0"]))
             if plan["joins"] and (it.get("params") or {}).get("scale") is None:
                 params["scale"] = JOIN_SCALE
             zones, face, frame = zones_for(ctx, plan["t0"], plan["t1"])

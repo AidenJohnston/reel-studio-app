@@ -4,6 +4,7 @@ spec + timing), and the same cut never asks twice."""
 from __future__ import annotations
 
 import json
+import math
 import subprocess
 from pathlib import Path
 
@@ -140,6 +141,31 @@ def test_a_recut_clip_is_made_at_the_project_rate(tmp_path, video):
         assert job["fps"] == fps
         named[fps] = job["out"]
     assert named[30] != named[60]
+
+
+def test_a_draft_plays_the_clip_anim_jobs_listed_when_starts_snap_to_frames(tmp_path, video, monkeypatch):
+    # Fails if a 60 fps project's draft (on the 30 fps preview clock) names a different re-timed clip
+    # than anim-jobs, which the app renders: with beat accents a card's start snaps to the render's frame
+    # grid (music.accent_time), and the draft would then show the old clip on every edit.
+    def snap(ctx, t, earliest=0.0, **_):
+        fps = broll.fmt_of(ctx)[2]
+        return math.ceil(t * fps + 0.5) / fps          # off the start, onto a frame of this clock
+    monkeypatch.setattr(broll, "accent_time", snap)
+    pdir = tmp_path / "p"
+    fx.make_project(pdir, video, keep=((1.0, 11.0),))
+    ctx = fx.make_ctx(pdir)
+    item, _ = _made_on(ctx, fx.word_near(ctx, 2.0), fx.word_near(ctx, 4.5))
+    fx.make_project(pdir, video, keep=((1.0, 3.0), (4.6, 11.0)))
+    ctx = fx.make_ctx(pdir)
+    fx.set_project(ctx, broll=[item], format={**ctx.project["format"], "fps": 60})
+    ctx.fmt["fps"] = 60
+    [job] = anim_timing.jobs(ctx)                      # what the app renders before the draft
+    _render_stand_in(Path(job["out"]), job["template"], job["params"])
+    draft = fx.make_ctx(pdir)
+    draft.fmt["fps"] = 30                              # render.run does this for a preview
+    layers = broll.build_layers(draft)
+    rec = json.loads((draft.work / "layers" / "layers.json").read_text(encoding="utf-8"))["items"][0]
+    assert rec["retime"] == "retimed" and Path(layers[0].path) == Path(job["out"])
 
 
 def test_readable_text_check_is_the_editors():

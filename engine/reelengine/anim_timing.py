@@ -20,6 +20,7 @@ rendered twice.
 """
 from __future__ import annotations
 
+import copy
 import hashlib
 import json
 import math
@@ -281,6 +282,27 @@ def project_fps(ctx) -> float:
     return float(((ctx.project or {}).get("format") or {}).get("fps") or 30)
 
 
+def at_project_rate(ctx):
+    """ctx on the project's frame clock. A card's start can snap to a beat on the frame grid
+    (music.accent_time), and a draft runs on the preview grid (render.preview_fps), so a draft and the
+    final could place one animation a frame apart and name two different re-timed clips. Where a clip
+    starts, which names it, is taken on the project's clock: every render then asks for the clip
+    anim-jobs listed. A draft plays it at most one preview frame from where it places the layer."""
+    fps = project_fps(ctx)
+    if float((ctx.fmt or {}).get("fps") or 30) == fps:
+        return ctx
+    view = copy.copy(ctx)
+    view.fmt = dict(ctx.fmt, fps=fps)
+    view._lint_snap_requests = None      # a lint pass records the render's own snaps, not these
+    return view
+
+
+def starts(ctx) -> dict:
+    """{b-roll id: output second it comes on, on the project's clock} (see at_project_rate)."""
+    from .broll import plan_windows
+    return {w["id"]: w["t0"] for w in plan_windows(at_project_rate(ctx))}
+
+
 def key(template: str, params: dict, fps: float = 30.0) -> str:
     # the rate is in the key: a clip made for another rate is a different clip, never reused
     blob = json.dumps([VERSION, template, params, float(fps)], sort_keys=True, separators=(",", ":"), default=str)
@@ -325,7 +347,7 @@ def jobs(ctx) -> list[dict]:
     [{id, template, params, fps, out}] (out is an absolute path for the renderer)."""
     from .broll import _anim_of, plan_windows
     out, seen = [], set()
-    for w in plan_windows(ctx):                  # where each card actually comes on
+    for w in plan_windows(at_project_rate(ctx)):      # where each card actually comes on
         sc = _anim_of(ctx, w["item"])
         if sc is None:
             continue
