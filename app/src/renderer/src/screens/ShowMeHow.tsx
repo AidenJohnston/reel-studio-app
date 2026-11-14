@@ -313,7 +313,12 @@ export function ShowMeHow({
           <Icon name="x" size={16} />
         </button>
       </div>
-      <p className="edit-sub">{s.queued ? `Your waiting edit. What you change here replaces it.` : 'Nothing changes until you make a new version.'}</p>
+      {/* The timeline under the reel makes each of its changes into a version at once (Reel.tsx timelineEdit), so this
+          line says so: it read "Nothing changes until you make a new version", and a subtitle fixed there with Enter
+          then made one (the runner's J3 by hand) */}
+      <p className="edit-sub">
+        {s.queued ? `Your waiting edit. What you change here replaces it.` : 'Changes here wait for a new version. A change on the timeline makes one straight away.'}
+      </p>
       <div
         className="tabs edit-tabs"
         role="tablist"

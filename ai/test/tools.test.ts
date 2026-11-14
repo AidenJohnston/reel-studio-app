@@ -10,7 +10,7 @@ import { FakeHost, makeProject, tinyPng, commitImage, tinyMp3, commitLocalAsset 
 import { CAPTION_PRESETS, applyPreset, presetOf } from '../../app/src/shared/caption-presets';
 import { describeChange } from '../../app/src/shared/describe';
 
-const SPEC_TOOLS = ['merge_versions', 'get_project', 'get_transcript', 'list_sources', 'set_clips', 'set_cut', 'find_match_cuts', 'set_cut_style', 'set_beat_accents', 'make_variant', 'set_gap_cap', 'set_caption_style', 'add_caption_correction', 'remove_caption_correction',
+const SPEC_TOOLS = ['merge_versions', 'get_project', 'get_transcript', 'list_sources', 'set_clips', 'set_cut', 'restore_from_version', 'find_match_cuts', 'set_cut_style', 'set_beat_accents', 'make_variant', 'set_gap_cap', 'set_caption_style', 'add_caption_correction', 'remove_caption_correction',
   'search_footage', 'list_library', 'read_references', 'choose_music', 'set_music_automation', 'add_broll', 'update_broll', 'remove_broll', 'resolve_asset', 'list_assets', 'preview_asset',
   'export_asset_credits', 'search_images', 'fetch_image', 'capture_website', 'make_animation', 'set_zoom', 'set_sfx', 'set_mirror', 'cover_candidates', 'set_cover', 'write_post', 'add_style_rule', 'render_draft', 'lint_edit', 'look_at_frames', 'finish'];
 
@@ -46,6 +46,102 @@ describe('tool schemas', () => {
     expect(result.isError).toBe(true);
     expect(result.content).toContain('was cut');
     expect(result.content).not.toContain('not in the transcript');
+  });
+});
+
+describe('restore_from_version', () => {
+  // The runner's J4 and J9 by chat (2026-11-13): Version 1 cut the "um" before a sentence, Version 2 cut the
+  // sentence, Version 3 made the subtitles big and red. Bringing the sentence back brought the "um" back too, and
+  // putting the subtitles back changed their capitals.
+  async function history() {
+    const { ctx, dir } = await ctxFor();
+    const p = await loadProject(dir);
+    const save = async (n: number) => {
+      await fsp.mkdir(path.join(dir, 'versions', `v${n}`), { recursive: true });
+      await saveProject(dir, { ...p, version: n }, path.join(dir, 'versions', `v${n}`, 'project.json'));
+    };
+    const v1Keep = [{ from: 'w0', to: 'w5' }, { from: 'w7', to: 'w17' }, { from: 'w19', to: 'w27' }];
+    p.cut.keep = v1Keep;
+    p.captions.style = { ...p.captions.style, case: 'upper', color: '#FFFFFF', size: 105 };
+    p.captions.corrections = [];
+    const v1Style = structuredClone(p.captions.style);
+    await save(1);
+    p.cut.keep = [{ from: 'w0', to: 'w5' }, { from: 'w19', to: 'w27', join: { transition: 'hard', frames: 0 } }];
+    await save(2);
+    // the bad version changes more than colour and size: the capitals, words per line and the pop too
+    p.captions.style = { ...p.captions.style, color: '#FF0000', size: 126, case: 'as-is', maxWords: 2, pop: true };
+    await save(3);
+    p.version = 3;
+    p.captions.corrections = [{ from: 'loaf', to: 'loaves' }];
+    await saveProject(dir, p);
+    return { ctx, dir, v1Keep, v1Style };
+  }
+
+  // fails if bringing a cut part back returns words the earlier version had cut (the "um" before it), drops a word
+  // it had, or changes the rest of the cut
+  it('brings back exactly the words the earlier version kept, in their place', async () => {
+    const { ctx, dir } = await history();
+    const r = await executeTool(ctx, 'restore_from_version', { part: 'words', from: 'w6', to: 'w17', version: null });
+    expect(r.isError).toBe(false);
+    expect((await loadProject(dir)).cut.keep).toEqual([
+      { from: 'w0', to: 'w5' }, { from: 'w7', to: 'w17' }, { from: 'w19', to: 'w27', join: { transition: 'hard', frames: 0 } },
+    ]);
+  });
+
+  // fails if putting the subtitles back leaves any style field different from the earlier version (the capitals), or
+  // undoes a word fix made since
+  it('puts the subtitles back with every style field of the earlier version, keeping word fixes', async () => {
+    const { ctx, dir, v1Style } = await history();
+    expect((await executeTool(ctx, 'restore_from_version', { part: 'subtitle-look', from: null, to: null, version: null })).isError).toBe(false);
+    const after = await loadProject(dir);
+    expect(after.captions.style).toEqual(v1Style);
+    expect(after.captions.corrections).toEqual([{ from: 'loaf', to: 'loaves' }]);
+  });
+
+  // fails if an undo on a branch takes the look of the other branch's version (numbered in between), or reads a
+  // style saved with its fields in another order as a different look, or passes over a version it could not read
+  it('takes the look from the newest version this one was made from that looks different', async () => {
+    const { ctx, dir } = await ctxFor();
+    const p = await loadProject(dir);
+    const save = async (n: number, parent: number | null, style: Record<string, unknown>) => {
+      const v = path.join(dir, 'versions', `v${n}`);
+      await fsp.mkdir(v, { recursive: true });
+      await saveProject(dir, { ...p, version: n, captions: { ...p.captions, style: style as any } }, path.join(v, 'project.json'));
+      await fsp.writeFile(path.join(v, 'version.json'), JSON.stringify({ parent }));
+    };
+    const white = { ...p.captions.style, color: '#FFFFFF' };
+    await save(1, null, white);
+    await save(2, 1, { ...white, color: '#FF0000' }); // red, then the person went back to Version 1
+    const blue = { ...white, color: '#0A84FF', pop: true, highlight: '#FFD60A' };
+    await save(3, 1, blue);
+    await save(4, 3, Object.fromEntries(Object.entries(blue).reverse())); // the same blue, fields in another order
+    await saveProject(dir, { ...p, version: 4, captions: { ...p.captions, style: blue as any } });
+    expect((await executeTool(ctx, 'restore_from_version', { part: 'subtitle-look', from: null, to: null, version: null })).isError).toBe(false);
+    expect((await loadProject(dir)).captions.style).toEqual(white);
+
+    await fsp.writeFile(path.join(dir, 'versions', 'v2', 'project.json'), '{ not json');
+    const r = await executeTool(ctx, 'restore_from_version', { part: 'subtitle-look', from: null, to: null, version: 2 });
+    expect(r.isError).toBe(true);
+    expect(r.content).toContain('Version 2 could not be read');
+
+    // a version on the line that is gone, or whose parent can't be read, stops the undo rather than skipping to Version 2
+    const blueAgain = () => saveProject(dir, { ...p, version: 4, captions: { ...p.captions, style: blue as any } });
+    await blueAgain();
+    await fsp.rm(path.join(dir, 'versions', 'v3'), { recursive: true });
+    const gone = await executeTool(ctx, 'restore_from_version', { part: 'subtitle-look', from: null, to: null, version: null });
+    expect(gone.isError).toBe(true);
+    expect(gone.content).toContain('Version 3 is missing');
+    await save(3, 1, blue);
+    await fsp.writeFile(path.join(dir, 'versions', 'v3', 'version.json'), JSON.stringify({ parent: '1' }));
+    const damaged = await executeTool(ctx, 'restore_from_version', { part: 'subtitle-look', from: null, to: null, version: null });
+    expect(damaged.isError).toBe(true);
+    expect(damaged.content).toContain("Version 3's version.json names no earlier version");
+
+    // damage further back than the look it finds never stops it: Version 1 is white, and its own parent is not read
+    await fsp.writeFile(path.join(dir, 'versions', 'v3', 'version.json'), JSON.stringify({ parent: 1 }));
+    await fsp.writeFile(path.join(dir, 'versions', 'v1', 'version.json'), '{ not json');
+    expect((await executeTool(ctx, 'restore_from_version', { part: 'subtitle-look', from: null, to: null, version: null })).isError).toBe(false);
+    expect((await loadProject(dir)).captions.style).toEqual(white);
   });
 });
 

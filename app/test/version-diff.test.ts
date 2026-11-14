@@ -48,6 +48,16 @@ describe('versionFact', () => {
   it('reads a subtitle’s size and look as one change, and a move alone as where they went', () => {
     const bigYellow = base({ captions: { enabled: true, style: { size: 126, position: 0.6, color: '#FFD60A' } } })
     expect(versionFact(versionRows(base(), bigYellow, { before: 20, after: 20 }))).toBe('Bigger yellow subtitles')
+    // fails if a colour other than white is named yellow: a note for bright red made "Bigger yellow subtitles" (J9),
+    // or a shade with no common name is given one
+    const bigRed = base({ captions: { enabled: true, style: { size: 126, position: 0.75, color: '#FF0000' } } })
+    expect(versionRows(base(), bigRed, { before: 20, after: 20 })).toContainEqual({ label: 'Subtitle look', before: 'Plain', after: 'Red' })
+    expect(versionFact(versionRows(base(), bigRed, { before: 20, after: 20 }))).toBe('Bigger red subtitles')
+    const muted = base({ captions: { enabled: true, style: { size: 105, position: 0.75, color: '#8C7B6B' } } })
+    expect(versionFact(versionRows(base(), muted, { before: 20, after: 20 }))).toBe('Recoloured subtitles')
+    // a deep purple is purple, not the pink of the same hue at full brightness
+    const purple = base({ captions: { enabled: true, style: { size: 105, position: 0.75, color: '#800080' } } })
+    expect(versionFact(versionRows(base(), purple, { before: 20, after: 20 }))).toBe('Purple subtitles')
     const higher = base({ captions: { enabled: true, style: { size: 105, position: 0.6 } } })
     expect(versionFact(versionRows(base(), higher, { before: 20, after: 18 }))).toBe('Shorter, higher subtitles')
   })

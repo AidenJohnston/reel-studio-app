@@ -14,32 +14,54 @@ test('caption looks: size through look switches, Karaoke rows, colours that matc
     await passFirstRun(page)
     await makeReel(page, media.video)
 
-    // A reel the AI editor gave red captions and a green spoken word (#34C759, not the row's #30D158). First, since
+    // A reel the AI editor gave purple captions and a green spoken word (#34C759, not the row's #30D158). First, since
     // Edit it myself keeps its changes when it closes and would show those instead.
     const detail = await page.evaluate(async () => {
       const [p] = await window.reel.projects.list()
       return window.reel.projects.get(p.slug)
     })
-    const styled = {
+    const withColor = (color: string) => ({
       ...detail,
-      project: { ...detail.project, captions: { ...detail.project.captions, enabled: true, style: { ...detail.project.captions?.style, color: '#FF3B30', highlight: '#34C759' } } }
+      project: { ...detail.project, captions: { ...detail.project.captions, enabled: true, style: { ...detail.project.captions?.style, color, highlight: '#34C759' } } }
+    })
+    const openWith = async (d: ReturnType<typeof withColor>) => {
+      await app.evaluate(({ ipcMain }, v) => {
+        ipcMain.removeHandler('projects:get')
+        ipcMain.handle('projects:get', () => ({ ok: true, value: v }))
+      }, d)
+      await page.getByTestId('nav-home').click()
+      await page.getByTestId('project-card').click()
+      await page.getByTestId('edit-myself').click()
+      await page.getByTestId('tab-captions').click()
     }
-    await app.evaluate(({ ipcMain }, d) => {
-      ipcMain.removeHandler('projects:get')
-      ipcMain.handle('projects:get', () => ({ ok: true, value: d }))
-    }, styled)
-    await page.getByTestId('nav-home').click()
-    await page.getByTestId('project-card').click()
-    await page.getByTestId('edit-myself').click()
-    await page.getByTestId('tab-captions').click()
-    for (const id of ['cap-color-white', 'cap-color-yellow', 'cap-highlight-yellow', 'cap-highlight-green'])
+
+    // fails if a red the editor picked (#FF0000 for "bright red", not the row's #FF3B30) shows as a second red beside
+    // Red rather than as Red (the runner's Windows capture, 2026-11-14)
+    await openWith(withColor('#FF0000'))
+    await expect(page.getByTestId('cap-color-red')).toHaveAttribute('aria-checked', 'true')
+    await expect(page.getByTestId('cap-color-current')).toHaveCount(0)
+    // and picking the Red that is already checked keeps the editor's red: no change to make a version of
+    await page.getByTestId('cap-color-red').click()
+    await expect(page.getByTestId('change-count')).toHaveText('Nothing changed yet')
+    await page.getByTestId('drawer-close').click()
+
+    await openWith(withColor('#BF5AF2'))
+    // fails if the Colour row shows no option checked while the reel has purple words (#53), or names it a colour
+    // it is not
+    await expect(page.getByTestId('cap-color-current')).toHaveAttribute('aria-checked', 'true')
+    await expect(page.getByTestId('cap-color-current')).toHaveText('Purple')
+    for (const id of ['cap-color-white', 'cap-color-yellow', 'cap-color-red', 'cap-highlight-yellow', 'cap-highlight-green'])
       await expect(page.getByTestId(id)).toHaveAttribute('aria-checked', 'false')
     await page.getByTestId('cap-pos-lower').focus()
     await page.keyboard.press('Tab')
-    await expect(page.getByTestId('cap-color-white')).toBeFocused()
+    await expect(page.getByTestId('cap-color-current')).toBeFocused()
     await page.keyboard.press('Tab')
     await expect(page.getByTestId('cap-highlight-yellow')).toBeFocused()
     await shot(page, 'looks-unmatched-colours')
+    // Red is a choice by hand, and once picked the editor's colour is gone from the row
+    await page.getByTestId('cap-color-red').click()
+    await expect(page.getByTestId('cap-color-red')).toHaveAttribute('aria-checked', 'true')
+    await expect(page.getByTestId('cap-color-current')).toHaveCount(0)
 
     // a Size the person picked survives every look; Karaoke shows both colour rows
     await page.getByTestId('cap-size-big').click()

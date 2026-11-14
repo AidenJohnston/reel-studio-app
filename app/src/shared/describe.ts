@@ -2,7 +2,7 @@
 // version's title and summary from its receipt facts. Keep free of Node and DOM imports.
 import type { ChatMessage, DropResult, EditFact, ProjectJson, VersionInfo, Word } from './api'
 import { keptIds } from './cut'
-import { CAPTION_PRESETS, presetOf } from './caption-presets'
+import { CAPTION_PRESETS, colorName, presetOf } from './caption-presets'
 import { kindsByWords, PACE_BANDS, PACE_LABELS, ZOOM_KIND_LABELS, type CutStyle } from './cut-style'
 import { isMirrored } from './mirror'
 import { gainOf, momentKey, musicFades, secondsText, sfxName } from './sfx'
@@ -11,7 +11,11 @@ type Style = Record<string, unknown>
 
 export const size = (s: Style): number => Number(s.size ?? 105)
 export const pos = (s: Style): number => Number(s.position ?? 0.75)
-export const look = (s: Style): string => (s.box ? 'box' : String(s.color ?? '#FFFFFF').toUpperCase() === '#FFFFFF' ? 'white' : 'yellow')
+/** A colour with no common name (colorName): said as "recoloured", never as a colour the reel does not show. */
+export const OTHER_COLOR = 'other colour'
+/** The subtitles' look: 'box', or the name of the colour the words are drawn in. */
+export const look = (s: Style): string => (s.box ? 'box' : colorName(String(s.color ?? '#FFFFFF')) ?? OTHER_COLOR)
+const lookWord = (l: string): string => (l === 'box' ? 'boxed' : l === OTHER_COLOR ? 'recoloured' : l)
 export const name = (p: string | null | undefined): string =>
   (p ?? '').split(/[\\/]/).pop()?.replace(/\.[^.]+$/, '').replace(/[_-]+/g, ' ').trim() ?? ''
 
@@ -28,7 +32,7 @@ function subtitles(before: ProjectJson['captions'], after: ProjectJson['captions
     if (size(b) > size(a)) words.push('bigger')
     if (size(b) < size(a)) words.push('smaller')
     const lb = look(b)
-    if (lb !== look(a)) words.push(lb === 'box' ? 'boxed' : lb)
+    if (lb !== look(a)) words.push(lookWord(lb))
   }
   const out: string[] = []
   if (words.length) out.push(`${words.join(' ')} subtitles`)
@@ -62,7 +66,7 @@ function subtitleActs(before: ProjectJson['captions'], after: ProjectJson['capti
     if (size(b) > size(a)) made.push('bigger')
     if (size(b) < size(a)) made.push('smaller')
     const lb = look(b)
-    if (lb !== look(a)) made.push(lb === 'box' ? 'boxed' : lb)
+    if (lb !== look(a)) made.push(lookWord(lb))
     if (made.length) out.push(`made the subtitles ${made.join(' and ')}`)
   }
   const moved = pos(b) < pos(a) - 0.01 ? 'up' : pos(b) > pos(a) + 0.01 ? 'down' : null
