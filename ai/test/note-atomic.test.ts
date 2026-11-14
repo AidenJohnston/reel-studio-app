@@ -280,9 +280,23 @@ describe('the asset ledger after a note that was not saved', () => {
     // project.json named that note
     host.engineAssets = true;
     host.searchResults = [{ url: 'https://example.com/bread.png', title: 'Bread', license: 'CC BY 4.0' }];
+    // like the engine's fetch-image: the download's search credit in credits.json, without which an open picture has
+    // no known licence and a commercial-safe search leaves it out (tools.ts originOf)
+    const run = host.runEngine.bind(host);
+    host.runEngine = async (command, args, onProgress) => {
+      const r = await run(command, args, onProgress);
+      if (command === 'fetch-image') {
+        await fsp.writeFile(path.join(dir, 'work', 'assets', 'credits.json'), JSON.stringify({ [path.basename(r.asset)]: {
+          title: 'Bread', creator: 'Baker', provider: 'commons', source: 'https://example.com/Bread', license: 'CC BY 4.0',
+          licenseUrl: 'https://creativecommons.org/licenses/by/4.0/', attributionRequired: true, attribution: 'Bread by Baker (CC BY 4.0)',
+          url: args[args.indexOf('--url') + 1] } }));
+      }
+      return r;
+    };
     const crashed = toolCtx(root, dir, host, 'crashed-note');
     const asked = await executeTool(crashed, 'resolve_asset', { kind: 'image', intent: 'warm bread', licensePolicy: null });
     expect(asked.isError, asked.content).toBe(false);
+    expect(JSON.parse(asked.content).candidates.length, asked.content).toBeGreaterThan(0);
     const committed = await executeTool(crashed, 'resolve_asset', { kind: 'image', intent: 'bread', phase: 'commit', candidateId: JSON.parse(asked.content).candidates[0].id });
     expect(committed.isError, committed.content).toBe(false);
     const bread = JSON.parse(committed.content).asset.committedPath;
