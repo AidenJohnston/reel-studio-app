@@ -172,7 +172,7 @@ a { color: inherit; }
   flex: none; display: inline-flex; align-items: center; gap: 4px; border: 0; background: none; padding: 4px 0; min-height: 28px;
   font: inherit; color: var(--ink-2); text-decoration: underline; text-underline-offset: 3px; white-space: nowrap; cursor: pointer;
 }
-.update-pop-link:hover { color: var(--ink); }
+@media (hover: hover) and (pointer: fine) { .update-pop-link:hover { color: var(--ink); } }
 .update-pop-notes p { margin: 8px 0 0; font-size: var(--fs-base); line-height: var(--lh-base); color: var(--ink); user-select: text; }
 .update-pop-key { margin: 0; font-size: var(--fs-sm); line-height: var(--lh-sm); color: var(--ink-2); }
 .update-pop-link.inline { display: inline; min-height: 0; padding: 0; text-decoration: underline; text-underline-offset: 3px; }
@@ -316,7 +316,10 @@ html.kb .switch { transition: none; }
 html.kb .big-play:active { transform: none; }
 .sound-chip { position: absolute; top: calc(14px + var(--safe-top, 0px)); right: 14px; display: inline-flex; gap: 6px; align-items: center; border: 0; border-radius: 999px; padding: 0 12px; height: 32px; background: rgba(0,0,0,.6); color: #fff; font: inherit; font-weight: 600; cursor: pointer; }
 .scrub { position: absolute; left: 0; right: 0; bottom: 0; padding: 24px 12px 12px; display: flex; align-items: center; gap: 8px; background: linear-gradient(transparent, rgba(0,0,0,.45)); opacity: 0; transition: opacity .2s; }
-.phone-screen:hover .scrub.shown, .scrub.shown:focus-within { opacity: 1; }
+.scrub.shown:focus-within { opacity: 1; }
+@media (hover: hover) and (pointer: fine) { .phone-screen:hover .scrub.shown { opacity: 1; } }
+/* where nothing can hover (a touch screen) the bar is there whenever it is offered, or it could never be reached */
+@media (hover: none) { .scrub.shown { opacity: 1; } }
 .scrub-btn { width: 32px; height: 32px; border: 0; border-radius: 999px; background: transparent; color: #fff; display: grid; place-items: center; cursor: pointer; flex: none; }
 @media (hover: hover) and (pointer: fine) { .scrub-btn:hover { background: rgba(255,255,255,.15); } }
 .scrub-btn .icon { fill: none; }
@@ -551,7 +554,9 @@ input[type="checkbox"]:disabled { cursor: default; opacity: .45; }
 .more { position: relative; }
 .more-menu { position: absolute; right: 0; top: calc(100% + 6px); z-index: 30; min-width: 200px; background: var(--surface); border-radius: var(--r-lg); box-shadow: var(--e3); padding: 6px; display: flex; flex-direction: column; transform-origin: top right; animation: pop-in .15s var(--ease-out); }
 .more-menu button { border: 0; background: none; font: inherit; text-align: left; padding: 0 12px; height: 32px; border-radius: 7px; cursor: pointer; color: var(--ink); }
-.more-menu button:hover { background: var(--sunk-2); }
+@media (hover: hover) and (pointer: fine) { .more-menu button:hover { background: var(--sunk-2); } }
+/* opened from the keyboard, the menu is there at once (motion.ts marks html.kb) */
+html.kb .more-menu { animation: none; }
 .more-menu button.danger { color: var(--pencil); }
 .more-menu button:disabled { opacity: .5; cursor: default; }
 
@@ -621,6 +626,9 @@ html.kb .toast-action:active { transform: none; } /* as .btn: no press motion fr
   @keyframes pop-in { from { opacity: 0; } }
   @keyframes toast-in { from { opacity: 0; transform: translateX(-50%); } to { opacity: 1; transform: translateX(-50%); } }
   @keyframes phone-in { from { opacity: 0; } }
+  /* the spinner pulses instead of turning: still at work, never frozen */
+  .spin { animation-duration: 1.4s; animation-timing-function: ease-in-out; }
+  @keyframes spin { 0%, 100% { opacity: 1; } 50% { opacity: .35; } }
 }
 @keyframes fade-out { to { opacity: 0; } }
 @keyframes breathe-soft { 0%, 100% { opacity: .2; } 50% { opacity: .85; } }

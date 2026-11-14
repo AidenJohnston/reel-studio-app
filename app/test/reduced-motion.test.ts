@@ -56,8 +56,9 @@ function moves(body: string): boolean {
   return bothEnds ? values.size > 1 : [...values].some((v) => v !== 'none')
 }
 
-// A spinner still turns under reduced motion: frozen, it reads as "stuck".
-const STILL_TURNS = new Set(['spin'])
+// Nothing keeps moving under reduced motion: the spinner pulses there instead of turning (prep-for-prod round 1),
+// which still reads as working where a frozen ring would read as stuck.
+const STILL_TURNS = new Set<string>()
 
 describe('reduced motion in the stylesheets', () => {
   const files = cssFiles(RENDERER).map((f) => ({ f: f.slice(RENDERER.length + 1), css: readFileSync(f, 'utf8') }))

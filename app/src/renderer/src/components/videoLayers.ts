@@ -74,4 +74,3 @@ export function versionsShown<V extends { draft: boolean }>(d: { status: string;
   const firstEditUnfinished = d.job ? d.job.kind === 'first-edit' : d.status !== 'ready'
   return firstEditUnfinished ? d.versions.filter((v) => !v.draft) : d.versions
 }
-
