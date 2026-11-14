@@ -160,6 +160,37 @@ describe('a note that does not finish leaves the project as it was', () => {
     expect(await read()).toBe(before);
   });
 
+  it('fails if a note takes back what it froze, or removes its folder, while a moments run that would not stop may still write', async () => {
+    const { root, dir, host, settingsDir, read, before } = await setup();
+    await fsp.writeFile(path.join(root, 'Library', 'Images', 'bread.png'), tinyPng());
+    await fsp.writeFile(path.join(dir, OWNER_LOCK), JSON.stringify({ app: 'Reel Studio', token: 'job-1' }));
+    const run = host.runEngine.bind(host);
+    let drawn = false;
+    host.runEngine = async (command, args, onProgress, signal) => {
+      if (command !== 'moments') return run(command, args, onProgress, signal);
+      if (args.includes('--mark')) return {};
+      // the changed-moments draw, whose engine would not stop: Moments keeps the error to itself
+      drawn = true;
+      throw { code: 'ENGINE_STUCK', userMessage: "Part of Reel Studio's video engine would not stop." };
+    };
+    const m = new ScriptedModel([
+      { toolCalls: [call('add_broll', { anchor: { from: 'w29', to: 'w30' }, treatment: 'side-card', asset: 'Library/Images/bread.png', animation: null, params: {} })] },
+      async () => {
+        for (let i = 0; i < 200 && !drawn; i++) await new Promise((r) => setTimeout(r, 10));
+        throw new AIError('network', 'I could not reach the AI. Check your internet and try again.');
+      },
+    ]);
+    await expect(createAI({ host, settingsDir, providerOverride: m, moments: true }).applyNote(dir, 'show my bread', () => undefined, undefined, { id: 'stuck-note', owner: 'job-1' }))
+      .rejects.toMatchObject({ code: 'ENGINE_STUCK' });
+    expect(drawn).toBe(true);
+    expect(await read()).toBe(before);
+    // the frozen picture and the note's folder, where that engine may still write, are left for recovery
+    const frozen = path.join(dir, 'work', 'assets', 'frozen', 'image');
+    expect(fs.readdirSync(frozen).filter((f) => f.endsWith('.png'))).toHaveLength(1);
+    expect(fs.existsSync(path.join(dir, 'work', 'notes', 'stuck-note'))).toBe(true);
+    expect(JSON.parse(await fsp.readFile(path.join(dir, OWNER_LOCK), 'utf8')).token).toBe('job-1');
+  });
+
   // a crash leaves a note's downloads in work/assets: only their note prefix says the note was never saved
   it.each([
     ['the engine saves', true, 'https://example.com/loaf.png'],

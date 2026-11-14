@@ -863,6 +863,12 @@ export async function applyNote(deps: EditorDeps, provider: ModelProvider | null
     started = p0;
   } catch (e) {
     stuck = engineStuck(e);
+    // Moments hides its engine's errors (moments.ts draw), so one that would not stop shows only once its run has
+    // been stopped: that comes before anything is taken back. The host then fails the edit with it (index.ts settle).
+    if (!stuck) {
+      await drawing?.moments?.stop();
+      stuck = !!deps.stuck?.();
+    }
     if (!stuck && !published) {
       await restoreCredits(projectDir, creditsBefore);
       await restoreAssets(projectDir, assetsBefore, ledgerBefore);
@@ -872,9 +878,9 @@ export async function applyNote(deps: EditorDeps, provider: ModelProvider | null
     // A moments run writes its base and pictures in the note's folder: gone before the folder is. The
     // final render already stopped one; this is a failure, or a note that made no version.
     if (!stuck) await drawing?.moments?.stop();
-    // Only this note's scratch. saveNote handles failed finals; crash leftovers stay unpublished
-    // until the app's job lane clears them (app store.ts cleanPartialVersions).
-    if (!stuck) await fsp.rm(dir, CLEANUP_RM).catch(() => undefined);
+    // Only this note's scratch, and only once nothing of the note's may still write there. saveNote handles failed
+    // finals; crash leftovers stay unpublished until the app's job lane clears them (app store.ts cleanPartialVersions).
+    if (!stuck && !deps.stuck?.()) await fsp.rm(dir, CLEANUP_RM).catch(() => undefined);
   }
   // read from the saved project; a failure here only skips the question, never the saved note
   const version = committed.version;
