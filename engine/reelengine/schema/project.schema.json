@@ -48,6 +48,21 @@
               "offset": { "type": "number" },
               "confidence": { "type": "number", "description": "how far the sound's best match stood out from the next (sync-angles)" }
             }
+          },
+          "mirrorCheck": {
+            "type": "object",
+            "description": "what `init` saw when it looked for a mirrored take (mirror_detect.py); never read by the render. `answer` = what the user then chose in the chat",
+            "required": ["verdict"],
+            "properties": {
+              "verdict": { "enum": ["mirrored", "maybe-mirrored", "as-filmed", "unsure", "unknown"] },
+              "why": { "type": "string" },
+              "camera": { "enum": ["front", "back"] },
+              "letters": {
+                "type": "object",
+                "properties": { "asFilmed": { "type": "integer", "minimum": 0 }, "flipped": { "type": "integer", "minimum": 0 } }
+              },
+              "answer": { "enum": ["flipped", "kept", "undone"] }
+            }
           }
         }
       }

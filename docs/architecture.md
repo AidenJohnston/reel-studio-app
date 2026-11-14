@@ -103,7 +103,8 @@ anchors to output time at render.
   "createdAt": "ISO", "updatedAt": "ISO", "version": 3,          // last rendered version number
   "format": { "width": 1080, "height": 1920, "fps": 30 },
   "sources": [ { "id": "s1", "path": "media/take01.mp4", "duration": 241.3, "fps": 29.97, "width": 1080, "height": 1920, "rotation": 0 } ],
-      // optional "mirror": true = the take is mirrored (front camera), the render flips the picture (schema-changes.md)
+      // optional "mirror": true = the take is mirrored (front camera), the render flips the picture (schema-changes.md);
+      // optional "mirrorCheck": what init saw when it looked for a mirrored take (mirror_detect.py), never read by the render
   "transcript": { "file": "work/transcript.json", "language": "en" },
       // transcript.json = { "words": [ { "id": "w0", "source": "s1", "s": 0.085, "e": 0.245, "w": "This" }, ... ] }
       // word ids are stable for the life of the project (re-transcription keeps ids by time overlap)
@@ -169,7 +170,8 @@ event may carry `ready`, a file the app can show right away: `{"kind":"still","t
 |---|---|
 | `probe <file>` | duration, fps, size, rotation, has audio, kind guess (`talking_head` / `broll_video` / `music` / `image` / `unknown`) |
 | `classify --root <root> <file>...` | sorts dropped files into the Library folders |
-| `init --project <dir> --title T <files>...` | creates the project folder and project.json, copies media |
+| `init --project <dir> --title T <files>...` | creates the project folder and project.json, copies media; looks at each take for a mirrored picture (`detect-mirror`), records it in `sources[].mirrorCheck` and flips a clearly mirrored one (`sources[].mirror`) |
+| `detect-mirror <file>` | does a take look mirrored? Reads the writing in 4 frames as filmed and flipped with the OS's own text recognition (Windows.Media.Ocr, macOS Vision) and counts everyday words (the speech model's vocabulary) each way; an iPhone file's lens tag rules out a back-camera take. `mirrored` (init flips it) / `maybe-mirrored` (the app asks) / `as-filmed` / `unsure` / `unknown` (no text recognition, no model yet) |
 | `transcribe` | faster-whisper word timestamps -> `work/transcript.json` with stable ids |
 | `analyze` | audio envelope, pause list, retake groups (lines said more than once), face box track, a deterministic default cut |
 | `autocut` | writes a deterministic baseline `cut.keep`; the AI then refines it |

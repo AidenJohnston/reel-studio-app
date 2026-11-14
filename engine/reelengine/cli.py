@@ -80,6 +80,14 @@ def cmd_init(args):
                        faster_exports=args.faster_exports, keep_order=args.keep_order)
 
 
+def cmd_detect_mirror(args):
+    """Does a take look mirrored? (the check `init` runs on every new take; mirror_detect.py)"""
+    import tempfile
+    from . import mirror_detect
+    with tempfile.TemporaryDirectory() as work:
+        return mirror_detect.detect(Path(args.file), Path(work))
+
+
 def cmd_transcribe(args):
     from . import transcribe
     return transcribe.run(_project(args), model_name=args.model, language=args.language,
@@ -608,6 +616,8 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--title", default="My video")
     sp.add_argument("--slug")
     sp.add_argument("files", nargs="+")
+    sp = add("detect-mirror", cmd_detect_mirror, "does a take look mirrored (writing reads backwards)?")
+    sp.add_argument("file")
     sp = add("transcribe", cmd_transcribe, "speech to words")
     sp.add_argument("--model")
     sp.add_argument("--language")

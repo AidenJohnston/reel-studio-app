@@ -15,6 +15,8 @@ export interface Source {
   mirror?: boolean;
   hasAudio?: boolean;
   capturedAt?: string;
+  /** what the engine saw at import (mirror_detect.py) and, in `answer`, what the user then chose in the chat */
+  mirrorCheck?: { verdict: string; answer?: 'flipped' | 'kept' | 'undone' };
   [k: string]: unknown;
 }
 export interface Join { transition: 'hard' | 'j' | 'l' | 'smash' | 'match' | 'flash' | 'action'; frames: number }

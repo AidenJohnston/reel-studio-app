@@ -37,6 +37,8 @@ export interface AgentResult {
   styleChecks?: StyleCheckProposal[];
   /** the model that made this version, as the notes name it ("Claude Sonnet 5.5 · High"); absent for a basic version */
   model?: string;
+  /** takes the editor would have flipped, but the user had said they are the right way round: the app asks "Flip it?" */
+  mirrorDeclined?: string[];
 }
 export interface ScriptResult { hook: string; script: string; onScreenText: string[]; title?: string }
 

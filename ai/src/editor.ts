@@ -88,6 +88,11 @@ function mediaSeconds(p: Project): number {
 
 /** Runs transcribe + analyze if the project has no transcript yet. The face track needs no words,
  * so it is found WHILE the speech model listens (`analyze --faces-only`); `analyze` then reuses it. */
+/** set_mirror's refusals, for the app's "It still looks mirrored to me. Flip it?" (none: no field). */
+function declinedFlips(state: ToolState): { mirrorDeclined?: string[] } {
+  return state.mirrorDeclined?.length ? { mirrorDeclined: state.mirrorDeclined } : {};
+}
+
 export async function ensureAnalyzed(deps: EditorDeps, projectDir: string, onEvent: (e: AgentEvent) => void, signal?: AbortSignal): Promise<void> {
   const p = await loadProject(projectDir);
   const mediaSec = mediaSeconds(p);
@@ -466,7 +471,7 @@ First edit (stopped early).
 ${summary}
 `);
         await writeAiRun(projectDir, version, ctx.state.aiCalls);
-        return { summary, version, styleRulesAdded: ctx.state.styleRulesAdded, ...(await checkedProposals(deps, ctx, measured)), changed: [...ctx.state.changed], notice: e.toJSON() };
+        return { summary, version, styleRulesAdded: ctx.state.styleRulesAdded, ...(await checkedProposals(deps, ctx, measured)), changed: [...ctx.state.changed], ...declinedFlips(ctx.state), notice: e.toJSON() };
       }
       throw e;
     }
@@ -480,7 +485,7 @@ ${summary}
     await snapshotVersion(projectDir, await loadProject(projectDir), version, `# v${version}\n\nFirst edit.\n\n${summary}\n`);
     await writeAiRun(projectDir, version, ctx.state.aiCalls);
     onEvent({ type: 'status', message: 'Done', pct: 100 });
-    return { summary, version, styleRulesAdded: ctx.state.styleRulesAdded, ...(await checkedProposals(deps, ctx, measured)), changed: [...ctx.state.changed] };
+    return { summary, version, styleRulesAdded: ctx.state.styleRulesAdded, ...(await checkedProposals(deps, ctx, measured)), changed: [...ctx.state.changed], ...declinedFlips(ctx.state) };
   } finally {
     await ctx.moments?.stop();
   }
@@ -969,7 +974,7 @@ async function saveNote(deps: EditorDeps, ctx: ToolContext, base: Buffer, baseVe
     } catch {
       // the note is saved: a My style write or a listener that fails now must not report it as failed
     }
-    return { summary: n.summary, ...(final ? { version } : {}), styleRulesAdded, styleSuggestions, changed: [...ctx.state.changed] };
+    return { summary: n.summary, ...(final ? { version } : {}), styleRulesAdded, styleSuggestions, changed: [...ctx.state.changed], ...declinedFlips(ctx.state) };
   } catch (e) {
     // Only our next unpublished number, under the edit lock, after the engine has settled.
     // A stuck engine may still be writing; recovery owns its files instead.

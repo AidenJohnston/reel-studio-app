@@ -294,6 +294,9 @@ const api: ReelApi = {
   sfx: {
     pack: () => call('sfx:pack')
   },
+  mirror: {
+    answer: (slug, messageId, action) => call('mirror:answer', slug, messageId, action)
+  },
   dev: {
     renderTestAnimation: (out, full, template, params) => call('dev:renderTestAnimation', out, full, template, params)
   },

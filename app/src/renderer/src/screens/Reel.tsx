@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { ChatAction, NoteMoment, PlacedWord, ProjectDetail, ProviderInfo, VersionInfo, VersionTimeline } from '../../../shared/api'
 import { versionTitle } from '../../../shared/describe'
+import { MIRROR_ANSWERS, type MirrorAnswer } from '../../../shared/mirror'
 import { clock } from '../../../shared/progress'
 import { EMPTY_LIVE, liveFromDetail, reduceLive, type LiveState } from '../../../shared/live'
 import { NO_TIMELINE, noSpeech, noteMarks, noteMoment, sourceAt, wordsAt, wordsBetween, type RenderSegment } from '../../../shared/moments'
@@ -772,7 +773,18 @@ export function Reel({ slug, at, go, draft: startDraft }: { slug: string; at?: n
   }
 
   const runAction = (a: ChatAction, messageId: string) => {
-    if (a === 'remember-yes' || a === 'remember-no') {
+    if ((MIRROR_ANSWERS as readonly ChatAction[]).includes(a)) {
+      // "Undo flip" / "Flip it" / "Keep as filmed" under the editor's mirror line: main records the answer and, when the
+      // picture changes, queues it as a change made by hand, which makes the next version (main mirror:answer)
+      reel.mirror
+        .answer(slug, messageId, a as MirrorAnswer)
+        .then(async () => {
+          setAnswerError(null)
+          await load()
+          document.getElementById(`msg-${messageId}`)?.focus()
+        })
+        .catch((e) => setAnswerError({ id: messageId, text: userMessage(e) }))
+    } else if (a === 'remember-yes' || a === 'remember-no') {
       reel.style
         .answer(slug, messageId, a === 'remember-yes')
         .then(async () => {

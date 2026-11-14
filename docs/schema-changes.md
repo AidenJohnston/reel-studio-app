@@ -273,3 +273,18 @@ Existing project shapes remain valid. New shapes can require a newer engine, as 
 - `analyze-music` now suggests a start on the song's first attack after the calm bar (`suggestedStartAt`).
   The fade-in default is unchanged on release/0.2.0 (0.6 s, `fadeIn` sets it; `fadeIn: 0` starts the song
   on that hit). The beat tracker is release/0.2.0's (beat phase fix of 2026-10-23), not #178's.
+
+## 2026-11-12 (mirrored take found at import)
+
+- `sources[].mirrorCheck` (object, optional): what `init` saw when it looked at the take for a mirrored picture
+  (`engine/reelengine/mirror_detect.py`): `verdict` (`mirrored` / `maybe-mirrored` / `as-filmed` / `unsure` /
+  `unknown`), `why` (plain words the app may show), `camera` (`front` / `back`, from an iPhone file's lens tag)
+  and `letters` (letters of everyday words read as filmed and flipped). No timings, so the same take writes the
+  same record. The render never reads it: only `mirror` changes the picture, so renders stay deterministic.
+- `init` now writes `sources[].mirror = true` for a `mirrored` take. A `maybe-mirrored` one is left alone and the
+  app asks. The user's choice goes in `mirrorCheck.answer` (`undone` / `flipped` / `kept`): from the chat
+  buttons ("Undo flip", "Flip it", "Keep as filmed"), or the "Flip picture" switch in Cover (both through Edit it myself's queue). So
+  nothing is undone or asked twice. After `undone` / `kept` only the user's own tap flips that take again: the AI
+  editor's `get_project` shows `userSaidAsFilmed`, its `set_mirror` refuses to flip the take whatever the note says,
+  and the app asks "Flip it?" instead. Each mirror question in the chat keeps the ids of its takes
+  (`ChatMessage.sources`, app state), and its buttons act on those takes only.

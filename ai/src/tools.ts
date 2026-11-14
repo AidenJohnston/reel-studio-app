@@ -75,6 +75,8 @@ export interface ToolState {
   finishRefused?: boolean;
   /** rules the AI proposed with a check: the app turns each into a checked rule measured on the finished video */
   styleChecks?: { text: string; choice: CheckChoice }[];
+  /** takes set_mirror would have flipped, but the user had said they are the right way round: the app asks */
+  mirrorDeclined?: string[];
 }
 
 export interface ToolContext {
@@ -458,7 +460,11 @@ function projectView(ctx: ToolContext, p: Project, t: Transcript): unknown {
     version: p.version,
     format: p.format,
     ...(p.cutStyle ? { cutStyle: p.cutStyle, cutStyleSettings: CUT_STYLES[p.cutStyle.preset] } : {}),
-    sources: p.sources.map((s) => ({ id: s.id, duration: s.duration, mirror: s.mirror === true })),
+    sources: p.sources.map((s) => ({
+      id: s.id, duration: s.duration, mirror: s.mirror === true,
+      // the user answered the app's "it looked mirrored" line with "Undo flip" or "Keep as filmed"
+      ...(s.mirrorCheck?.answer === 'undone' || s.mirrorCheck?.answer === 'kept' ? { userSaidAsFilmed: true } : {}),
+    })),
     cut: cutSummary(t, p),
     captions: p.captions,
     music: musicView(p.music, times),
@@ -2353,11 +2359,18 @@ const tools: ToolDef[] = [
     async run(ctx, args) {
       const on = args.on === true;
       const hit: string[] = [];
+      // The user already answered the app's "it looked mirrored" line with "as filmed": only their own tap
+      // changes that again. The take is recorded instead, and the app asks "Flip it?" (one tap).
       await mutate(ctx, 'mirror', (p) => {
         const all = args.source === null || args.source === undefined;
         if (!all && !p.sources.some((s) => s.id === args.source)) return `unknown source ${args.source}`;
+        const kept = (s: Project['sources'][number]) => on && (s.mirrorCheck?.answer === 'undone' || s.mirrorCheck?.answer === 'kept');
+        const targets = p.sources.filter((s) => all || s.id === args.source);
+        const declined = targets.filter(kept).map((s) => s.id);
+        if (declined.length) ctx.state.mirrorDeclined = [...new Set([...(ctx.state.mirrorDeclined ?? []), ...declined])];
+        if (targets.every(kept)) return 'the user chose to keep this video as filmed (userSaidAsFilmed), so only they can flip it: the app now shows them a Flip it button. Say so in one line.';
         for (const s of p.sources) {
-          if (!all && s.id !== args.source) continue;
+          if ((!all && s.id !== args.source) || kept(s)) continue;
           hit.push(s.id);
           if (on) s.mirror = true; else delete s.mirror;    // absent = as shot (old projects look the same)
         }
