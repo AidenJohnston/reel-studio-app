@@ -204,6 +204,41 @@ describe('job manager (main): the contract on the wire', () => {
     expect(events.at(-1)).toMatchObject({ type: 'cancelled' })
   })
 
+  // #147 (bcdaeeb5): on Windows a stopped engine prints progress for about a second while it dies; a status after
+  // `cancelled` put the job back on the Reel screen with every export button disabled
+  it('says nothing more about a job once it is cancelled, even when its engine still prints progress', async () => {
+    setupPaths()
+    const slug = 'stopped'
+    mkdirSync(projectDir(slug), { recursive: true })
+    const events: JobEvent[] = []
+    const jobs = createJobManager((e) => events.push(e), () => undefined, {
+      loadHistory: async () => ({ v: 1, phases: {} }),
+      saveHistory: async () => undefined,
+      mediaSeconds: async () => 30,
+      tickMs: 15
+    })
+    const held: { emit?: (e: { type: 'status'; message: string; pct: number; phase: 'final' }) => void } = {}
+    let running!: () => void
+    const started = new Promise<void>((r) => (running = r))
+    const id = jobs.start(slug, 'rerender', async (emit, signal) => {
+      held.emit = emit
+      emit({ type: 'status', message: 'Making the full-quality video', pct: 1, phase: 'final' })
+      const stopped = new Promise((r) => signal.addEventListener('abort', r, { once: true }))
+      running()
+      await stopped
+      throw { code: 'CANCELLED', userMessage: 'Stopped.' }
+    })
+    await started
+    jobs.cancel(id)
+    await jobs.forSlug(slug)?.done
+    // the runner rejected at once; the dying engine's last progress line arrives after the job ended
+    held.emit!({ type: 'status', message: 'Putting it all together', pct: 40, phase: 'final' })
+    await new Promise((r) => setTimeout(r, 60))
+    const end = events.findIndex((e) => e.type === 'cancelled')
+    expect(end).toBeGreaterThan(-1)
+    expect(events.slice(end + 1)).toEqual([])
+  })
+
   it('keeps thinking across the once-a-second repeats, adds video to renders before done, passes reply + heard', async () => {
     setupPaths()
     const slug = 'wire'

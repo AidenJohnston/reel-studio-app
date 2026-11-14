@@ -1,12 +1,33 @@
 import { afterAll, describe, expect, it, onTestFinished, vi } from 'vitest'
 import { execFileSync, spawn, spawnSync } from 'node:child_process'
-import { mkdirSync, mkdtempSync, promises as fs, readdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { constants, mkdirSync, mkdtempSync, promises as fs, readdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { basename, join, resolve } from 'node:path'
 import { createEngineRunner } from '../src/main/engine'
 import { exportPlatforms, makeStagingFolder, sweepExportStaging, type ExportTry } from '../src/main/platform-export'
 import { coverFrame, outputGroups, type Platform } from '../src/shared/platforms'
 import { PYTHON } from './helpers'
+
+// Reading `stalled.path` with fs.createReadStream hands over one chunk and then nothing more, like a drive that
+// stopped answering mid-copy; `onRead` runs once that chunk is out. Every other path reads normally.
+const stalled = vi.hoisted(() => ({ path: '', onRead: () => {} }))
+vi.mock('node:fs', async (original) => {
+  const real = await original<typeof import('node:fs')>()
+  const { Readable } = await import('node:stream')
+  const createReadStream = (path: unknown, options?: unknown) => {
+    if (path !== stalled.path) return real.createReadStream(path as string, options as Parameters<typeof real.createReadStream>[1])
+    let sent = false
+    return new Readable({
+      read() {
+        if (sent) return
+        sent = true
+        this.push(Buffer.alloc(1 << 16))
+        setImmediate(stalled.onRead)
+      }
+    })
+  }
+  return { ...real, createReadStream }
+})
 
 const scratch = mkdtempSync(join(tmpdir(), 'rs-platform-export-'))
 const engine = resolve(__dirname, '../../engine')
@@ -140,6 +161,30 @@ describe('platform files through the real engine', () => {
       runEngine, signal: stop.signal, onProgress: (_message, pct) => { if (pct > 0) stop.abort() } })
     await expect(running).rejects.toMatchObject({ code: 'CANCELLED' })
     expect(await fs.readdir(folder)).toEqual(['earlier export.mp4'])
+  })
+
+  // #175's fix for #147 after #137: Stop that finds the engine would not end is still ENGINE_STUCK, never "Stopped."
+  it('fails if an engine that would not stop is reported as a normal Stop, or its staging folder is removed under it', async () => {
+    const folder = join(scratch, 'stuck engine')
+    mkdirSync(folder)
+    const stop = new AbortController()
+    const stuck = { code: 'ENGINE_STUCK', userMessage: "Part of Reel Studio's video engine would not stop." }
+    // like engine.ts: Stop aborts the signal first, then the runner finds the engine still alive after the kill
+    const stubborn = (async (command: string, args: string[]) => {
+      if (command === 'export-probe') return { hasVideo: true, duration: 3, fps: 30, vduration: 3, sizeBytes: 1000, audioBitrate: 192_000, editList: true }
+      if (command === 'export-cover') return writeFileSync(args[args.indexOf('--dest') + 1], 'cover')
+      writeFileSync(args[args.indexOf('--dest') + 1], 'half written')
+      stop.abort()
+      throw stuck
+    }) as unknown as typeof runEngine
+    await expect(exportPlatforms({ tries: oneTry(join(scratch, 'unused.mp4'), null, 'Stuck', { platforms: ['instagram'], caption: '', coverSeconds: null }), folder, runEngine: stubborn, signal: stop.signal }))
+      .rejects.toMatchObject({ code: 'ENGINE_STUCK' })
+    const left = await fs.readdir(folder)
+    expect(left).toHaveLength(1)
+    expect(left[0].startsWith('.platform-export-')).toBe(true)
+    // the next start removes it
+    await sweepExportStaging(folder)
+    expect(await fs.readdir(folder)).toEqual([])
   })
 
   it('fails if a cover-only Try 2 writes a second video file, or its cover is Try 1\'s frame', async () => {
@@ -312,6 +357,54 @@ describe('platform files through the real engine', () => {
     }
     expect(await fs.readdir(folder)).toEqual([])
   })
+  // An exFAT drive (no clones) that stops answering partway through the copy: only Stop can end the copy now (#147).
+  it('fails if Stop does not end a copy that is under way on a drive without clones', async () => {
+    const source = finalRender(join(scratch, 'stalled.mp4'), 3)
+    const folder = join(scratch, 'stalled')
+    mkdirSync(folder)
+    const stop = new AbortController()
+    stalled.path = source
+    stalled.onRead = () => stop.abort() // the first chunk is on its way
+    // No clones here, and a plain copy from this drive never finishes either.
+    const stub = vi.spyOn(fs, 'copyFile').mockImplementation((_from, _to, mode) => ((mode ?? 0) & constants.COPYFILE_FICLONE_FORCE)
+      ? Promise.reject(Object.assign(new Error('ENOTSUP: operation not supported'), { code: 'ENOTSUP' }))
+      : new Promise<void>(() => {}))
+    try {
+      await expect(exportPlatforms({ tries: oneTry(source, null, 'Stalled', { platforms: ['tiktok'], caption: '', coverSeconds: null }), folder, runEngine, signal: stop.signal }))
+        .rejects.toMatchObject({ code: 'CANCELLED' })
+    } finally {
+      stub.mockRestore()
+      stalled.path = ''
+    }
+    expect(await fs.readdir(folder)).toEqual([])
+  }, 20_000)
+
+  it('fails if an export to a drive without hard links keeps a second copy of a placed video until it ends', async () => {
+    const source = finalRender(join(scratch, 'no links.mp4'), 3)
+    const folder = join(scratch, 'no links')
+    mkdirSync(folder)
+    const staged: string[] = []
+    const { copyFile } = fs
+    const stubs = [
+      vi.spyOn(fs, 'link').mockRejectedValue(Object.assign(new Error('ENOTSUP: operation not supported'), { code: 'ENOTSUP' })),
+      vi.spyOn(fs, 'copyFile').mockImplementation(async (from, to, mode) => {
+        // As the second video starts, the staging folder holds nothing of the first one.
+        if (to === join(folder, 'Space - YouTube Shorts.mp4')) {
+          const [stage] = (await fs.readdir(folder)).filter((n) => n.startsWith('.platform-export-'))
+          staged.push(...await fs.readdir(join(folder, stage)))
+        }
+        return copyFile(from, to, mode)
+      })
+    ]
+    try {
+      await exportPlatforms({ tries: oneTry(source, null, 'Space', { platforms: ['tiktok', 'youtube'], caption: '', coverSeconds: null }), folder, runEngine })
+    } finally {
+      for (const stub of stubs) stub.mockRestore()
+    }
+    expect(staged).toContain('Space - YouTube Shorts.mp4')
+    expect(staged.filter((n) => n.startsWith('Space - TikTok'))).toEqual([])
+  })
+
   it.skipIf(process.platform !== 'win32')('fails if the staging folder is not hidden on Windows, where a leading dot hides nothing', async () => {
     const folder = join(scratch, 'hidden-stage')
     mkdirSync(folder)
