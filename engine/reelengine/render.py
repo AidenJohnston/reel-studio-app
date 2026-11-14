@@ -97,6 +97,20 @@ def asset_fingerprint(project_dir: Path, proj: dict, root: Optional[Path] = None
         except (EngineError, OSError):
             out[r] = None
     out.update(anim_timing.rendered_clips(project_dir))   # an animation may play a clip re-timed to the cut
+    # Outside project.json too (Astra engine review 3): the face tracks set every crop and where each card goes
+    # (source_faces), and the caption font draws every subtitle (captions.resolve_font, as burn_captions picks it).
+    work = Path(project_dir) / "work"
+    for f in sorted(work.glob("face*.json")) if work.is_dir() else []:
+        st = f.stat()
+        out[f"work/{f.name}"] = [st.st_size, st.st_mtime_ns]
+    cap = proj.get("captions") or {}
+    if cap.get("enabled", True):
+        try:
+            font = Path(capmod.resolve_font((cap.get("style") or {}).get("font") or capmod.DEFAULT_FONT)[1])
+            st = font.stat()
+            out[f"font:{font.name}"] = [st.st_size, st.st_mtime_ns]
+        except (EngineError, OSError):
+            out["font"] = None
     return {"engineVersion": reelengine.__version__, "assets": out}
 
 

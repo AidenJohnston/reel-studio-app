@@ -33,6 +33,47 @@ def test_engine_upgrade_changes_fingerprint_and_selects_a_new_version(tmp_path, 
     assert projmod.read_json(vdir / "assets.json") == original
 
 
+def test_a_changed_face_track_cannot_reuse_a_saved_render(tmp_path):
+    # Fails if a regenerated face track (another face centre, so another crop) lets an export hand back the old
+    # video as reused (Astra engine review 3).
+    proj, vdir = saved_project(tmp_path)
+    face = tmp_path / "work" / "face-s1.json"
+    face.parent.mkdir()
+    face.write_text('{"track": [[0, 400, 600, 200, 260]]}', encoding="utf-8")
+    projmod.write_json(vdir / "assets.json", render.asset_fingerprint(tmp_path, proj))
+    assert render.pick_version(tmp_path, proj) == 1
+    face.write_text('{"track": [[0, 700, 900, 200, 260]]}', encoding="utf-8")
+    assert render.pick_version(tmp_path, proj) == 2
+
+
+def test_a_replaced_caption_font_cannot_reuse_a_saved_render(tmp_path, monkeypatch):
+    # Fails if the font file every subtitle is drawn in is replaced under the same name and an export hands back
+    # the old video as reused (Astra engine review 3).
+    from reelengine import captions
+    proj, vdir = saved_project(tmp_path)
+    proj["captions"] = {"enabled": True, "style": {"font": "Test Sans"}}
+    font = tmp_path / "fonts" / "TestSans.ttf"
+    font.parent.mkdir()
+    font.write_bytes(b"first font")
+    monkeypatch.setattr(captions, "resolve_font", lambda name: (name, font, {}, None))
+    projmod.write_json(vdir / "assets.json", render.asset_fingerprint(tmp_path, proj))
+    assert render.pick_version(tmp_path, proj) == 1
+    font.write_bytes(b"another font, longer")
+    assert render.pick_version(tmp_path, proj) == 2
+
+
+def test_the_engine_version_is_the_release_version():
+    # Fails if a release ships engine code under an older version: its renders carry that version in their
+    # fingerprint, so a saved render made by different code could be handed back as reused.
+    import json
+    from pathlib import Path
+    repo = Path(reelengine.__file__).resolve().parents[2]
+    release = json.loads((repo / "package.json").read_text(encoding="utf-8"))["version"]
+    pyproject = (repo / "engine" / "pyproject.toml").read_text(encoding="utf-8")
+    assert reelengine.__version__ == release
+    assert f'version = "{release}"' in pyproject
+
+
 @pytest.mark.parametrize("legacy_fingerprint", [True, False], ids=["unversioned", "missing"])
 def test_unknown_engine_version_cannot_reuse_a_saved_render(tmp_path, legacy_fingerprint):
     proj, vdir = saved_project(tmp_path)

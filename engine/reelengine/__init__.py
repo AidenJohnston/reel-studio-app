@@ -1,5 +1,5 @@
 """Reel Studio media engine."""
-__version__ = "0.1.2"
+__version__ = "0.2.0"
 
 # Before anything imports faster-whisper: it imports PyAV, which the installers leave out (see nopyav.py).
 from . import nopyav as _nopyav
