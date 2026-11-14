@@ -20,7 +20,7 @@ import {
 } from './project';
 import { extractJson } from './providers/cli';
 import { CheckRecord, CheckRound, MAX_REPAIRS, askChecker, askHarnessChecker, checkerEvidence, repairTask, saveCheck, unresolvedLine } from './checker';
-import { writeAiRun } from './provenance';
+import { writeAiRun, writeKeptAiRun } from './provenance';
 import * as fsp from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
 import { refuseIfOpen } from './owner';
@@ -423,6 +423,11 @@ export async function firstEdit(deps: EditorDeps, provider: ModelProvider | null
   return kept ? { ...r, summary: `${r.summary} Subtitles are lowercase, from My style.` } : r;
 }
 
+/** A first edit's model calls: into the version it made, or beside the project when it got its saved version back. */
+function recordFirstEditRun(projectDir: string, version: number, baseVersion: number, calls: ToolState['aiCalls']): Promise<void> {
+  return version > baseVersion ? writeAiRun(projectDir, version, calls) : writeKeptAiRun(projectDir, `first-edit-${randomUUID()}`, version, calls);
+}
+
 async function editNewVideo(deps: EditorDeps, provider: ModelProvider | null, projectDir: string, onEvent: (e: AgentEvent) => void, signal?: AbortSignal): Promise<EditResult> {
   if (!provider) return deterministicEdit(deps, projectDir, onEvent, signal);
   const ctx = newCtx(deps, projectDir, provider, onEvent, signal, 3);
@@ -453,7 +458,7 @@ async function editNewVideo(deps: EditorDeps, provider: ModelProvider | null, pr
         // and say plainly why. No other paid service is used.
         const simple = await deterministicEdit(deps, projectDir, onEvent, signal, e.userMessage);
         // the calls the AI answered before it stopped were still spent
-        if (simple.version !== undefined) await writeAiRun(projectDir, simple.version, ctx.state.aiCalls);
+        if (simple.version !== undefined) await recordFirstEditRun(projectDir, simple.version, baseVersion, ctx.state.aiCalls);
         return { ...simple, notice: e.toJSON() };
       }
       if (e instanceof AIError) {
@@ -467,7 +472,7 @@ First edit (stopped early).
 
 ${summary}
 `);
-        await writeAiRun(projectDir, version, ctx.state.aiCalls);
+        await recordFirstEditRun(projectDir, version, baseVersion, ctx.state.aiCalls);
         return { summary, version, styleRulesAdded: ctx.state.styleRulesAdded, ...(await checkedProposals(deps, ctx, measured)), changed: [...ctx.state.changed], notice: e.toJSON() };
       }
       throw e;
@@ -480,7 +485,7 @@ ${summary}
     const summary = withRulesReply(withStyleEcho(honestSummary({ ...run, finished: ctx.state.finished ?? run.finished }, ctx.state)
       ?? 'I could not finish your first edit this time, so this version is mostly your video as it was. Try again, or tell me what to change.', ctx.state), ctx, unreadable);
     if (version > baseVersion) await snapshotVersion(projectDir, await loadProject(projectDir), version, `# v${version}\n\nFirst edit.\n\n${summary}\n`);
-    await writeAiRun(projectDir, version, ctx.state.aiCalls);
+    await recordFirstEditRun(projectDir, version, baseVersion, ctx.state.aiCalls);
     onEvent({ type: 'status', message: 'Done', pct: 100 });
     return { summary, version, styleRulesAdded: ctx.state.styleRulesAdded, ...(await checkedProposals(deps, ctx, measured)), changed: [...ctx.state.changed] };
   } finally {
@@ -964,6 +969,8 @@ async function saveNote(deps: EditorDeps, ctx: ToolContext, base: Buffer, baseVe
       await unchanged();
       if (ctx.signal?.aborted) throw new AIError('cancelled', 'Stopped.');
     });
+    // an unchanged video's calls go beside the project, named by the note, once the note is saved
+    if (version <= baseVersion) await writeKeptAiRun(ctx.projectDir, ctx.note!.id, version, ctx.state.aiCalls);
     try {
       if (saveStyle) for (const rule of styleRulesAdded) await deps.style.add(rule);
       if (final) ctx.emit(renderEvent(final));
