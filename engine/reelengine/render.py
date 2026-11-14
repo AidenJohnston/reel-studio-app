@@ -981,7 +981,7 @@ def video_graph(ctx: RenderCtx, segments: list, src_meta: dict, src_paths: dict,
     def zoom_lane(cur: str, tag: str) -> str:
         """The zoom chains on `cur`; labels start with `tag`. Returns the zoomed label."""
         for zi, z in enumerate(zooms or []):
-            span = _zoom_frames(z, fps, ctx.duration or dur)
+            span = _zoom_frames(z, fps, max(ctx.duration or 0.0, t_shift + dur))   # the whole video's length
             if span is None:
                 continue
             # counted in frames of the full video: frame k here is its frame k + k_shift, as the caption track

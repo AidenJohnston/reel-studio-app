@@ -88,7 +88,10 @@ def _edit(pdir: Path, change) -> None:
 
 
 def _render(pdir: Path, root: Path, keep: Path, verify: bool = False, **kw) -> tuple:
-    """(a copy of the export, the result): the next render of the same edit writes the same file."""
+    """(a copy of the export, the result). The saved versions are cleared first: a render of an unchanged edit
+    hands back its saved version as it is (docs/versions.md rule 4), and these tests need each render made. The
+    chunk cache (work/render/chunks) stays."""
+    shutil.rmtree(pdir / "versions", ignore_errors=True)
     res = render.run(pdir, root=root, verify=verify, cover=False, **kw)
     keep.parent.mkdir(parents=True, exist_ok=True)
     return Path(shutil.copy2(res["file"], keep)), res
@@ -265,11 +268,11 @@ def test_a_caption_change_reencodes_only_the_chunks_it_shows_in(tmp_path, media,
     _, res = _render(pdir, root, tmp_path / "out" / "before.mp4")
     spans = chunks.plan(round(res["duration"] * FPS), FPS)
     assert len(spans) == res["chunks"]["total"] >= 30
-    cues_before = json.loads((pdir / "work" / "captions.json").read_text(encoding="utf-8"))["cues"]
+    cues_before = json.loads((Path(res["versionDir"]) / "captions.json").read_text(encoding="utf-8"))["cues"]
 
     _fix_caption(pdir, words, 31.0, "CHANGED")
     after, res = _render(pdir, root, tmp_path / "out" / "after.mp4")
-    cues_after = json.loads((pdir / "work" / "captions.json").read_text(encoding="utf-8"))["cues"]
+    cues_after = json.loads((Path(res["versionDir"]) / "captions.json").read_text(encoding="utf-8"))["cues"]
     changed = [c for c in cues_after if c not in cues_before]
     assert changed and max(c["e"] for c in changed) - min(c["s"] for c in changed) < 2.0
     a, b = min(c["s"] for c in changed), max(c["e"] for c in changed)

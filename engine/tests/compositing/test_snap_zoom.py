@@ -110,13 +110,16 @@ def test_snap_zoom_blurs_only_while_moving(renders):
 
 
 def test_default_zoom_render_is_unchanged(renders):
-    """The filters a zoom without `style` renders through, as on main before snap zooms."""
+    """The filters a zoom without `style` renders through: main's before snap zooms, counted in frames since
+    chunked finals (#184), so a chunk or a window zooms exactly the frames the whole video does. The zoom covers
+    frames 28 to 109, those starting in [t0, t1); the time-based trim also took frame 110, which starts at t1,
+    only because its end printed as 3.666667, just past 110 / 30."""
     zoom_chains = [c for c in renders[None]["graph"].split(";\n") if "zs0" in c or "zz0" in c]
     assert zoom_chains == [
         "[base0]split=2[zm0][zs0]",
-        "[zs0]trim=start=0.933333:end=3.666667,setpts=PTS-STARTPTS,crop=964:1714:58:103,"
+        "[zs0]trim=start_frame=28:end_frame=110,setpts=PTS-STARTPTS,crop=964:1714:58:103,"
         "scale=1080:1920:flags=lanczos,setsar=1,fps=30.0,tpad=start=28[zz0]",
-        "[zm0][zz0]overlay=0:0:eof_action=pass:repeatlast=0:enable='between(t,0.933333,3.666667)'[zb0]",
+        "[zm0][zz0]overlay=0:0:eof_action=pass:repeatlast=0:enable='between(t,0.916667,3.65)'[zb0]",
     ]
 
 
