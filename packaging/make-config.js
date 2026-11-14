@@ -133,6 +133,20 @@ if (process.env.RS_UPDATE_HOST) {
     process.exit(1)
   }
   out = out.replace(feed, (_m, head) => head + 'https://' + host + '/u/')
+  // A Windows copy can't read the app-update.yml inside an installer, so a staging build also says what it is in the
+  // installer's FileDescription, which electron-builder writes from the description (app updater-electron.ts).
+  if (host === 'dl-staging.getreelstudio.com') {
+    const m = fs.readFileSync(path.join(SHARED, 'channel.ts'), 'utf8').match(/export const STAGING_DESCRIPTION = '([^'\n]+)'\n/)
+    if (!m) {
+      console.error('make-config: STAGING_DESCRIPTION not found in app/src/shared/channel.ts')
+      process.exit(1)
+    }
+    if (!/^extraMetadata:[ \t]*\r?\n/m.test(out)) {
+      console.error('make-config: electron-builder.yml has no extraMetadata block for the staging description')
+      process.exit(1)
+    }
+    out = out.replace(/^extraMetadata:[ \t]*\r?\n/m, (head) => head + '  description: ' + JSON.stringify(m[1]) + '\n')
+  }
 }
 const afterPack = path.join(here, 'after-pack.js').replace(/[\\]/g, '/')
 out += `\nafterPack: ${afterPack}\n`

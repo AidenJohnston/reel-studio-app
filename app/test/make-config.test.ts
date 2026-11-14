@@ -2,6 +2,7 @@ import { expect, it } from 'vitest'
 import { spawnSync } from 'node:child_process'
 import { existsSync, readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
+import { STAGING_DESCRIPTION } from '../src/shared/channel'
 
 // packaging/make-config.js resolves the electron-builder template. The build is unsigned unless RS_WIN_SIGN=1, and then
 // the Azure Artifact Signing values must all be present and land inside the existing `win:` mapping.
@@ -74,4 +75,15 @@ it('still refuses a missing path variable', () => {
   const r = spawnSync(process.execPath, [script], { env: full, encoding: 'utf8' })
   expect(r.status).toBe(1)
   expect(r.stderr).toContain('RS_TEMPLATES_DIR')
+})
+
+it('fails if a staging build does not say so in its description, which a Windows copy reads from the installer', () => {
+  const staging = run({ RS_UPDATE_HOST: 'dl-staging.getreelstudio.com' })
+  expect(staging.status, staging.stderr).toBe(0)
+  expect(staging.yaml).toMatch(/\n  url: https:\/\/dl-staging\.getreelstudio\.com\/u\/\n/)
+  expect(staging.yaml).toMatch(new RegExp(`\\nextraMetadata:\\n(?:  .*\\n)*  description: ${JSON.stringify(STAGING_DESCRIPTION)}\\n`))
+  for (const production of [run({ RS_UPDATE_HOST: 'dl.getreelstudio.com' }), run({})]) {
+    expect(production.status, production.stderr).toBe(0)
+    expect(production.yaml).not.toContain(STAGING_DESCRIPTION)
+  }
 })

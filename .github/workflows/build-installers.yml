@@ -35,6 +35,12 @@ on:
         required: false
         type: number
         default: 14
+      update-host:
+        description: The server the build updates from (packaging/make-config.js RS_UPDATE_HOST).
+        required: false
+        type: choice
+        options: [dl.getreelstudio.com, dl-staging.getreelstudio.com]
+        default: dl.getreelstudio.com
   # A change to this workflow or the bundle check builds once, so it is proven before it is used. GitHub can only
   # start a workflow by hand once it has run, and main does not have this file yet.
   push:
@@ -42,6 +48,7 @@ on:
     paths:
       - .github/workflows/build-installers.yml
       - scripts/ci/check-bundle.py
+      - scripts/ci/check-update-channel.ps1
 
 permissions:
   contents: read
@@ -92,10 +99,22 @@ jobs:
       - name: Build the Windows installer
         if: runner.os == 'Windows'
         shell: pwsh
+        env:
+          RS_UPDATE_HOST: ${{ inputs.update-host }}
         run: ./packaging/build-win.ps1
       - name: Build the macOS installer
         if: runner.os == 'macOS'
+        env:
+          RS_UPDATE_HOST: ${{ inputs.update-host }}
         run: bash packaging/build-mac.sh
+      # A Windows copy tells a staging installer from a production one by its FileDescription (app updater-electron.ts
+      # installerRefusal): this reads what the built installer really carries.
+      - name: Check the update server the Windows installer names
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          RS_UPDATE_HOST: ${{ inputs.update-host }}
+        run: ./scripts/ci/check-update-channel.ps1
       - name: Check the bundled engine
         run: python scripts/ci/check-bundle.py "${{ matrix.resources }}"
       - name: Checksums

@@ -10,6 +10,7 @@ import type { UpdateCheckResult, UpdateInfo } from 'electron-updater'
 import { SAME_FOR_EVERYONE, STAGING_FEED_URL, UPDATE_FEED_URL, electronUpdaterBackend, installerRefusal, macBundleCheck, windowsInstaller, windowsInstallerFacts, type InstallStep, type UpdaterLike, type WindowsInstallerFacts } from '../src/main/updater-electron'
 import { LATEST_URL, UPDATE_PAGE, type FetchLike } from '../src/main/update-check'
 import { createUpdater } from '../src/main/updater'
+import { STAGING_DESCRIPTION } from '../src/shared/channel'
 import { updateAction } from '../src/shared/update'
 
 const KEY = 'v1.eyJwIjoibW9udGhseSJ9.c2lnbmF0dXJl'
@@ -294,6 +295,17 @@ describe('Windows installer check', () => {
     // the feed says 0.1.3, the installer inside is 0.1.1 from the same publisher
     expect(installerRefusal(facts({ productVersion: '0.1.1' }), '0.1.3', '0.1.2')).toMatch(/0\.1\.1/)
     expect(installerRefusal(facts({ productVersion: '0.1.2' }), '0.1.2', '0.1.2')).toMatch(/not the newer/)
+  })
+
+  it('fails if a signed installer of the right version moves this copy between the production and staging servers', () => {
+    const staging = facts({ description: STAGING_DESCRIPTION })
+    const production = facts({ description: 'Turn a raw talking-head video into a finished Reel.' })
+    expect(installerRefusal(production, '0.1.3', '0.1.2')).toBeNull()
+    expect(installerRefusal(staging, '0.1.3', '0.1.2')).toMatch(/staging build, and this copy updates from production/)
+    expect(installerRefusal(staging, '0.1.3', '0.1.2', true)).toBeNull()
+    expect(installerRefusal(production, '0.1.3', '0.1.2', true)).toMatch(/production build, and this copy updates from staging/)
+    // an installer whose description Windows won't give is no staging build
+    expect(installerRefusal(facts({ description: null }), '0.1.3', '0.1.2', true)).toMatch(/production build/)
   })
 
   // Windows' own answers: node.exe is signed by its publisher, a plain file is not.

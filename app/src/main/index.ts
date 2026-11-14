@@ -178,7 +178,7 @@ import { helperInstruction, MAC_PANES } from './mac-permission'
 import { MacPermissionHelper } from './mac-permission-helper'
 import { createUpdater, menuCheckForUpdates } from './updater'
 import { autoUpdater } from 'electron-updater'
-import { electronUpdaterBackend, macBundleCheck, windowsInstaller } from './updater-electron'
+import { electronUpdaterBackend, macBundleCheck, windowsInstaller, windowsInstallerFacts } from './updater-electron'
 import { disabledReason, updateMode } from './update-machine'
 import { feedFromFile } from './update-feed'
 import { createJobFeedback, createMainWindow, feedbackLog, installMenu, showTimelineInMenu, startDragOut, windowStateFile, type AppCommand, titleBarOverlay } from './window'
@@ -656,7 +656,7 @@ const updates = createUpdater({
         log,
         devFeedFile: TEST_FEED ? updateConfig ?? undefined : undefined,
         onError: (e) => updates.installFailed(e),
-        install: process.platform === 'win32' ? windowsInstaller(app.getVersion()) : macBundleCheck(app.getVersion(), siteFeed.staging)
+        install: process.platform === 'win32' ? windowsInstaller(app.getVersion(), windowsInstallerFacts, siteFeed.staging) : macBundleCheck(app.getVersion(), siteFeed.staging)
       }),
   load: loadSettings,
   save: saveSettings,

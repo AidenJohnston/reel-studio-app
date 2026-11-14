@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { promisify } from 'node:util'
 import type { AppUpdater, ProgressInfo } from 'electron-updater'
+import { STAGING_DESCRIPTION } from '../shared/channel'
 import { isNewer, newerOnSite, type FetchLike } from './update-check'
 import type { PageReason, UpdateBackend } from './updater'
 
@@ -242,24 +243,21 @@ export function macBundleCheck(running: string, staging = false): InstallStep {
 export interface WindowsInstallerFacts {
   /** Get-AuthenticodeSignature's Status: 'Valid', 'NotSigned', 'HashMismatch', ... */
   running: { status: string; subject: string | null }
-  installer: { status: string; subject: string | null; productVersion: string | null }
+  /** `description`: the installer's FileDescription, STAGING_DESCRIPTION for a staging build (packaging/make-config.js). */
+  installer: { status: string; subject: string | null; productVersion: string | null; description?: string | null }
 }
 
 /**
  * Why a downloaded Windows installer must not be run as `selected`, or null when it may. electron-updater checks only
  * that the file matches latest.yml's SHA-512, and the publisher only when the running build carries publisherName in
  * app-update.yml, which an unsigned build does not. So a feed that serves a self-consistent yml could hand over any
- * installer. Here the installer itself must be signed by the same publisher as this copy, and must say it is the
- * newer version the release named: a feed labelling an older installer as newer can't downgrade the app.
- *
- * Known issue: unlike the Mac check, nothing here tells a staging installer from a production one of the same version
- * and publisher. Their only difference, app-update.yml, sits inside the NSIS installer's compressed app archive, which
- * Windows has no tool to read. The fix puts the channel in the signed installer's version resource: make-config.js
- * marks a staging build there (electron-builder copies the app's description into the installer's FileDescription;
- * unverified, so one staging packaging run must confirm the field), windowsInstallerFacts reads it with
- * VersionInfo, and this refuses an installer whose channel is not this copy's.
+ * installer. Here the installer itself must be signed by the same publisher as this copy, must say it is the
+ * newer version the release named (a feed labelling an older installer as newer can't downgrade the app), and must be
+ * built for the server this copy updates from (`staging`, main/update-feed.ts): a staging and a production installer
+ * of one version differ only in the app-update.yml inside them, which picks the server every later update comes from,
+ * and Windows can't read it there, so a staging build also says so in its FileDescription.
  */
-export function installerRefusal(facts: WindowsInstallerFacts, selected: string, running: string): string | null {
+export function installerRefusal(facts: WindowsInstallerFacts, selected: string, running: string, staging = false): string | null {
   if (facts.running.status !== 'Valid' || !facts.running.subject) return 'This copy of Reel Studio is not signed, so it updates from the download page.'
   if (facts.installer.status !== 'Valid' || !facts.installer.subject) return 'The update is not signed.'
   if (facts.installer.subject !== facts.running.subject) return 'The update is signed by someone else.'
@@ -268,6 +266,8 @@ export function installerRefusal(facts: WindowsInstallerFacts, selected: string,
   const v = facts.installer.productVersion?.trim() ?? ''
   const same = v === selected || (/^\d+\.\d+\.\d+$/.test(selected) && v === `${selected}.0`)
   if (!same || !isNewer(selected, running)) return `The update installer says it is version ${v || 'unknown'}, not the newer release ${selected}.`
+  const built = facts.installer.description === STAGING_DESCRIPTION
+  if (built !== staging) return `The update is a ${built ? 'staging' : 'production'} build, and this copy updates from ${staging ? 'staging' : 'production'}.`
   return null
 }
 
@@ -282,10 +282,10 @@ export async function windowsInstallerFacts(installer: string, runningExe = proc
     "$ErrorActionPreference = 'Stop'",
     '$r = Get-AuthenticodeSignature -LiteralPath $env:RS_RUNNING_EXE',
     '$i = Get-AuthenticodeSignature -LiteralPath $env:RS_UPDATE_FILE',
-    '$v = (Get-Item -LiteralPath $env:RS_UPDATE_FILE).VersionInfo.ProductVersion',
+    '$info = (Get-Item -LiteralPath $env:RS_UPDATE_FILE).VersionInfo',
     '[pscustomobject]@{',
     '  running = @{ status = $r.Status.ToString(); subject = $(if ($r.SignerCertificate) { $r.SignerCertificate.Subject } else { $null }) }',
-    '  installer = @{ status = $i.Status.ToString(); subject = $(if ($i.SignerCertificate) { $i.SignerCertificate.Subject } else { $null }); productVersion = $v }',
+    '  installer = @{ status = $i.Status.ToString(); subject = $(if ($i.SignerCertificate) { $i.SignerCertificate.Subject } else { $null }); productVersion = $info.ProductVersion; description = $info.FileDescription }',
     '} | ConvertTo-Json -Compress -Depth 3'
   ].join('\n')
   const powershell = join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe')
@@ -301,12 +301,13 @@ export async function windowsInstallerFacts(installer: string, runningExe = proc
 }
 
 /** The NSIS installer people download (packaging/electron-builder.yml nsis.artifactName); latest.yml names it. */
-export function windowsInstaller(running: string, facts: (file: string) => Promise<WindowsInstallerFacts> = windowsInstallerFacts): InstallStep {
+/** `staging`: this copy updates from the staging server (main/update-feed.ts). */
+export function windowsInstaller(running: string, facts: (file: string) => Promise<WindowsInstallerFacts> = windowsInstallerFacts, staging = false): InstallStep {
   return {
     fileName: (version) => `Reel-Studio-Setup-${version}-x64.exe`,
     showInstaller: true,
     async verify(file, selected) {
-      const why = installerRefusal(await facts(file), selected, running)
+      const why = installerRefusal(await facts(file), selected, running, staging)
       if (why) throw new Error(why)
     }
   }

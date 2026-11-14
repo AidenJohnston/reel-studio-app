@@ -18,3 +18,9 @@ export const productName = (version: string): string => PRODUCT_NAME[channelOf(v
 export const RELEASES_REPOS: Record<Channel, string> = { stable: RELEASES_REPO, nightly: NIGHTLY_RELEASES_REPO }
 
 export const releasesUrl = (version: string): string => `https://github.com/${RELEASES_REPOS[channelOf(version)]}/releases`
+
+/** A build that updates from the staging server (RS_UPDATE_HOST=dl-staging.getreelstudio.com) carries this as its
+ * description, which electron-builder writes into the Windows installer's FileDescription: a Windows copy then refuses
+ * an installer built for the other server (main/updater-electron.ts installerRefusal). packaging/make-config.js reads
+ * it from this file. */
+export const STAGING_DESCRIPTION = 'Reel Studio staging build'
