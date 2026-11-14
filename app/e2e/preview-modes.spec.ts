@@ -2,7 +2,7 @@
 // - speed: 0.5x to 2x from the transport row's menu or < and >, the voice at its own pitch, kept across a version
 //   switch and a restart;
 // - full screen: F or the button lifts the same playing video onto a stage at the window's height, with its own
-//   controls; Esc puts it back and returns focus to where it was;
+//   controls; Esc puts it back and returns focus to where it was; undo can't reach the edit panel behind it;
 // - phone shapes: the frame takes each phone's proportion, the reel is trimmed the way that phone shows it, and the
 //   caption safe band stays clear of Instagram's buttons drawn on that phone.
 //
@@ -169,6 +169,20 @@ test('fails if speed, full screen or the phone shapes stop working, applying or 
       await page.keyboard.press('Escape')
       await expect(stage).toHaveCount(0)
       await expect.poll(() => focusedTestId(page)).toBe('timeline')
+
+      // fails if Cmd/Ctrl+Z on the stage reaches the edit panel behind it, which would drop an edit out of sight (#133)
+      await page.getByTestId('edit-myself').click()
+      await page.locator('.word').first().click()
+      await expect(page.getByTestId('drawer-undo')).toBeVisible()
+      await page.getByTestId('full-screen').click()
+      await expect(stage).toBeVisible()
+      await page.keyboard.press(process.platform === 'darwin' ? 'Meta+Z' : 'Control+Z')
+      await page.keyboard.press('Escape')
+      await expect(stage).toHaveCount(0)
+      await expect(page.getByTestId('drawer-undo')).toBeVisible()
+      await page.getByTestId('drawer-undo').click()
+      await page.getByTestId('drawer-close').click()
+      await expect(page.getByTestId('drawer')).toHaveCount(0)
 
       // an f typed in a note is a letter
       await page.getByTestId('note-input').fill('')
