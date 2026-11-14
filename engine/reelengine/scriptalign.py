@@ -54,7 +54,7 @@ def script_text(project_dir: Optional[Path], proj: dict) -> str:
             return locked
     sc = proj.get("script")
     if isinstance(sc, dict):
-        sc = sc.get("text") or sc.get("script") or ""
+        sc = sc.get("text") or _hooked(sc.get("hook"), sc.get("script")) or ""
     if isinstance(sc, str) and sc.strip():
         return sc
     if project_dir is None:
@@ -67,6 +67,17 @@ def script_text(project_dir: Optional[Path], proj: dict) -> str:
         except OSError:
             pass
     return ""
+
+
+def _hooked(hook, script) -> str:
+    """The app's script object (app shared/plan.ts planAsScript, the editor's writeScript): `script`, with the hook
+    said first when `script` does not hold it already. A reel's plan carries its hook apart from its lines; the
+    editor's own script includes it. ai/src/script-follow.ts reads it the same way, as the mapping's key needs."""
+    if not isinstance(script, str) or not script.strip():
+        return ""
+    if isinstance(hook, str) and hook.strip() and hook.strip() not in script:
+        return f"{hook.strip()}\n{script}"
+    return script
 
 
 # Only these markdown marks are taken out, so a name keeps its own characters ("C#", "snake_case").

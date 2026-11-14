@@ -264,3 +264,34 @@ def test_the_mapping_is_stored_and_the_same_inputs_give_the_same_mapping(tmp_pat
 def test_unrelated_speech_follows_nothing():
     m = scriptalign.build("Neve makes great microphones for studios.", heard("So today we talk about cooking pasta at home."))
     assert m["groups"] == [] and m["spans"] == []
+
+
+def test_following_the_script_never_moves_a_caption_off_the_audio():
+    """The script changes the words drawn, never when they show: each caption keeps the start, end and transcript
+    words it has without the script, and each word starts when it is heard. Fails if a caption drifts from the
+    timing the audio gives it."""
+    said = "I use Nave and flatly every day. Talk to Nave about it. Then call Flowly back."
+    script = "I use Neve and Flowly every day. Talk to Neve about it. Then call Flowly back."
+    words = heard(said)
+    groups = scriptalign.build(script, words)["groups"]
+    cap = {"style": {"case": "as-is"}}
+    plain = captions.build_cues(words, cap)
+    follow = captions.build_cues(words, cap, script_groups=groups)
+    assert text([c["t"] for c in follow]) == "I use Neve and Flowly every day Talk to Neve about it Then call Flowly back"
+    assert [(c["s"], c["e"], c["ids"]) for c in follow] == [(c["s"], c["e"], c["ids"]) for c in plain]
+    # and each word lights at the moment it is heard (a karaoke highlight reads these)
+    by_id = {w["id"]: w for w in words}
+    for c in follow:
+        assert c["starts"] == [by_id[ids[0]]["s"] for ids in c["wids"]], c
+
+
+def test_a_planned_reels_hook_and_lines_are_one_script(tmp_path):
+    """The app writes a planned reel's script as {hook, script, shots} (app shared/plan.ts planAsScript), with the
+    hook apart from its lines; the editor's own script already holds its hook. ai test/script-follow.test.ts pins
+    the same text, which the mapping's key is made from."""
+    planned = {"hook": "Nobody tells you this about Neve.", "script": "I use Neve every day.", "shots": ["desk"]}
+    assert scriptalign.script_text(None, {"script": planned}) == "Nobody tells you this about Neve.\nI use Neve every day."
+    written = {"hook": "Nobody tells you this.", "script": "Nobody tells you this.\nI use Neve every day."}
+    assert scriptalign.script_text(None, {"script": written}) == written["script"]
+    words = heard("Nobody tells you this about Nave. I use Nave every day.")
+    assert text(lines_for(tmp_path, project(tmp_path, planned), words)) == "Nobody tells you this about Neve I use Neve every day"

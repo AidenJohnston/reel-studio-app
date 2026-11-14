@@ -389,7 +389,13 @@ export interface ProjectJson {
     /** word ids that start a caption line; lines starting at `to` that go onto the line ending at `from` */
     split?: string[]
     join?: { from: string; to: string }[]
+    /** false: the subtitles show what was heard, not the script's words (engine scriptalign.py). Absent: they follow
+     * the script when there is one. */
+    followScript?: boolean
   }
+  /** The script the take was read from: text, or the app's {hook, script, shots} (store.ts carryScript). The subtitles
+   * follow it (captions.followScript). */
+  script?: string | { text?: string; hook?: string; script?: string; shots?: string[] }
   music?: {
     enabled: boolean
     track: string | null

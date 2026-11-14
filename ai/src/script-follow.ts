@@ -21,6 +21,13 @@ export interface ScriptFollow { script: string; align: ScriptAlign | null }
 
 const nonBlank = (x: unknown): x is string => typeof x === 'string' && x.trim() !== '';
 
+/** scriptalign._hooked: the app's script object, `script` with the hook said first when `script` does not hold it.
+ * A reel's plan (app shared/plan.ts planAsScript) carries its hook apart from its lines; the editor's script includes it. */
+function hooked(hook: unknown, script: unknown): string {
+  if (!nonBlank(script)) return '';
+  return nonBlank(hook) && !script.includes(hook.trim()) ? `${hook.trim()}\n${script}` : script;
+}
+
 /** The locked script, as scriptalign.script_text finds it: the plan's script once locked (the creator's
  * rewrite, else the draft), else project.json `script` (text, or {text}), else script.txt / script.md. */
 export async function currentScript(projectDir: string, p: Project): Promise<string> {
@@ -28,7 +35,7 @@ export async function currentScript(projectDir: string, p: Project): Promise<str
   const locked = plan?.script?.locked ? (plan.script.rewrite || plan.script.draft) : null;
   if (nonBlank(locked)) return locked;
   let sc = p.script as unknown;
-  if (sc && typeof sc === 'object') sc = (sc as { text?: unknown; script?: unknown }).text || (sc as { script?: unknown }).script || '';
+  if (sc && typeof sc === 'object') sc = (sc as { text?: unknown }).text || hooked((sc as { hook?: unknown }).hook, (sc as { script?: unknown }).script) || '';
   if (nonBlank(sc)) return sc;
   for (const name of SCRIPT_FILES) {
     const file = path.join(projectDir, name);

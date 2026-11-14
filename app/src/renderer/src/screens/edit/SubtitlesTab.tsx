@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react'
 import type { ProjectJson } from '../../../../shared/api'
 import { SIZE_PER_EM } from '../../../../shared/caption-fit'
-import { CAPTION_COLORS, CAPTION_PRESETS, applyPreset, colorName, lookFromStyle, presetOf, rowPosition } from '../../../../shared/caption-presets'
+import { CAPTION_COLORS, CAPTION_PRESETS, applyPreset, colorName, hasScript, lookFromStyle, presetOf, rowPosition } from '../../../../shared/caption-presets'
 import { SubtitleSample } from '../../components/Player'
 import { arrowPick, Segmented, tabStop } from '../../components/ui'
 import { setP, type TabProps } from './controls'
@@ -98,6 +98,8 @@ export function SubtitlesTab({ now, change, next }: TabProps) {
   const set = (fn: (c: Captions) => Captions) => change(setP((p) => ({ captions: fn(p.captions ?? { enabled: true }) })))
   const setStyle = (extra: Style) => set((c) => ({ ...c, style: { ...(c.style ?? {}), ...extra } }))
   const on = captions.enabled !== false
+  // the subtitles follow the reel's script (engine scriptalign.py): one from its plan or the editor's script writer
+  const scripted = hasScript(now.p.script)
 
   return (
     <div className="edit-stack">
@@ -105,6 +107,15 @@ export function SubtitlesTab({ now, change, next }: TabProps) {
         <input type="checkbox" checked={on} onChange={(e) => set((c) => ({ ...c, enabled: e.target.checked }))} data-testid="subs-on" />
         Show subtitles
       </label>
+      {on && scripted && (
+        <div className="edit-field">
+          <label className="toggle">
+            <input type="checkbox" checked={captions.followScript !== false} onChange={(e) => set((c) => ({ ...c, followScript: e.target.checked }))} data-testid="subs-follow-script" />
+            Spell words the way my script does
+          </label>
+          <p className="edit-hint">Names, numbers and spellings as you wrote them, at the moment you say them. Where you went off the script, the words you said.</p>
+        </div>
+      )}
       {on ? (
         <div className="edit-stack" data-testid="caption-controls">
           <div className="edit-field">

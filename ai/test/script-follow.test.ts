@@ -120,4 +120,14 @@ describe('captions that follow the script, as the AI is told', () => {
     expect(await currentScript(dir, p)).toBe('Mine.');
     expect(mappingKey(await currentScript(dir, p), transcript.words)).toHaveLength(64);
   });
+
+  // the engine reads the same text (engine tests/test_captions_follow_script.py), which the mapping's key is made from
+  it("reads a planned reel's {hook, script} as one script, the hook first unless the script holds it", async () => {
+    const { dir } = await makeProject({ lines: [LINE] });
+    const p = await loadProject(dir);
+    p.script = { hook: 'Nobody tells you this about Neve.', script: 'I use Neve every day.', shots: ['desk'] };
+    expect(await currentScript(dir, p)).toBe('Nobody tells you this about Neve.\nI use Neve every day.');
+    p.script = { hook: 'Nobody tells you this.', script: 'Nobody tells you this.\nI use Neve every day.' };
+    expect(await currentScript(dir, p)).toBe('Nobody tells you this.\nI use Neve every day.');
+  });
 });
