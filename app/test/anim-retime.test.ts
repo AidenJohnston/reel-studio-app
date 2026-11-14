@@ -31,6 +31,38 @@ describe('withAnimationRetiming', () => {
     expect(rendered).toEqual([{ template: job.template, params: job.params, out: job.out }])
   })
 
+  it("asks about the edit the render reads, with the job's token, and renders at the project rate", async () => {
+    const { run, calls } = fakeEngine([{ ...job, fps: 60 }])
+    const rates: (number | undefined)[] = []
+    const wrapped = withAnimationRetiming(run, async (_t, _p, out, fps) => {
+      rates.push(fps)
+      return out
+    })
+    await wrapped('render', ['--project', '/p', '--project-file', 'work/notes/n1/project.json', '--draft', '--owner', 'tok'])
+    expect(calls[0]).toBe('anim-jobs --project /p --project-file work/notes/n1/project.json --owner tok')
+    expect(rates).toEqual([60])
+  })
+
+  it('re-times before a moments run, which draws the cut too, but not before moments --mark', async () => {
+    const { run, calls } = fakeEngine([job])
+    const wrapped = withAnimationRetiming(run, async (_t, _p, out) => out)
+    await wrapped('moments', ['--project', '/p', '--mark'])
+    expect(calls).toEqual(['moments --project /p --mark'])
+    await wrapped('moments', ['--project', '/p'])
+    expect(calls.slice(1)).toEqual(['anim-jobs --project /p', 'moments --project /p'])
+  })
+
+  it("passes the runner's later arguments through (the exit callback)", async () => {
+    const seen: unknown[][] = []
+    const run = (async (...call: unknown[]) => {
+      seen.push(call)
+      return call[0] === 'anim-jobs' ? { jobs: [] } : { version: 3 }
+    }) as RunEngine
+    const onExit = (): void => {}
+    await withAnimationRetiming(run, async (_t, _p, out) => out)('render', ['--project', '/p'], undefined, undefined, onExit)
+    expect(seen[seen.length - 1][4]).toBe(onExit)
+  })
+
   it('leaves every other command alone', async () => {
     const { run, calls } = fakeEngine([job])
     const wrapped = withAnimationRetiming(run, async () => {
@@ -58,7 +90,7 @@ describe('withAnimationRetiming', () => {
     const { run, calls } = fakeEngine([job, { ...job, id: 'b5' }])
     const stop = new AbortController()
     const seen: (AbortSignal | undefined)[] = []
-    const wrapped = withAnimationRetiming(run, async (_t, _p, _out, signal) => {
+    const wrapped = withAnimationRetiming(run, async (_t, _p, _out, _fps, signal) => {
       seen.push(signal)
       stop.abort()
       throw { code: 'CANCELLED', userMessage: 'Stopped.' }

@@ -122,6 +122,25 @@ def test_the_same_cut_always_names_the_same_clip(tmp_path, video):
     assert anim_timing.jobs(fx.make_ctx(pdir)) == first      # deterministic: same project, same clip
 
 
+def test_a_recut_clip_is_made_at_the_project_rate(tmp_path, video):
+    # Fails if a 60 fps project's re-timed clip is asked for at another rate, or if one name serves both
+    # rates: a draft runs at the preview rate (render.preview_fps), the clip must not follow it.
+    pdir = tmp_path / "p"
+    fx.make_project(pdir, video, keep=((1.0, 11.0),))
+    ctx = fx.make_ctx(pdir)
+    item, _ = _made_on(ctx, fx.word_near(ctx, 2.0), fx.word_near(ctx, 4.5))
+    fx.make_project(pdir, video, keep=((1.0, 3.0), (4.6, 11.0)))
+    named = {}
+    for fps in (30, 60):
+        ctx = fx.make_ctx(pdir)
+        fx.set_project(ctx, broll=[item], format={**ctx.project["format"], "fps": fps})
+        ctx.fmt["fps"] = 30                              # what a draft does to its context
+        [job] = anim_timing.jobs(ctx)
+        assert job["fps"] == fps
+        named[fps] = job["out"]
+    assert named[30] != named[60]
+
+
 def test_readable_text_check_is_the_editors():
     # the same cases as ai/test/e2efix.test.ts (ai/src/readable.ts)
     assert anim_timing.hero_px("stat-count-up", {"value": "9", "text": "days"}, {"w": 1004, "h": 650}) > 250

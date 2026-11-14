@@ -268,13 +268,20 @@ def _rendered_with(sidecar: dict) -> dict:
     return p
 
 
-def key(template: str, params: dict) -> str:
-    blob = json.dumps([VERSION, template, params], sort_keys=True, separators=(",", ":"), default=str)
+def project_fps(ctx) -> float:
+    """The rate a re-timed clip is rendered at: the project's, as make_animation renders the first one
+    (ai/src/tools.ts). Not ctx.fmt, which a draft lowers to the preview rate (render.preview_fps)."""
+    return float(((ctx.project or {}).get("format") or {}).get("fps") or 30)
+
+
+def key(template: str, params: dict, fps: float = 30.0) -> str:
+    # the rate is in the key: a clip made for another rate is a different clip, never reused
+    blob = json.dumps([VERSION, template, params, float(fps)], sort_keys=True, separators=(",", ":"), default=str)
     return hashlib.sha1(blob.encode()).hexdigest()[:12]
 
 
 def retimed_path(ctx, template: str, params: dict) -> Path:
-    return Path(ctx.work) / "animations" / f"{template}-{key(template, params)}.mov"
+    return Path(ctx.work) / "animations" / f"{template}-{key(template, params, project_fps(ctx))}.mov"
 
 
 def plan(ctx, item: dict, sidecar: dict) -> Optional[dict]:
@@ -292,7 +299,7 @@ def plan(ctx, item: dict, sidecar: dict) -> Optional[dict]:
     if same(want, _rendered_with(sidecar)):
         return None
     out = retimed_path(ctx, template, params)
-    return {"template": template, "params": params, "out": out,
+    return {"template": template, "params": params, "fps": project_fps(ctx), "out": out,
             "ready": out.exists() and out.with_suffix(".anim.json").exists()}
 
 
@@ -308,7 +315,7 @@ def rendered_clips(project_dir: Path) -> dict:
 
 def jobs(ctx) -> list[dict]:
     """Every animation clip the current cut needs that is not rendered yet:
-    [{id, template, params, out}] (out is an absolute path for the renderer)."""
+    [{id, template, params, fps, out}] (out is an absolute path for the renderer)."""
     from .broll import _anim_of
     out, seen = [], set()
     for i, it in enumerate((ctx.project or {}).get("broll") or []):
@@ -320,5 +327,5 @@ def jobs(ctx) -> list[dict]:
             continue
         seen.add(str(p["out"]))
         out.append({"id": it.get("id", f"b{i + 1}"), "template": p["template"], "params": p["params"],
-                    "out": str(p["out"])})
+                    "fps": p["fps"], "out": str(p["out"])})
     return out
