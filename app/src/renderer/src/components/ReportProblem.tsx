@@ -104,6 +104,8 @@ export function ReportProblem({ context, screenshotAvailable, hasKey, onClose }:
   }, [step])
 
   const invalid = (f: string) => (fieldError?.field === f ? true : undefined)
+  // the refused field names the message saying why, so a screen reader reads it with the field
+  const why = (f: string) => (fieldError?.field === f ? 'report-field-error' : undefined)
 
   const kind = step.name === 'write' ? 'write' : step.name === 'sent' ? 'sent' : 'review'
   // false until the first step change: the dialog's own entrance covers the first step
@@ -141,7 +143,7 @@ export function ReportProblem({ context, screenshotAvailable, hasKey, onClose }:
             value={draft.what}
             onChange={(e) => set('what', e.target.value)}
             placeholder="For example: I clicked Export and it stopped at 80%."
-            aria-invalid={invalid('what')}
+            aria-invalid={invalid('what')} aria-describedby={why('what')}
             ref={fieldRefs.what}
             data-autofocus
             data-testid="report-what"
@@ -151,13 +153,13 @@ export function ReportProblem({ context, screenshotAvailable, hasKey, onClose }:
           <b>
             What did you expect? <span className="muted-sm">(optional)</span>
           </b>
-          <textarea className="textarea" rows={3} maxLength={CAPS.expected} value={draft.expected} onChange={(e) => set('expected', e.target.value)} aria-invalid={invalid('expected')} ref={fieldRefs.expected} data-testid="report-expected" />
+          <textarea className="textarea" rows={3} maxLength={CAPS.expected} value={draft.expected} onChange={(e) => set('expected', e.target.value)} aria-invalid={invalid('expected')} aria-describedby={why('expected')} ref={fieldRefs.expected} data-testid="report-expected" />
         </label>
         <label className="rp-field">
           <b>
             Your email <span className="muted-sm">(optional, so we can write back)</span>
           </b>
-          <input className="input" type="email" maxLength={CAPS.email} value={draft.email} onChange={(e) => set('email', e.target.value)} aria-invalid={invalid('email')} ref={fieldRefs.email} data-testid="report-email" />
+          <input className="input" type="email" maxLength={CAPS.email} value={draft.email} onChange={(e) => set('email', e.target.value)} aria-invalid={invalid('email')} aria-describedby={why('email')} ref={fieldRefs.email} data-testid="report-email" />
         </label>
         <div className="rp-ticks">
           <label className="toggle">
@@ -179,7 +181,7 @@ export function ReportProblem({ context, screenshotAvailable, hasKey, onClose }:
           )}
         </div>
         {fieldError && (
-          <p className="field-error" role="alert" data-testid="report-field-error">
+          <p className="field-error" role="alert" id="report-field-error" data-testid="report-field-error">
             {fieldError.message}
           </p>
         )}
@@ -217,7 +219,7 @@ export function ReportProblem({ context, screenshotAvailable, hasKey, onClose }:
       <>
         <h2 id="report-title">{step.name === 'failed' ? "The report wasn't sent" : 'This is what will be sent'}</h2>
         {step.name === 'failed' && (
-          <div className="banner error" role="alert" data-testid="report-error">
+          <div className="banner error" role="alert" id="report-error" data-testid="report-error">
             <span>
               {step.message} You can also email it to <span className="selectable">{SUPPORT_EMAIL}</span>.
             </span>

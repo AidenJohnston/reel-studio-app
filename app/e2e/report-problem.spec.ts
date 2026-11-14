@@ -116,6 +116,8 @@ test('Report a problem: review, send, and the way out when sending fails', async
     await expect(page.getByTestId('report-email')).toBeFocused()
     await expect(page.getByTestId('report-email')).toHaveAttribute('aria-invalid', 'true')
     await expect(page.getByTestId('report-what')).not.toHaveAttribute('aria-invalid', 'true')
+    // the refused field names the message saying why (prep-for-prod round 1, should-fix)
+    await expect(page.getByTestId('report-email')).toHaveAttribute('aria-describedby', 'report-field-error')
     await expect(page.getByTestId('report-field-error')).toContainText('not an email address')
     await expect(page.getByTestId('report-send')).toHaveCount(0) // the form has no Send: only a fresh review does
     // Replace the address with fill(), not a select-all shortcut, so the test does not depend on the platform's keys.
