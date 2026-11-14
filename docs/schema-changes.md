@@ -268,8 +268,6 @@ Existing project shapes remain valid. New shapes can require a newer engine, as 
   under that word and fades out if it is still ringing when the video ends. The tail depends only on that word's
   samples, so a preview window or an earlier edit gives the same tail.
 - All three are written by the AI's `set_sound_moments`; turning one off removes its field.
-- Sound effects: at most one, plus one per 8 seconds of video, play; the earliest play and the rest are left
-  out with a render warning.
 - `analyze-music` now suggests a start on the song's first attack after the calm bar (`suggestedStartAt`).
   The fade-in default is unchanged on release/0.2.0 (0.6 s, `fadeIn` sets it; `fadeIn: 0` starts the song
   on that hit). The beat tracker is release/0.2.0's (beat phase fix of 2026-10-23), not #178's.

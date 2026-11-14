@@ -13,8 +13,6 @@ Restraint is enforced here rather than left to the prompt:
   * one effect at a time, at most one every MIN_GAP seconds; a later one that is closer, or that
     would start before the previous one has finished, is left out. So is one whose build-up would
     start before the video does (it would come in mid-swell on the first frame).
-  * sparse: one effect, plus one more for every SECONDS_PER_EFFECT of video (a whoosh on every cut is
-    the clearest sign a machine made the edit); the earliest ones play and the rest are left out
   * level from the measured voice, like the music bed: an effect peaks LEVEL_DB under the voice's
     speech loudness, gainDb moves it, and nothing goes above CAP_DB under the voice
   * an effect that sounds while the voice is talking, from its start to just after its hit, is ducked
@@ -39,7 +37,6 @@ from .music import HOP, SR, accent_time, block_power, decode, lufs, speech_mask
 
 PACK_DIR = Path(__file__).resolve().parent / "sfx"
 MIN_GAP = 2.0
-SECONDS_PER_EFFECT = 8.0
 LEVEL_DB = -10.0
 CAP_DB = -4.0
 SPEECH_DUCK_DB = -6.0
@@ -135,7 +132,6 @@ def plan(ctx) -> tuple[list, list]:
             cands.append((t, i, {"t": t, "start": start, "end": start + snd["seconds"], "sound": snd,
                                  "gainDb": float(e.get("gainDb") or 0.0), "at": at}))
     placed = []
-    cap = max_effects(float(getattr(ctx, "duration", 0.0) or 0.0))
     cands.sort(key=lambda k: k[:2])
     for k, (t, _, c) in enumerate(cands):
         # B-roll has already checked its word lead; snapping again could move its sound off the card.
@@ -149,17 +145,9 @@ def plan(ctx) -> tuple[list, list]:
         if placed and (t - placed[-1]["t"] < MIN_GAP or c["start"] < placed[-1]["end"]):
             left.append({"at": c["at"], "sound": c["sound"]["id"],
                          "skipped": f"it is too close to another sound effect (one at a time, {MIN_GAP:g} seconds apart)"})
-        elif len(placed) >= cap:
-            left.append({"at": c["at"], "sound": c["sound"]["id"],
-                         "skipped": f"a video this long has room for {cap} sound effects (one, plus one every {SECONDS_PER_EFFECT:g} seconds)"})
         else:
             placed.append(c)
     return placed, left
-
-
-def max_effects(duration: float) -> int:
-    """How many effects a video this long may carry."""
-    return 1 + int(duration // SECONDS_PER_EFFECT)
 
 
 def signature(placed: list) -> list:

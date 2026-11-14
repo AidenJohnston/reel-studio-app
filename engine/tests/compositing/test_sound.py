@@ -84,7 +84,7 @@ def grid_of(media):
 def mixed(ctx, tmp_path, name="voice.wav"):
     voice = fx.cut_voice(ctx, tmp_path / name)
     out = music.build_audio(ctx, voice)
-    return music.decode(out, ctx), json.loads((ctx.work / "audio" / "mix.json").read_text())
+    return music.decode(out, ctx), json.loads(out.with_suffix(".json").read_text())    # mix-<sig>.json, beside the mix
 
 
 def on_grid(t, ctx):
