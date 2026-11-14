@@ -244,15 +244,3 @@ describe('a project.json some Windows editors saved with a byte-order mark', () 
     expect(JSON.parse((await read()).replace(/^\uFEFF/, '')).notes.at(-1)).toMatchObject({ id: 'job-bom', reply });
   });
 });
-
-describe('a project.json some Windows editors saved with a byte-order mark', () => {
-  it('takes a note like any other project', async () => {
-    const { dir, host, settingsDir, read } = await setup();
-    await fsp.writeFile(path.join(dir, 'project.json'), '﻿' + (await read()));
-    await createAI({ host, settingsDir, providerOverride: new ScriptedModel([
-      { toolCalls: [call('set_gap_cap', { seconds: 0.3 })] },
-      finish('I tightened the pauses.'),
-    ]) }).applyNote(dir, 'tighter', () => undefined);
-    expect(JSON.parse(await read()).cut.gapCap).toBe(0.3);
-  });
-});
