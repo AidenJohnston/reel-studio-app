@@ -36,7 +36,7 @@ Recommendation: close each with a comment pointing at the release PR once it mer
 |---|---|---|
 | Notes and AI core (landed) | `port/0.2.0/notes-core` | #137 #138 #139 #140 (atomic notes, one writer per project), #144, #143, #135, #117, #129, #145, #127, #128, #153, #34 |
 | Render engine | `port/0.2.0/engine` | #124, #116, #146, #156, #151, #149, #154, #155, #172, #173, #178, #180 |
-| UI | `port/0.2.0/ui` | #3, #133 (for #4), #17, #126, #130, #131, #132, #118, #147, #134, #142, #152, #174, #185 |
+| UI (landed) | `port/0.2.0/ui` | #3, #133 (for #4), #17, #126, #130, #131, #132, #118, #147, #134, #142, #152, #174, #185 |
 | CI, updater, packaging (landed) | `port/0.2.0/ship` | CI green on all three OSes, #120, #121, #179, #123, #125, #136, #168, #169, #177 |
 | Second wave, after notes core and engine land | to be named | #157, #150, #184, #170, #171, #182, #183 |
 
@@ -68,3 +68,9 @@ Updated as each group lands.
   - #138's attachment sharing is dropped. The redesign's staging (#58) replaces it: an attachment waits in the note queue instead of being refused.
   - #153's "couldn't undo My style" error is dropped. The redesign saves My style only with a committed note, so a failed note can't leave it half-changed.
   - New test `app/test/jobs.property.test.ts` runs seeded random jobs and hand edits on two reels. After every step it checks against a model that a project has at most one writer.
+- UI landed. CI at the port's head 59ade1f8 passes on every job (run 43598440808). Results:
+  - #174, #185 and #142 are merged or ported. #118, #17, #3, #126, #130, #131, #132, #147 and #134 are ported onto the redesign's screens.
+  - #133 is ported, and #4 is superseded by it.
+  - #152 was already in by content.
+  - The Electron end-to-end specs the port added or adapted are typechecked only. CI doesn't run them, so they wait on the Windows real-app pass.
+  - Report a problem (#185) needs the site's support endpoint (reel-studio-site#16) deployed. Until then a send fails and offers email instead.
