@@ -2,7 +2,7 @@
 // version's title and summary from its receipt facts. Keep free of Node and DOM imports.
 import type { ChatMessage, DropResult, EditFact, ProjectJson, VersionInfo, Word } from './api'
 import { keptIds } from './cut'
-import { CAPTION_PRESETS, colorName, presetOf } from './caption-presets'
+import { CAPTION_PRESETS, LOOK_KEYS, colorName, presetOf } from './caption-presets'
 import { kindsByWords, PACE_BANDS, PACE_LABELS, ZOOM_KIND_LABELS, type CutStyle } from './cut-style'
 import { isMirrored } from './mirror'
 import { gainOf, momentKey, musicFades, secondsText, sfxName } from './sfx'
@@ -30,8 +30,11 @@ function subtitles(before: ProjectJson['captions'], after: ProjectJson['captions
   const a = (before?.style ?? {}) as Style
   const b = (after.style ?? {}) as Style
   const words: string[] = []
-  const preset = presetOf(b)
-  if (preset && preset !== presetOf(a)) words.push(CAPTION_PRESETS.find((x) => x.key === preset)!.label.toLowerCase())
+  // A receipt's style holds only the fields that changed, so a look is named only when it records every field the
+  // look draws: the rest would be guessed from defaults (unboxing yellow subtitles is not the Clean look).
+  const lookOf = (s: Style): string | null => (!partial || LOOK_KEYS.every((k) => k in s) ? presetOf(s) : null)
+  const preset = lookOf(b)
+  if (preset && preset !== lookOf(a)) words.push(CAPTION_PRESETS.find((x) => x.key === preset)!.label.toLowerCase())
   else {
     if (size(b) > size(a)) words.push('bigger')
     if (size(b) < size(a)) words.push('smaller')
