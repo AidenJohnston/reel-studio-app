@@ -1571,7 +1571,7 @@ def burn_captions(ctx: RenderCtx, proj: dict, tl, broll_report: list, rwork: Pat
         # Grouping only the window's words made lines the full video never shows ("HERE IS THE" where
         # the video shows "SO HERE IS"), so a window starting or ending mid-line drew the wrong words.
         ass, cap_report, cwarn, (family, font_path), stats = capmod.build_for_timeline(
-            tl, proj, W, H, position_spans=spans, project_dir=project_dir)
+            tl, proj, W, H, position_spans=spans, project_dir=ctx.project_dir)
         warnings += cwarn
         ass_name = "captions.ass"
         with open(rwork / ass_name, "w", encoding="utf-8", newline="\n") as fh:
