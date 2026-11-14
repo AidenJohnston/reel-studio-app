@@ -278,5 +278,5 @@ html.kb .mchip:active, html.kb .ed-seg-o:active { transform: none; }
 }
 
 /* the model that made a version, on its line in the notes (NotesLog.tsx): quiet, one line, full name in its tooltip.
-   It gives up its room before the version's few words do (the shrink weight), down to a few letters and "…" */
-.nt-res .t.by { display: block; color: var(--ink-3); white-space: nowrap; text-overflow: ellipsis; -webkit-line-clamp: unset; flex: 0 1000 auto; min-width: 3em; }
+   It gives up its room before the version's few words do (the shrink weight), down to its first word or so and "…" (3em left only "the …": the runner's Windows capture, 2026-11-14) */
+.nt-res .t.by { display: block; color: var(--ink-3); white-space: nowrap; text-overflow: ellipsis; -webkit-line-clamp: unset; flex: 0 1000 auto; min-width: 6em; }

@@ -224,7 +224,8 @@ export function NotesLog({
           {madeWith?.[v] && (
             <>
               <span className="t by" title={`Made with ${madeWith[v]}`} data-testid={`version-model-${v}`}>
-                {madeWith[v]}
+                {/* cut short from the end when the row is narrow, so the article goes: "Codex ap…" says more than "the …" */}
+                {madeWith[v].replace(/^the\s+/i, '')}
               </span>
               <span className="sep" aria-hidden>
                 ·
