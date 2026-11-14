@@ -52,6 +52,9 @@ h3.edit-label { margin: 0; }
 .edit .word { padding: 2px 2px; }
 .edit .word.changed { background: var(--marker-soft); }
 .edit .word.cut { color: var(--ink-3); }
+/* Cut words: the words this edit brings back, named, with the one step that cuts them again (CutTab.tsx) */
+.edit-back { display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 8px; }
+.edit-back .edit-hint { flex: 1 1 220px; min-width: 0; }
 
 /* the one-word-per-place fixes ("As heard" -> "Should read") */
 .edit-fix { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto; gap: 6px; align-items: center; }

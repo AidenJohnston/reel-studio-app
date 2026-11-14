@@ -10,7 +10,7 @@ import { readAttachment } from './attachments';
 import {
   Analysis, Broll, CaptionStyle, ClipItem, CutItem, LIBRARY_FOLDERS, LibraryKind, MusicFrozen, MusicLevel, Project, Sfx, Transcript, TREATMENTS, Word, WordAnchor, Zoom,
   anchorText, anchorWords, approxDuration, approxOutputTimes, keptWords, loadAnalysis, loadProject, loadTranscript,
-  captionsUnderInstagram, nextBrollId, clipProblem, normalizeKeep, captionCorrectionProblem, saveProject, validateProject, wordIndex, anchorProblem, PROJECT_FILE, versionDir, JOIN_TRANSITIONS, SEARCHED_JOINS,
+  captionsUnderInstagram, nextBrollId, clipProblem, normalizeKeep, captionCorrectionProblem, saveProject, validateProject, wordIndex, anchorProblem, PROJECT_FILE, versionDir, JOIN_TRANSITIONS, SEARCHED_JOINS, listVersions, versionLine, withWordsBack,
 } from './project';
 import { MERGE_FIELDS, MergeRequest, MergeResult, mergeVersions, validateMergeRequest } from './version-merge';
 import { S, JSONSchema, validate, fillNulls } from './schema';
@@ -762,6 +762,8 @@ export function operationStatus(ctx: ToolContext, name: string, args: any): stri
       if (back > 0 && !gone.length) return `Bringing back ${words(back)}`;
       return undefined;
     }
+    case 'restore_from_version':
+      return args?.part === 'words' ? 'Bringing back the words you asked for' : args?.part === 'subtitle-look' ? 'Putting the subtitles back as they were' : undefined;
     case 'add_broll':
       return `Adding ${args?.treatment === 'animation' || args?.animation ? 'an animation' : WORD_TREATMENTS.has(args?.treatment) ? 'words on screen' : 'a picture'}${at(args?.anchor?.from)}`;
     case 'update_broll':
@@ -1570,6 +1572,86 @@ const tools: ToolDef[] = [
         content: { ok: true, ...(cutSummary(t, p) as object) },
         summary: 'Picked your best takes',
       };
+    },
+  },
+  {
+    name: 'restore_from_version',
+    description: 'Put part of an earlier saved version back exactly as it was there. Use it for "bring that part back", "put it back how it was", "undo that change", instead of rebuilding the cut or the style by hand. part words: the words from..to come back exactly as that version kept them, each in its place; words that version had cut (a filler, a stumble) stay out and the rest of the cut is unchanged. part subtitle-look: the subtitles\' look (on or off, size, colour, capitals, position and every other style field) becomes exactly that version\'s; word fixes stay. version null: the newest saved version where that part differs from now.',
+    parameters: S.obj({
+      part: S.enum(['words', 'subtitle-look']),
+      from: S.opt(S.str('part words: first word id of the part to bring back, e.g. "w44"', WORD_ID)),
+      to: S.opt(S.str('part words: last word id (inclusive)', WORD_ID)),
+      version: S.opt(S.int('the saved version to take it from; null = the newest one where it differs from now', { minimum: 1 })),
+    }),
+    async run(ctx, args) {
+      const { p, t } = await load(ctx);
+      const saved = await listVersions(ctx.projectDir);
+      if (args.version != null && !saved.includes(args.version)) throw new ToolInputError(`Version ${args.version} is not a saved version. Saved: ${saved.join(', ') || 'none'}.`);
+      // with no version named, the earlier ones are the versions this one was made from, newest first: on a branch,
+      // the other branch's versions are not earlier ones even when their numbers are lower
+      const snapshot = async (n: number): Promise<Project> => {
+        try { return await loadProject(ctx.projectDir, path.join(versionDir(ctx.projectDir, n), PROJECT_FILE)); } catch (e) {
+          // never skipped: passing over it would bring back an older version's part as if it were the one asked for
+          throw new ToolInputError(`Version ${n} could not be read (${e instanceof Error ? e.message : String(e)}). Tell the person, and ask which version to take it from, or set it by hand.`);
+        }
+      };
+      const pick = async (differs: (s: Project) => boolean): Promise<{ n: number; s: Project } | null> => {
+        if (args.version != null) {
+          const s = await snapshot(args.version);
+          return differs(s) ? { n: args.version, s } : null;
+        }
+        // each version is looked at before its parent is read, so damage further back than the match never stops it;
+        // a missing one on the way stops it, since skipping would take the part from further back
+        try {
+          for await (const n of versionLine(ctx.projectDir, ctx.note?.parent ?? p.version)) {
+            const s = await snapshot(n);
+            if (differs(s)) return { n, s };
+          }
+        } catch (e) {
+          if (e instanceof ToolInputError) throw e;
+          throw new ToolInputError(`${e instanceof Error ? e.message : String(e)} Tell the person, and ask which version to take it from, or set it by hand.`);
+        }
+        return null;
+      };
+      if (args.part === 'words') {
+        if (args.from == null || args.to == null) throw new ToolInputError('part words needs from and to: the first and last word of the part to bring back.');
+        const problem = anchorProblem(wordIndex(t), { from: args.from, to: args.to });
+        if (problem) throw new ToolInputError(problem);
+        const keptNow = new Set(keptWords(t, p.cut.keep).map((w) => w.id));
+        const range = anchorWords(t, { from: args.from, to: args.to }).map((w) => w.id).filter((id) => !keptNow.has(id));
+        const backFrom = (s: Project) => {
+          const k = new Set(keptWords(t, s.cut.keep).map((w) => w.id));
+          return range.filter((id) => k.has(id));
+        };
+        const found = await pick((s) => backFrom(s).length > 0);
+        if (!found) {
+          throw new ToolInputError(args.version != null
+            ? `Version ${args.version} did not have any of those words that are cut now.`
+            : 'No saved version had any of those words that are cut now. Check the word ids in get_transcript.');
+        }
+        const back = backFrom(found.s);
+        await mutate(ctx, 'cut', (project) => { project.cut.keep = withWordsBack(t, project.cut.keep, back); });
+        const idx = wordIndex(t);
+        return {
+          content: { ok: true, version: found.n, broughtBack: asData(back.map((id) => idx.words[idx.byId.get(id)!].w).join(' ')), ...(cutSummary(t, ctx.project!) as object) },
+          summary: `Put back the words from Version ${found.n}`,
+        };
+      }
+      // key order is not part of the look: a style written in another order is the same look
+      const canon = (v: unknown): unknown => (Array.isArray(v) ? v.map(canon) : v && typeof v === 'object'
+        ? Object.fromEntries(Object.keys(v).sort().filter((k) => (v as Record<string, unknown>)[k] !== undefined).map((k) => [k, canon((v as Record<string, unknown>)[k])])) : v);
+      const look = (c: Project['captions']) => JSON.stringify(canon([c.enabled, c.style]));
+      const found = await pick((s) => look(s.captions) !== look(p.captions));
+      if (!found) {
+        throw new ToolInputError(args.version != null
+          ? `The subtitles already look as they did in Version ${args.version}.`
+          : 'No saved version had subtitles that look different from now.');
+      }
+      await mutate(ctx, 'captions', (project) => {
+        project.captions.enabled = found.s.captions.enabled;
+        project.captions.style = structuredClone(found.s.captions.style);
+      });
+      return { content: { ok: true, version: found.n, captions: ctx.project!.captions }, summary: `Put the subtitles back as they were in Version ${found.n}` };
     },
   },
   {

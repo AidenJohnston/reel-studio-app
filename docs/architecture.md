@@ -228,7 +228,7 @@ small TypeScript project API and then ask the main process to re-render. The set
 
 `get_project`, `get_transcript` (with retake groups and pauses from `analyze`), `set_cut(keep)`, `find_match_cuts`
 (which joins can be match cuts, from `reelengine match-joins`; `set_cut` refuses a match whose two sides don't line up),
-`set_gap_cap`, `set_cut_style(preset, seed)`, `set_beat_accents(on)` (accents on the song's beat; null lets the cut style decide), `set_caption_style`, `add_caption_correction`, `list_library(kind)`, `read_references` (the
+`restore_from_version(part, from, to, version)` (puts the words of a cut part, or the subtitle look, back exactly as an earlier saved version had them, for "bring that back" and "undo that"), `set_gap_cap`, `set_cut_style(preset, seed)`, `set_beat_accents(on)` (accents on the song's beat; null lets the cut style decide), `set_caption_style`, `add_caption_correction`, `list_library(kind)`, `read_references` (the
 reference reels saved in My style and the app's readout of what they have in common: talking pace, seconds per shot,
 the opening line; titles and opening lines are other creators' words, fenced as data), `choose_music(track,
 startAt, level)`, `set_music_automation`, `add_broll(anchor, treatment, asset, params)`, `update_broll`,

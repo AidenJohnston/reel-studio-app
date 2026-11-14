@@ -72,8 +72,19 @@ test('transitions: picked by hand, a match kept only where it lines up, made int
     await shot(page, 'joins-04-smallest-window')
     await page.setViewportSize({ width: 1280, height: 820 })
 
-    // a word cut inside the last stretch keeps the match on the cut into it
+    // fails if a crossed-out word clicked by mistake comes back unnamed, or takes more than one step to cut again (the
+    // runner's J2 by hand brought back two fillers and saved them); the version at the end shows nothing came back
     await page.getByTestId('cut-mode-cut').click()
+    const words = page.getByTestId('words').locator('.word')
+    await words.nth(5).click()
+    await words.nth(6).click()
+    await expect(page.getByTestId('brought-back')).toHaveText(/^You brought back “[\p{L}\p{N}']+”, “[\p{L}\p{N}']+”\. They are heard in Version 2\.\s*Cut them again$/u)
+    await page.getByTestId('cut-again').click()
+    await expect(page.getByTestId('brought-back')).toHaveCount(0)
+    await expect(words.nth(5)).toHaveClass(/(^| )cut( |$)/)
+    await expect(words.nth(6)).toHaveClass(/(^| )cut( |$)/)
+
+    // a word cut inside the last stretch keeps the match on the cut into it
     await page.getByTestId('words').locator('.word').nth(16).click()
     await page.getByTestId('cut-mode-joins').click()
     await expect(rows.nth(1).getByRole('radio', { name: 'Match', exact: true })).toHaveAttribute('aria-checked', 'true')
