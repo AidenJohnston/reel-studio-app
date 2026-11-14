@@ -635,7 +635,6 @@ export function PhonePlayer({
       style={shape ? shapeVars(shape) : undefined}
       data-shape={shape?.id}
       draggable={!!dragFile}
-      title={dragFile ? 'Drag the reel out of the window to the desktop or an upload box' : undefined}
       onPointerDown={(e) => {
         dragOrigin.current = e.target
       }}
