@@ -166,17 +166,20 @@ describe('a note that does not finish leaves the project as it was', () => {
     await fsp.writeFile(path.join(dir, OWNER_LOCK), JSON.stringify({ app: 'Reel Studio', token: 'job-1' }));
     const run = host.runEngine.bind(host);
     let drawn = false;
+    let seen: () => void = () => {};
+    const drawing = new Promise<void>((resolve) => { seen = resolve; });
     host.runEngine = async (command, args, onProgress, signal) => {
       if (command !== 'moments') return run(command, args, onProgress, signal);
       if (args.includes('--mark')) return {};
       // the changed-moments draw, whose engine would not stop: Moments keeps the error to itself
       drawn = true;
+      seen();
       throw { code: 'ENGINE_STUCK', userMessage: "Part of Reel Studio's video engine would not stop." };
     };
     const m = new ScriptedModel([
       { toolCalls: [call('add_broll', { anchor: { from: 'w29', to: 'w30' }, treatment: 'side-card', asset: 'Library/Images/bread.png', animation: null, params: {} })] },
       async () => {
-        for (let i = 0; i < 200 && !drawn; i++) await new Promise((r) => setTimeout(r, 10));
+        await drawing;
         throw new AIError('network', 'I could not reach the AI. Check your internet and try again.');
       },
     ]);

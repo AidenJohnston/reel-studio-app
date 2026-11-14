@@ -195,7 +195,7 @@ export function electronUpdaterBackend(opts: {
 }
 
 /** Whether a bundle's app-update.yml names the staging feed (true), production's (false), or neither (null). */
-export function bundleIsStaging(yml: string): boolean | null {
+function bundleIsStaging(yml: string): boolean | null {
   const url = /^url:[ \t]*(\S+)[ \t]*$/m.exec(yml)?.[1]
   return url === STAGING_FEED_URL ? true : url === UPDATE_FEED_URL ? false : null
 }

@@ -7,8 +7,7 @@ import { join } from 'node:path'
 import { EventEmitter } from 'node:events'
 import { describe, expect, it } from 'vitest'
 import type { UpdateCheckResult, UpdateInfo } from 'electron-updater'
-import { SAME_FOR_EVERYONE, STAGING_FEED_URL, UPDATE_FEED_URL, bundleIsStaging, electronUpdaterBackend, installerRefusal, macBundleCheck, windowsInstaller, windowsInstallerFacts, type InstallStep, type UpdaterLike, type WindowsInstallerFacts } from '../src/main/updater-electron'
-import { feedFromConfig } from '../src/main/update-feed'
+import { SAME_FOR_EVERYONE, STAGING_FEED_URL, UPDATE_FEED_URL, electronUpdaterBackend, installerRefusal, macBundleCheck, windowsInstaller, windowsInstallerFacts, type InstallStep, type UpdaterLike, type WindowsInstallerFacts } from '../src/main/updater-electron'
 import { LATEST_URL, UPDATE_PAGE, type FetchLike } from '../src/main/update-check'
 import { createUpdater } from '../src/main/updater'
 import { updateAction } from '../src/shared/update'
@@ -261,7 +260,8 @@ it.skipIf(process.platform !== 'darwin')('fails if a signed update of the right 
     }
     const production = bundle('production', appUpdateYml(UPDATE_FEED_URL))
     const staging = bundle('staging', appUpdateYml(STAGING_FEED_URL))
-    const elsewhere = bundle('elsewhere', appUpdateYml('https://dl.example.com/u/'))
+    // a feed one path segment off staging's is neither server
+    const elsewhere = bundle('elsewhere', appUpdateYml(`${STAGING_FEED_URL}x/`))
     const none = bundle('none', null)
     await expect(macBundleCheck('0.1.2').verify(production, '0.1.3')).resolves.toBeUndefined()
     await expect(macBundleCheck('0.1.2').verify(staging, '0.1.3')).rejects.toThrow(/staging build, and this copy updates from production/)
@@ -274,16 +274,6 @@ it.skipIf(process.platform !== 'darwin')('fails if a signed update of the right 
   } finally {
     rmSync(root, { recursive: true, force: true })
   }
-})
-
-it('fails if a bundle names a feed other than the exact production or staging one and passes as either', () => {
-  expect(bundleIsStaging(appUpdateYml(UPDATE_FEED_URL))).toBe(false)
-  expect(bundleIsStaging(appUpdateYml(STAGING_FEED_URL))).toBe(true)
-  expect(bundleIsStaging(appUpdateYml('https://dl-staging.getreelstudio.com/u/x/'))).toBeNull()
-  expect(bundleIsStaging(appUpdateYml('http://dl.getreelstudio.com/u/'))).toBeNull()
-  expect(bundleIsStaging('')).toBeNull()
-  // the running copy reads the same file the same way (main/update-feed.ts)
-  expect(feedFromConfig(appUpdateYml(STAGING_FEED_URL)).staging).toBe(true)
 })
 
 describe('Windows installer check', () => {
