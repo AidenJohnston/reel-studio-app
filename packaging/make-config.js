@@ -119,6 +119,21 @@ if (process.env.RS_WIN_SIGN === '1') {
     m + '  # Azure Artifact Signing (RS_WIN_SIGN=1): the app .exe, the uninstaller and the installer\n' +
     '  azureSignOptions:\n' + lines.join('\n') + '\n')
 }
+// Staging builds (RS_UPDATE_HOST=dl-staging.getreelstudio.com): app-update.yml names the staging feed, and the
+// packaged app (main/update-feed.ts) then asks staging for latest.json and updates. Only the two known hosts.
+if (process.env.RS_UPDATE_HOST) {
+  const host = process.env.RS_UPDATE_HOST
+  if (host !== 'dl.getreelstudio.com' && host !== 'dl-staging.getreelstudio.com') {
+    console.error('make-config: RS_UPDATE_HOST must be dl.getreelstudio.com or dl-staging.getreelstudio.com, got ' + host)
+    process.exit(1)
+  }
+  const feed = /^(publish:[ \t]*\r?\n(?:[ \t]+.*\r?\n)*?[ \t]+url:[ \t]*)https:\/\/dl\.getreelstudio\.com\/u\/[ \t]*$/m
+  if (!feed.test(out)) {
+    console.error('make-config: electron-builder.yml has no publish url to point at ' + host)
+    process.exit(1)
+  }
+  out = out.replace(feed, (_m, head) => head + 'https://' + host + '/u/')
+}
 const afterPack = path.join(here, 'after-pack.js').replace(/[\\]/g, '/')
 out += `\nafterPack: ${afterPack}\n`
 const dir = path.join(here, '.build')

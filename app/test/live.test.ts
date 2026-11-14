@@ -194,7 +194,10 @@ describe('job manager (main): the contract on the wire', () => {
       await new Promise((r) => setTimeout(r, 20))
       throw { code: 'CANCELLED', userMessage: 'Stopped.' }
     })
-    await new Promise((r) => setTimeout(r, 60))
+    // Stop once the draft is on screen, not after a fixed wait: start() reads and writes the project before the job
+    // runs, and on a loaded Windows runner that took longer than the 30 ms the slow copy waits, so a timed Stop came
+    // before the pictures and they were (rightly) dropped
+    await vi.waitFor(() => expect(events.some((e) => e.type === 'render')).toBe(true), { timeout: 5000 })
     jobs.cancel(id)
     stopped()
     await jobs.forSlug(slug)?.done

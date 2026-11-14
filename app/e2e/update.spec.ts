@@ -14,8 +14,8 @@ import { APP_DIR, BASE, root, userData, passFirstRun, openSettings, shot } from 
 /** The copies that install updates themselves (main/update-machine.ts updateMode). */
 const INSTALLS = process.platform === 'darwin' || process.platform === 'win32'
 const WIN = process.platform === 'win32'
-const CURRENT = '0.1.4' // app/package.json
-const NEXT = '0.1.5'
+const CURRENT = '0.2.0' // app/package.json
+const NEXT = '0.2.1'
 const PAYLOAD = WIN ? `Reel-Studio-Setup-${NEXT}-x64.exe` : `Reel-Studio-${NEXT}-arm64-mac.zip`
 const FEED = WIN ? 'latest.yml' : 'latest-mac.yml'
 const KEY = 'v1.eyJwIjoibW9udGhseSJ9.c2lnbmF0dXJl'
