@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { previewText, readCaptionLines, retype, setBreak, subtitleLines, type LineToken } from '../src/shared/subtitle-lines'
+import { drawnWords, previewText, readCaptionLines, retype, setBreak, subtitleLines, type LineToken } from '../src/shared/subtitle-lines'
 
 // work/captions.json as the engine writes it: a line split at w4 ("for" / "everything,"), "type script"
 // corrected to one word, and a long pause before the last line (a new speech run).
@@ -63,5 +63,19 @@ describe('subtitle lines', () => {
   it('cleans a line for the phone preview as the engine cleans a caption (captions.cue_text)', () => {
     expect(previewText('¿Listo para esto…')).toBe('Listo para esto')
     expect(previewText('"(Quote) it.")')).toBe('Quote) it')
+  })
+
+  // #171 with Fable check 1: a word drawn as the script writes it ("Claude", heard "cloud") that was fixed to "Clod" and
+  // has that fix taken back reads as the script's word, as the next render will draw it, never the heard one; the fix
+  // a person types over it is still written against the heard word, which the engine matches
+  it("fails if a word whose fix is taken back shows the heard word while the subtitles follow the script", () => {
+    const fixed = { ...saved, corrections: [{ from: 'cloud', to: 'Clod', at: 'w2' }] }
+    const lines = readCaptionLines({ cues: [{ run: 0, text: 'I USE CLOD', tokens: [{ w: 'I', ids: ['w0'] }, { w: 'use', ids: ['w1'] }, { w: 'Clod', ids: ['w2'] }] }] })
+    const drawn = drawnWords(heard, { w2: 'Claude' })
+    const back = { ...saved, corrections: [] }
+    expect(text(subtitleLines(lines, kept, fixed, back, drawn))).toEqual(['I use Claude'])
+    expect(text(subtitleLines(lines, kept, fixed, back, heard))).toEqual(['I use cloud'])
+    const line = subtitleLines(lines, kept, fixed, fixed, drawn)[0]
+    expect(retype(line, fixed.corrections, fixed.corrections, 'I use Claud', heard)).toEqual([{ from: 'cloud', to: 'Claud', at: 'w2' }])
   })
 })

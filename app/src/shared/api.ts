@@ -304,6 +304,9 @@ export interface ProjectDetail extends ProjectSummary {
   keptIds: string[]
   /** The caption lines of the saved version (or the preview before one), word by word: its captions.json. */
   captionLines: CaptionToken[][]
+  /** While the subtitles follow the reel's script: the script's words each transcript word is drawn as (work/
+   * script-align.json; a group's words on its first id, '' on the rest). Null when there is no script or it is off. */
+  scriptWords?: Record<string, string> | null
   checklist: ChecklistItem[]
   versionsMade: VersionMade[]
   chat: ChatMessage[]

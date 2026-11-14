@@ -111,9 +111,9 @@ export function SubtitlesTab({ now, change, next }: TabProps) {
         <div className="edit-field">
           <label className="toggle">
             <input type="checkbox" checked={captions.followScript !== false} onChange={(e) => set((c) => ({ ...c, followScript: e.target.checked }))} data-testid="subs-follow-script" />
-            Spell words the way my script does
+            Follow my script
           </label>
-          <p className="edit-hint">Names, numbers and spellings as you wrote them, at the moment you say them. Where you went off the script, the words you said.</p>
+          <p className="edit-hint">Names and numbers show the way your script writes them. Where you went off it, they show what you said; a word you fix by hand still wins.</p>
         </div>
       )}
       {on ? (

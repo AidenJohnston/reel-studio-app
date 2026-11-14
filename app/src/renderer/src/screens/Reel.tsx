@@ -34,6 +34,7 @@ import { Timeline, type TimelineMark } from '../components/Timeline'
 import { TrackTimeline } from '../components/TrackTimeline'
 import { FramingBox } from '../components/FramingBox'
 import { trackLanes } from '../../../shared/track-lanes'
+import { drawnWords } from '../../../shared/subtitle-lines'
 import { brollGesture, framingOf, usableWords, withEdits, type Broll, type Gesture } from '../../../shared/timeline-edit'
 import { countChanges, type HandEdit } from '../../../shared/hand-edit'
 import { lanesOf, pictureWhy, type Lanes } from '../../../shared/lanes'
@@ -503,6 +504,8 @@ export function Reel({ slug, at, go, draft: startDraft }: { slug: string; at?: n
   // the changes made there, and the timeline's own changes still on their way (waiting in the queue, or just sent), on
   // the clock of the version on screen.
   const saidAt = useMemo(() => new Map((d?.words ?? []).map((w) => [w.id, w.w])), [d?.words])
+  // the subtitle lane shows a word whose fix is taken back as the subtitles draw it: the script's, while followed
+  const drawnAt = useMemo(() => drawnWords(saidAt, d?.project.captions?.followScript === false ? null : d?.scriptWords), [saidAt, d?.project.captions?.followScript, d?.scriptWords])
   const track = useMemo(() => {
     const v = timeline?.version
     if (!d || !drawer || !v || timeline.video !== shownVideo || shownN === undefined) return null
@@ -513,7 +516,7 @@ export function Reel({ slug, at, go, draft: startDraft }: { slug: string; at?: n
     const had = new Set((d.project.broll ?? []).map((b) => b.id))
     const why = (id: string) => (had.has(id) ? pictureWhy(id, d.versions, d.project.notes ?? [], shownN) : drawerDraft ? `New: in Version ${drawerDraft.next} once you make it` : null)
     const thumb = drawerDraft?.thumb ?? ((b: { id: string }) => d.brollThumbs[b.id] ?? null)
-    const lanes = trackLanes({ draft, version: v, words: d.words, captionLines: d.captionLines, savedCaptions: d.project.captions, heard: saidAt, pack, why, thumb })
+    const lanes = trackLanes({ draft, version: v, words: d.words, captionLines: d.captionLines, savedCaptions: d.project.captions, heard: drawnAt, pack, why, thumb })
     return { draft, lanes, thumb }
   }, [d, drawer, timeline, shownVideo, shownN, sent, drawerDraft, saidAt, pack])
 
