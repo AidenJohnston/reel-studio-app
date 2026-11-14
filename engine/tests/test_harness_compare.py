@@ -300,9 +300,11 @@ def test_a_proxy_run_refuses_a_take_whose_copy_was_not_made(tmp_path):
 
 def test_a_note_state_with_a_saved_version_replays_its_stills_from_the_draft(tmp_path, monkeypatch):
     """A real note's frozen state can have version > 0, and copy_project leaves out every saved
-    version. The stills must come from the draft just made, not from the missing versions/vN."""
+    version. The stills must come from the draft just made: without a file, `frames` takes the
+    newest render that still shows the edit or draws stills from the project (frames.py), and neither
+    is the draft the checks compare them with."""
     from types import SimpleNamespace
-    from reelengine.render import latest_render, preview_dir
+    from reelengine.render import preview_dir
     src = tmp_path / "take"
     (src / "media").mkdir(parents=True)
     (src / "media" / "take01.mp4").write_bytes(b"media")
@@ -311,7 +313,7 @@ def test_a_note_state_with_a_saved_version_replays_its_stills_from_the_draft(tmp
     (src / "versions" / "v2" / "export.mp4").write_bytes(b"old export")
 
     class FakeEngine:
-        """Like the engine: `frames` reads --file, else the project's latest render (frames.py)."""
+        """Like the engine, except that `frames` must be given the draft just made."""
         def run(self, command, args):
             proj = __import__("pathlib").Path(args[args.index("--project") + 1])
             out = preview_dir(proj)
@@ -321,10 +323,9 @@ def test_a_note_state_with_a_saved_version_replays_its_stills_from_the_draft(tmp
                 f.write_bytes(command.encode())
                 return SimpleNamespace(seconds=0.1, result={"file": str(f), "duration": 1.0})
             assert command == "frames"
-            state = json.loads((proj / "project.json").read_text(encoding="utf-8"))
-            video = args[args.index("--file") + 1] if "--file" in args else latest_render(proj, state)
-            if video is None:
-                raise RuntimeError("NO_RENDER: There's no video to look at yet.")
+            assert "--file" in args, "stills asked for without naming the draft"
+            video = args[args.index("--file") + 1]
+            assert __import__("pathlib").Path(video) == out / "draft.mp4"
             still = out / "still.png"
             still.write_bytes(b"png")
             return SimpleNamespace(seconds=0.1, result={"video": str(video), "frames": [{"t": 0.5, "file": str(still)}]})
