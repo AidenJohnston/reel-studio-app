@@ -52,6 +52,7 @@ The second wave waits because those PRs are built on the new note flow from #140
 3. **AI context budget.** 0.2.0 sends more fixed context than main: 634,443 characters and 42 tools, against main's 447,274 and 26, measured in CI run 43592033947. `ai/context-budget.json` is re-pinned to the measured numbers. A PR into main that grows the budget needs the `ai-context-increase` label, so the release PR needs that label from Sam.
 4. **Engine version.** The app is 0.2.0, and the engine stays at 0.1.2. The engine's version is part of each render's fingerprint, so bumping it makes saved projects render again instead of reusing their last render. Recommendation: bump the engine to 0.2.0. The redesign's engine renders differently (for example #186 runs the final scale on one thread), and stopping old renders from being reused is what the fingerprint is for.
 5. **#177's leak-check hooks.** #177 lets `.claude/settings.json` through the check, because that file carries the repo's agent hook, and it scans PR titles and bodies. Both changes are #177's own; nothing else in the check's rules changed.
+6. **Run the macOS workflow pass after freeing disk.** The real-app pass on macOS runs only when the Mac has at least 12 GiB free. On Nov 14 it had 10 to 11 GiB, because swap grew as the agents ran. Until the pass runs, the macOS evidence is CI's macOS jobs and the macOS installer's bundled-engine check.
 
 ## Status
 
