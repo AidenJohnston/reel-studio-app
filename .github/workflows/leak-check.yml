@@ -3,12 +3,13 @@
 # pull_request_target runs THIS file and the checker from main, never from the pull request, so a pull request
 # cannot change or skip the check. The pull request (a fork's too) is checked out as data only: the checker reads
 # its files and nothing from it is installed, built or run. The token can only read, and is not kept in either
-# checkout.
+# checkout. The pull request's title and body reach the job only as environment variables, read by the checker as
+# data: never through ${{ }} inside a run: script, where the text would become shell code.
 name: Leak check
 
 on:
   pull_request_target:
-    types: [opened, synchronize, reopened]
+    types: [opened, edited, synchronize, reopened]   # edited: a new title or body
   push:
     branches: [main]
 
@@ -48,3 +49,16 @@ jobs:
         env:
           TARGET: ${{ github.event_name == 'pull_request_target' && 'candidate' || 'trusted' }}
         run: python3 trusted/scripts/leak-check/check.py --root "$TARGET"
+
+      # The title and body are public the moment they are posted, so this flags a leak for the author to edit out;
+      # it can't stop one. The local hooks (docs/leak-check.md) are what stop it first.
+      - name: Scan the pull request title and body
+        if: ${{ !cancelled() && github.event_name == 'pull_request_target' }}
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/pr" && cd "$RUNNER_TEMP/pr"
+          printf '%s\n' "$PR_TITLE" > title
+          printf '%s\n' "$PR_BODY" > body
+          python3 "$GITHUB_WORKSPACE/trusted/scripts/leak-check/check.py" --text title body

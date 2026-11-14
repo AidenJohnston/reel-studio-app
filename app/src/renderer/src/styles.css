@@ -123,7 +123,7 @@ a { color: inherit; }
 @media (hover: hover) and (pointer: fine) {
   .update-pill:not([aria-disabled]):hover { background: var(--wash); }
 }
-.update-pill:active { transform: scale(.98); }
+.update-pill:active:not(:focus-visible) { transform: scale(.98); } /* pointer presses only: keyboard actions never animate */
 .update-pill[aria-disabled] { cursor: default; }
 .update-pill[aria-disabled]:active { transform: none; }
 .update-pill-text { flex: 1; display: flex; flex-direction: column; min-width: 0; }
@@ -597,7 +597,7 @@ html.kb .toast { animation: none; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { transition-property: opacity, color, background-color, border-color, outline-color, box-shadow, filter, visibility !important; }
   .update-pop { transform: none; }
-  .update-pill:active { transform: none; }
+  .update-pill:active:not(:focus-visible) { transform: none; }
   @keyframes breathe { 0%, 100% { opacity: .2; } 50% { opacity: .85; } }
   @keyframes word-in { from { opacity: 0; } }
   @keyframes slide-in { from { opacity: 0; } }
