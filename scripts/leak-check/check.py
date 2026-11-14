@@ -11,6 +11,14 @@ It reads every tracked file (`git ls-files`) and fails on:
   * a file over 5 MB that is not on the ship list;
   * a path that must never be committed (test footage, media, keys, .env, local agent settings, ...).
 
+Other modes, each run by one layer of docs/leak-check.md:
+  --staged               the staged content of the staged paths, not the working tree (the pre-commit hook)
+  --text PATH [...]      text that is about to become public, such as a PR title or body; `-` reads stdin.
+                         Same term, e-mail and local-path rules. A finding gives line and column, never the
+                         term or the line, because this text is not in the repo for anyone to look up.
+  --commit-message PATH  a commit message (the commit-msg hook): --text, stopping at git's scissors line, and
+                         allowing no-reply addresses in trailers and the address on git's `#` comment lines
+
 The maintainer regenerates patterns.json from the private list. Standard library only, so CI needs no
 install step.
 """
@@ -62,6 +70,10 @@ SHIPPED_SAMPLE = {
 }
 NEVER_COMMIT_EXACT = {"SPEC.md", "docs/PUBLISH.md"}
 NEVER_COMMIT_PREFIX = ("docs/RELEASE-NOTES",)
+# The one .claude/ file that is shared, not local: Claude Code's project settings, which carry the repo's agent
+# hook (docs/leak-check.md). Personal settings (.claude/settings.local.json) and agents stay refused; the root
+# .claude/skills/ is let through by NEVER_COMMIT above.
+SHARED_AGENT_SETTINGS = {".claude/settings.json"}
 
 # Not secret, so kept in the clear: a Windows path into a developer's own folders.
 PLAIN = [("local path", re.compile(r"c:[\\/]+dev(?![a-z])", re.I))]
@@ -132,16 +144,17 @@ class Terms:
                 return True
         return False
 
-    def line(self, text: str) -> bool:
+    def find(self, text: str) -> int | None:
+        """Index in `text` of the first word (or word pair) that matches a term, or None."""
         low = text.lower()
         words = list(WORD.finditer(low))
-        if any(self.word(m.group()) for m in words):
-            return True
-        for m1, m2 in zip(words, words[1:]):
-            gap = low[m1.end():m2.start()]
-            if gap and gap.isspace() and self.pair(m1.group(), m2.group()):
-                return True
-        return False
+        hits = [m.start() for m in words if self.word(m.group())]
+        hits += [m1.start() for m1, m2 in zip(words, words[1:])
+                 if (gap := low[m1.end():m2.start()]) and gap.isspace() and self.pair(m1.group(), m2.group())]
+        return min(hits, default=None)
+
+    def line(self, text: str) -> bool:
+        return self.find(text) is not None
 
     def blob(self, data: bytes) -> bool:
         low = data.lower()
@@ -160,7 +173,7 @@ def is_text(path: str, data: bytes) -> bool:
 
 
 def never_commit(path: str) -> bool:
-    if SHIPPED_MEDIA.match(path) or path in SHIPPED_SAMPLE:
+    if SHIPPED_MEDIA.match(path) or path in SHIPPED_SAMPLE or path in SHARED_AGENT_SETTINGS:
         return False
     return path in NEVER_COMMIT_EXACT or path.startswith(NEVER_COMMIT_PREFIX) or any(r.search(path) for r in NEVER_COMMIT)
 
@@ -197,6 +210,72 @@ def check_tree(tree: dict[str, bytes], terms: Terms) -> list[str]:
     return out
 
 
+# A trailer such as "Co-authored-by: Name <address>" may carry an address that exists to be public.
+TRAILER = re.compile(r"^[A-Za-z][A-Za-z0-9-]*:\s")
+NOREPLY = re.compile(r"^(?:[^@]+@users\.noreply\.github\.com|noreply@[^@]+)$", re.I)
+SCISSORS = "# ------------------------ >8 ------------------------"
+
+
+def check_text(label: str, text: str, terms: Terms, commit_message: bool = False) -> list[str]:
+    """Findings as `label:line:column: [kind]`. Never the term, the address or the line: unlike a file in a pull
+    request, this text is not public yet, and the output may be (a CI log, an agent transcript)."""
+    out: list[str] = []
+    for i, line in enumerate(text.splitlines(), 1):
+        # `#` lines are still checked: `git commit -F` keeps them. Only their e-mail is let through, because git's
+        # own "# Author: Name <address>" line carries the address the commit already records.
+        comment = commit_message and line.startswith("#")
+        if commit_message and line.startswith(SCISSORS):
+            break                               # git always cuts here: below is the diff (`commit -v`), not the message
+        bare = line
+        for phrase in ALLOW:                    # blanked, not removed, so columns still point into the original
+            bare = bare.replace(phrase, " " * len(phrase))
+        col = terms.find(bare)
+        if col is not None:
+            out.append(f"{label}:{i}:{col + 1}: [private term]")
+        for kind, rx in PLAIN:
+            if m := rx.search(bare):
+                out.append(f"{label}:{i}:{m.start() + 1}: [{kind}]")
+        for m in EMAIL_RE.finditer(line):
+            ok = (comment or EMAIL_OK_VALUES.match(m.group())
+                  or (commit_message and TRAILER.match(line) and NOREPLY.match(m.group())))
+            if not ok:
+                out.append(f"{label}:{i}:{m.start() + 1}: [email]")
+    return out
+
+
+def read_text(path: str) -> str:
+    if path == "-":
+        return sys.stdin.buffer.read().decode("utf-8", "replace")
+    return Path(path).read_bytes().decode("utf-8", "replace")
+
+
+def git_out(root: Path, *args: str, stdin: bytes | None = None) -> bytes:
+    return subprocess.run(["git", "-C", str(root), *args], input=stdin, capture_output=True, check=True).stdout
+
+
+def read_staged(root: Path) -> dict[str, bytes]:
+    """The index's content of every path this commit adds or changes. The working tree is not read: what is
+    staged is what gets committed."""
+    changed = set(git_out(root, "diff", "--cached", "--name-only", "--no-renames", "--diff-filter=d", "-z")
+                  .decode("utf-8").split("\0")) - {""}
+    blobs: list[tuple[str, str]] = []
+    for entry in git_out(root, "ls-files", "--stage", "-z").decode("utf-8").split("\0"):
+        if not entry:
+            continue
+        meta, path = entry.split("\t", 1)
+        mode, sha, stage = meta.split()
+        if path in changed and stage == "0" and mode != "160000":     # 160000 is a submodule: no blob to read
+            blobs.append((path, sha))   # a symlink's blob is its link text, as read_tracked reads it
+    batch = git_out(root, "cat-file", "--batch", stdin="".join(f"{sha}\n" for _, sha in blobs).encode())
+    tree, pos = {}, 0
+    for path, _ in blobs:
+        header_end = batch.index(b"\n", pos)
+        size = int(batch[pos:header_end].split()[2])
+        tree[path] = batch[header_end + 1:header_end + 1 + size]
+        pos = header_end + 1 + size + 1
+    return tree
+
+
 def load_terms() -> Terms:
     return Terms(json.loads((HERE / "patterns.json").read_text(encoding="utf-8")))
 
@@ -218,9 +297,48 @@ def read_tracked(root: Path) -> dict[str, bytes]:
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--root", type=Path, default=Path("."), help="the checkout to scan (default: here)")
+    mode = ap.add_mutually_exclusive_group()
+    mode.add_argument("--staged", action="store_true", help="scan what is staged for the next commit")
+    mode.add_argument("--text", nargs="+", metavar="PATH", help="scan text files; - reads stdin")
+    mode.add_argument("--commit-message", metavar="PATH", help="scan a commit message file")
     args = ap.parse_args()
+    terms = load_terms()
+
+    if args.text or args.commit_message:
+        paths = args.text or [args.commit_message]
+        if paths.count("-") > 1:
+            ap.error("stdin (-) can be read only once")
+        findings = [f for p in paths
+                    for f in check_text("stdin" if p == "-" else p, read_text(p), terms, bool(args.commit_message))]
+        for f in findings:
+            print("LEAK  " + f)
+        if findings and args.commit_message:
+            print(f"\nleak check: commit blocked ({len(findings)} finding(s) in the commit message): reword the flagged "
+                  "lines and commit again (docs/leak-check.md; --no-verify is for a real hotfix only, and the pull "
+                  "request must say so).", file=sys.stderr)
+            return 1
+        if findings:
+            print(f"\nleak check: FAILED ({len(findings)} finding(s) in the text). Remove the private material; "
+                  "a finding gives the line and column, never the word.", file=sys.stderr)
+            return 1
+        if not args.commit_message:             # a hook stays quiet when it passes
+            print("leak check: passed (text)")
+        return 0
+
+    if args.staged:
+        tree = read_staged(args.root.resolve())
+        findings = check_tree(tree, terms)
+        for f in findings:
+            print("LEAK  " + f)
+        if findings:
+            print(f"\nleak check: commit blocked ({len(findings)} finding(s) in {len(tree)} staged files): remove or "
+                  "reword the flagged lines, stage the fix and commit again (docs/leak-check.md; --no-verify is for a "
+                  "real hotfix only, and the pull request must say so).", file=sys.stderr)
+            return 1
+        return 0
+
     tree = read_tracked(args.root.resolve())
-    findings = check_tree(tree, load_terms())
+    findings = check_tree(tree, terms)
     for f in findings:
         print("LEAK  " + f)
     if findings:

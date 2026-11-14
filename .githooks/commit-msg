@@ -1,0 +1,3 @@
+#!/bin/sh
+# Leak check on the commit message: it is public once the branch is pushed (docs/leak-check.md).
+exec sh scripts/leak-check/with-python.sh scripts/leak-check/check.py --commit-message "$1"
