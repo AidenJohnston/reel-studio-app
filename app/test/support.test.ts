@@ -35,6 +35,14 @@ function rig(opts: { reply?: () => Promise<Response> | Response; key?: string | 
   return { s, sent, logs, diagCalls: () => diagCalls }
 }
 
+/** Every entry of a sent form. Node's FormData iterates at runtime, but the app's tsconfig (lib ES2022, no DOM) types
+ * it without keys() or values(), so the entries are read through the iteration it does have. */
+function entries(form: FormData): [string, unknown][] {
+  const out: [string, unknown][] = []
+  ;(form as unknown as { forEach(cb: (value: unknown, key: string) => void): void }).forEach((value, key) => out.push([key, value]))
+  return out
+}
+
 describe('Report a problem', () => {
   it('by default sends only what was typed, the version and the OS: no diagnostics, screenshot, key or email', async () => {
     const r = rig()
@@ -46,7 +54,7 @@ describe('Report a problem', () => {
     expect(await r.s.send(p.id)).toEqual({ id: 'RS-7K3F9QXA' })
     const [one] = r.sent
     expect(one.url).toBe('https://dl.getreelstudio.com/v1/support')
-    expect([...one.form.keys()].sort()).toEqual(['appVersion', 'os', 'what'])
+    expect(entries(one.form).map(([k]) => k).sort()).toEqual(['appVersion', 'os', 'what'])
     expect(one.headers.Authorization).toBeUndefined()
     expect(one.headers['User-Agent']).toBe('ReelStudio/0.1.6')
   })
@@ -71,7 +79,7 @@ describe('Report a problem', () => {
     expect(new Uint8Array(await file.arrayBuffer())).toEqual(PNG)
     // the key goes in the header, never in the form
     expect(r.sent[0].headers.Authorization).toBe(`Bearer ${KEY}`)
-    for (const v of f.values()) if (typeof v === 'string') expect(v).not.toContain(KEY)
+    for (const [, v] of entries(f)) if (typeof v === 'string') expect(v).not.toContain(KEY)
     expect(r.logs.join('\n')).not.toContain(KEY)
   })
 
