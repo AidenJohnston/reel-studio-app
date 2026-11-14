@@ -18,6 +18,30 @@ on:
         required: false
         type: number
         default: 14
+  # By hand on any branch, such as release/0.2.0: gh workflow run build-installers.yml --ref release/0.2.0
+  workflow_dispatch:
+    inputs:
+      label:
+        description: Name for the artifacts. Empty names them after the run and commit.
+        required: false
+        type: string
+        default: ''
+      ref:
+        description: Commit, branch or tag to build. Empty builds the branch this runs on.
+        required: false
+        type: string
+        default: ''
+      retention-days:
+        required: false
+        type: number
+        default: 14
+  # A change to this workflow or the bundle check builds once, so it is proven before it is used. GitHub can only
+  # start a workflow by hand once it has run, and main does not have this file yet.
+  push:
+    branches: ['release/**', 'port/**']
+    paths:
+      - .github/workflows/build-installers.yml
+      - scripts/ci/check-bundle.py
 
 permissions:
   contents: read
@@ -26,7 +50,9 @@ jobs:
   build:
     name: Installer / ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 60
+    # macOS compiles OpenCV without FFmpeg (#169, packaging/build_opencv_mac.py) when no cached wheel matches; that
+    # build gets the same 240 minutes as .github/workflows/opencv-mac.yml. A cached wheel makes it minutes again.
+    timeout-minutes: ${{ matrix.os == 'macos-15' && 240 || 60 }}
     strategy:
       fail-fast: false
       matrix:
@@ -48,6 +74,21 @@ jobs:
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
         with:
           python-version: '3.11'
+      # The same cache as opencv-mac.yml: only the finished wheel and its build record, which build_opencv_mac.py
+      # checks against the record again before using it.
+      - name: Cache key of the macOS OpenCV build
+        if: runner.os == 'macOS'
+        id: opencv
+        working-directory: packaging
+        run: |
+          key=$(python3 -c 'import build_opencv_mac as b; print(b.cache_key())')
+          echo "key=$key" >> "$GITHUB_OUTPUT"
+          echo "dir=packaging/cache/opencv/${key:0:16}" >> "$GITHUB_OUTPUT"
+      - if: runner.os == 'macOS'
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: ${{ steps.opencv.outputs.dir }}
+          key: opencv-mac-arm64-${{ steps.opencv.outputs.key }}
       - name: Build the Windows installer
         if: runner.os == 'Windows'
         shell: pwsh
@@ -66,11 +107,11 @@ jobs:
           if command -v sha256sum >/dev/null; then sha256sum $files; else shasum -a 256 $files; fi | tee "SHA256SUMS-${{ runner.os }}.txt"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: reel-studio-${{ inputs.label }}-${{ runner.os }}
+          name: reel-studio-${{ inputs.label || format('run{0}-{1}', github.run_number, github.sha) }}-${{ runner.os }}
           path: |
             app/release/*.exe
             app/release/*.dmg
             app/release/signed/*.dmg
             app/release/SHA256SUMS-*.txt
           if-no-files-found: error
-          retention-days: ${{ inputs.retention-days }}
+          retention-days: ${{ inputs.retention-days || 14 }}
