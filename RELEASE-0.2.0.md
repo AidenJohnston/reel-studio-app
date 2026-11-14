@@ -60,7 +60,18 @@ The second wave waits because those PRs are built on the new note flow from #140
    - Sound-effect cap: #178 allows one effect plus one per 8 seconds. That cap is left out, because it dropped effects people add by hand and the hits that smash cuts add. If Sam wants a cap, apply it only to effects the editor adds.
    - Two tools overlap on zooms and b-roll: the release's `set_beat_accents` and #178's `set_sound_moments`. Recommendation: give each edit type one owner.
 6. **#177's leak-check hooks.** #177 lets `.claude/settings.json` through the check, because that file carries the repo's agent hook, and it scans PR titles and bodies. Both changes are #177's own; nothing else in the check's rules changed.
-7. **Run the macOS workflow pass after freeing disk.** The real-app pass on macOS runs only when the Mac has at least 12 GiB free. On Nov 14 it had 10 to 11 GiB, because swap grew as the agents ran. Until the pass runs, the macOS evidence is CI's macOS jobs and the macOS installer's bundled-engine check.
+7. **#184 changes final exports from CRF 18 to constant QP 18.** Chunked export needs it: CRF's rate control carries frame complexity across chunk boundaries, so chunks encoded alone don't match a full render. I measured the change on the one real camera clip available, Sam-intro-1min.mp4 (Sam talking, 1920x1080, 30 fps, 66 s, source 1.6 Mbps). The run used the engine's exact x264 arguments, video only (script: release-0.2.0-notes/qp-vs-crf.sh, run on Nov 14 with FFmpeg 9.0.1). SSIM and VMAF are against the source after the same crop and scale.
+
+   | Shape | Encode | Size | Bitrate | SSIM | Worst frame | VMAF |
+   |---|---|---|---|---|---|---|
+   | Full 1920x1080 | CRF 18 (0.1.4 to now) | 25.8 MB | 3.14 Mbps | 0.99581 | 0.99431 | 95.59 |
+   | Full 1920x1080 | QP 18 (#184) | 25.0 MB | 3.04 Mbps | 0.99540 | 0.99459 | 96.34 |
+   | Reel 1080x1920 | CRF 18 | 35.0 MB | 4.26 Mbps | 0.99474 | 0.99338 | 95.35 |
+   | Reel 1080x1920 | QP 18 | 37.9 MB | 4.61 Mbps | 0.99476 | 0.99386 | 96.79 |
+
+   QP 18 is 0.97x the size of CRF 18 at full size, and 1.08x on the reel crop. Its VMAF is 0.8 and 1.4 points higher. The other option was to keep CRF and give up exact matching. Encoding CRF 18 in 2 s chunks with #184's closed GOP and joining them reaches only 0.9967 SSIM (full) and 0.9959 (reel) against a one-pass CRF encode. Its worst frames are 0.9946 and 0.9935, and SSIM dips at chunk edges (0.99549 against 0.99587 elsewhere on the reel), so it fails the 0.999 bar for "no visible seams".
+   Recommendation: keep QP 18. The reel export grows by about 8% and looks slightly better, and chunks stay frame-identical to a full render. Limit: the clip is already heavily compressed, so a busier, high-bitrate phone take could grow more. If one does, `render.FINAL_QP` is the single setting to raise.
+8. **Run the macOS workflow pass after freeing disk.** The real-app pass on macOS runs only when the Mac has at least 12 GiB free. On Nov 14 it had 10 to 11 GiB, because swap grew as the agents ran. Until the pass runs, the macOS evidence is CI's macOS jobs and the macOS installer's bundled-engine check.
 
 ## Status
 

@@ -194,18 +194,17 @@ def check_still(ffmpeg: str, ffprobe: str, ref: Path, png: Path, t: float, capti
     ffmpeg's accurate input seek in frames.py returns), scaled to the required still size `want`.
     The draft runs at `preview_fps`, so that frame is found on the preview's clock and compared with
     the reference frame nearest it, the same rule as check_preview_video. Without a preview rate the
-    draft runs on the reference's own clock."""
+    draft runs on the reference's own clock. Both `frames` and `moments` show the frame nearest t
+    (render.frame_at), on that clock."""
     b = media.read_image(png)
     h, w = b.shape[:2]
     bad = _wrong_size((w, h), want)
     if bad:
         return bad
     rp = media.video_pts(ffprobe, ref)
-    # frames.py rounds its FFmpeg seek to milliseconds, which can cross a fractional-rate frame.
-    if preview_fps is None:
-        idx = next((i for i, x in enumerate(rp) if x >= round(t, 3) - 1e-6), len(rp) - 1)
-    else:
-        idx = _nearest(rp, math.ceil(round(t, 3) * preview_fps - 1e-6) / preview_fps)
+    # the frame nearest t (render.frame_at): at 29.97 fps frame 103 starts at 3.4368 s and is asked for as
+    # 3.437 s, so the frame after that time would be 104
+    idx = _nearest(rp, t if preview_fps is None else round(t * preview_fps) / preview_fps)
     a: Optional[object] = None
     for i, fr in enumerate(media.iter_frames(ffmpeg, ref, w, h)):
         if i == idx:

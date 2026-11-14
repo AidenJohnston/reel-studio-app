@@ -146,7 +146,8 @@ def test_probe_and_render_use_the_same_options(fake, enc, pix):
 
 def test_software_args_unchanged():
     assert render.encoder_args("libx264", True, 30)[:6] == ["-c:v", "libx264", "-preset", "ultrafast", "-crf", "24"]
-    # finals: FINAL_PRESET (veryfast since stream wire, status/wire.md) at CRF 18
+    # finals: FINAL_PRESET (veryfast since stream wire, status/wire.md) at a constant QP 18, which chunked
+    # finals need (render.chunked_video)
     final = render.encoder_args("libx264", False, 30)
-    assert final[:6] == ["-c:v", "libx264", "-preset", render.FINAL_PRESET, "-crf", "18"]
+    assert final[:6] == ["-c:v", "libx264", "-preset", render.FINAL_PRESET, "-qp", "18"]
     assert render.FINAL_PRESET == "veryfast"

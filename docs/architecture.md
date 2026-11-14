@@ -186,7 +186,7 @@ event may carry `ready`, a file the app can show right away: `{"kind":"still","t
 | `transcribe` | faster-whisper word timestamps -> `work/transcript.json` with stable ids |
 | `analyze` | audio envelope, pause list, retake groups (lines said more than once), face box track, a deterministic default cut |
 | `autocut` | writes a deterministic baseline `cut.keep`; the AI then refines it |
-| `render [--draft] [--window a:b] [--rules file]` | renders project.json -> `versions/vN/{export.mp4, cover.png, verify.json}`; `--draft` is a fast preview; `--rules` measures checked My style rules (result `ruleChecks`) and a final render that breaks one listed in `stopOn` returns `encoded: false` before its encode |
+| `render [--draft] [--window a:b] [--rules file]` | renders project.json -> `versions/vN/{export.mp4, cover.png, verify.json}`; `--draft` is a fast preview; `--rules` measures checked My style rules (result `ruleChecks`) and a final render that breaks one listed in `stopOn` returns `encoded: false` before its encode. A final is joined from ~2 s chunks cached in `work/render/chunks/` by everything that draws into them (`chunks.py`), so an edit re-encodes only the chunks it changed; a take with uneven frame times, or any failure there, renders it in one pass |
 | `score --version N` | the mechanical checks saved version N passes, from the reports beside it (pauses, subtitles, loudness, the file, My style rules, the double-check); renders nothing |
 | `match-joins [--keep <json>] [--every] [--project-file <f>]` | for each match join of the cut (or, with `--every`, each join that could hold one): whether the frames around it line up, its output time and why not (`match.py`) |
 | `pace-preview` | for no pace and each cut-style preset: picture changes a minute and in the first 5 seconds, from the plan a render would make, without encoding |
@@ -210,7 +210,7 @@ x64. Encoders: libx264 for the final export; drafts use `h264_videotoolbox` on m
 
 | Area | Modules |
 |---|---|
-| Core | `cli.py`, `project.py` (load/save/validate, word-anchor to output-time mapping), `schema/`, `probe.py`, `classify.py`, `transcribe.py`, `analyze.py` (pauses, retakes, default cut), `cut.py`, `match.py` (match cuts: the frames around a join that line up, searched in its pause and cached; `project.timeline` applies them so every kind of render cuts on the same frames), `captions.py`, `render.py` (orchestration and the final ffmpeg graph), `verify.py`, `frames.py`, `doctor.py` |
+| Core | `cli.py`, `project.py` (load/save/validate, word-anchor to output-time mapping), `schema/`, `probe.py`, `classify.py`, `transcribe.py`, `analyze.py` (pauses, retakes, default cut), `cut.py`, `match.py` (match cuts: the frames around a join that line up, searched in its pause and cached; `project.timeline` applies them so every kind of render cuts on the same frames), `captions.py`, `render.py` (orchestration and the final ffmpeg graph), `chunks.py` (the chunks of a final and their cache), `verify.py`, `frames.py`, `doctor.py` |
 | Compositing | `broll.py` (treatments to layers), `placement.py` (face-aware safe boxes), `zoom.py`, `music.py` (track analysis, level presets, automation, ducking, drops, the reverb throw, loudness), `beats.py` (the stored beat grid and landing moments on it), `sfx.py` (sound effects), `cover.py`, `assets.py` (images from the web, media from a link via yt-dlp), `templates/` |
 
 The core renders by composing: cut video (+ zooms) -> overlay layers by z -> captions burned last -> mux the
