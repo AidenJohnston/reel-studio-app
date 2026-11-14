@@ -1271,7 +1271,8 @@ export interface ReelApi {
     /** A change from "Edit it myself": it waits its turn behind running and waiting notes, then lands on the
      * newest version (render only, never the editor). `summary`: what it changes, in plain words. `replace`: a
      * waiting hand edit's id, changed in place. queued = it waits its turn. */
-    handEdit(slug: string, edit: HandEdit, summary: string, changes: number, replace?: string): Promise<{ jobId: string | null; queued?: boolean }>
+    /** `id`: the queue entry the edit is (the same id as `replace` when it replaced a waiting one). */
+    handEdit(slug: string, edit: HandEdit, summary: string, changes: number, replace?: string): Promise<{ id: string; jobId: string | null; queued?: boolean }>
     exportVersion(slug: string, version: number): Promise<ExportResult>
     /** The best cover frame near each raw-take moment, best first (engine cover-candidates). One look per
      * project at a time: asking again while one runs gets that one's answer. */

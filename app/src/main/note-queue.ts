@@ -256,10 +256,11 @@ export function createNoteQueue(deps: {
     steer,
 
     /** A change from "Edit it myself"; `replace` changes a waiting one in place instead. */
-    async sendHand(slug: string, hand: HandEntry['hand'], text: string, seenVersion: number, replace?: string): Promise<{ jobId: string | null; queued?: boolean }> {
+    /** `id`: the queue entry this edit is, which Undo takes back while it waits (queue.cancel). */
+    async sendHand(slug: string, hand: HandEntry['hand'], text: string, seenVersion: number, replace?: string): Promise<{ id: string; jobId: string | null; queued?: boolean }> {
       if (replace) {
         await lane(slug, () => change(slug, (s) => void Object.assign(stillWaiting(s, replace), { hand, text, seenVersion })))
-        return { jobId: null, queued: true }
+        return { id: replace, jobId: null, queued: true }
       }
       const entry: QueuedNote = { id: randomUUID(), text, attachments: [], seenVersion, hand }
       let first = false
@@ -271,7 +272,7 @@ export function createNoteQueue(deps: {
         })
       )
       const started = await pump(slug)
-      return started && first ? { jobId: started } : { jobId: null, queued: true }
+      return started && first ? { id: entry.id, jobId: started } : { id: entry.id, jobId: null, queued: true }
     },
 
     edit(slug: string, id: string, text: string): Promise<void> {
