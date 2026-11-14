@@ -192,7 +192,7 @@ export function createSupport(d: SupportDeps) {
         res = await d.fetch(d.url, { method: 'POST', body: form, headers, redirect: 'error', signal: AbortSignal.timeout(TIMEOUT_MS) })
       } catch (e) {
         d.log(`[support] send failed: ${(e as Error)?.name === 'TimeoutError' ? 'timeout' : String((e as Error)?.message ?? e).slice(0, 200)}`)
-        throw fail('SUPPORT_OFFLINE', "Couldn't reach Reel Studio's server. Check your internet connection and try again.")
+        throw fail('SUPPORT_OFFLINE', "Couldn't reach Reel Studio. Check your internet connection and try again.")
       }
       let body: { id?: unknown; error?: unknown; field?: unknown } = {}
       try {
@@ -211,9 +211,9 @@ export function createSupport(d: SupportDeps) {
       if (res.status === 413) throw fail('SUPPORT_TOO_BIG', 'This report is too large to send. Untick the screenshot or the diagnostics and try again.')
       if (res.status === 400 && typeof body.error === 'string') {
         const field = body.field === 'what' || body.field === 'expected' || body.field === 'email' ? body.field : undefined
-        throw fail('SUPPORT_FIELD', `The server could not take this report (${body.field ? `${String(body.field)}: ` : ''}${body.error.slice(0, 120)}).`, field)
+        throw fail('SUPPORT_FIELD', `Reel Studio couldn't take this report (${body.field ? `${String(body.field)}: ` : ''}${body.error.slice(0, 120)}).`, field)
       }
-      throw fail('SUPPORT_FAILED', "Reel Studio's server could not take the report just now. Try again in a few minutes.")
+      throw fail('SUPPORT_FAILED', "Reel Studio couldn't take the report just now. Try again in a few minutes.")
     },
 
     /** The form closed without sending: drop the screenshot and the prepared report. */

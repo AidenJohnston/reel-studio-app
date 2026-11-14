@@ -207,7 +207,7 @@ export function ReportProblem({ context, screenshotAvailable, hasKey, onClose }:
         </div>
       )}
       <p className="muted-sm">
-        To {p.server}, Reel Studio's server. Nothing else is sent.
+        It goes to Reel Studio at {p.server}. Nothing else is sent.
       </p>
       <dl className="rp-preview" data-testid="report-preview">
         <div>

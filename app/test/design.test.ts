@@ -177,8 +177,8 @@ describe('version messages', () => {
   it('fails if changing only the Spoken word colour leaves the version undescribed', () => {
     const karaoke = { preset: 'karaoke', size: 105, position: 0.75, color: '#FFFFFF', highlight: '#FFD60A' }
     const p = base({ captions: { enabled: true, style: karaoke } })
-    expect(describeChange(p, { captions: { enabled: true, style: { ...karaoke, highlight: '#30D158' } } })).toBe('words light up green')
-    expect(describeChange(p, { captions: { enabled: true, style: { ...karaoke, highlight: null } } })).toBe('words no longer light up')
+    expect(describeChange(p, { captions: { enabled: true, style: { ...karaoke, highlight: '#30D158' } } })).toBe('made the words light up green')
+    expect(describeChange(p, { captions: { enabled: true, style: { ...karaoke, highlight: null } } })).toBe('stopped the words lighting up')
   })
 
   it('describes retyping an existing one-place fix', () => {
