@@ -227,13 +227,15 @@ const ledgerBytes = (projectDir: string) => fsp.stat(path.join(projectDir, LEDGE
   if (e?.code === 'ENOENT') return null; throw e;
 });
 
-/** A failed note takes back the asset records it appended and the pictures it froze. Its downloads stay, unoffered,
- * like any unsaved note's (tools.ts projectAssets). */
+/** A failed note takes back the asset records it appended and the pictures it froze: the ledger goes back to its size
+ * before the note, or away when the note made it. Its downloads stay, unoffered, like any unsaved note's (tools.ts
+ * projectAssets). */
 async function restoreAssets(projectDir: string, assetsBefore: Set<string>, ledgerBefore: number | null): Promise<void> {
   for (const f of await listAssets(projectDir).catch(() => new Set<string>())) {
     if (f.startsWith('frozen/') && !assetsBefore.has(f)) await fsp.rm(path.join(projectDir, 'work', 'assets', f), { force: true, recursive: true }).catch(() => undefined);
   }
-  if (ledgerBefore !== null) await fsp.truncate(path.join(projectDir, LEDGER), ledgerBefore).catch(() => undefined);
+  const ledger = path.join(projectDir, LEDGER);
+  await (ledgerBefore === null ? fsp.rm(ledger, { force: true }) : fsp.truncate(ledger, ledgerBefore)).catch(() => undefined);
 }
 
 /** The caption's credit line follows the pictures the edit ends with (one removed after write_post

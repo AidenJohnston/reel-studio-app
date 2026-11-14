@@ -209,6 +209,56 @@ describe('a note that does not finish leaves the project as it was', () => {
   });
 });
 
+describe('the asset ledger after a note that was not saved', () => {
+  const ledger = (dir: string) => path.join(dir, 'work', 'assets', 'manifest.jsonl');
+  const records = async (dir: string) => (await fsp.readFile(ledger(dir), 'utf8')).trim().split('\n').map((l) => JSON.parse(l));
+  const toolCtx = (root: string, dir: string, host: FakeHost, id: string): ToolContext => ({
+    projectDir: dir, host, style: new StyleStore(() => root), emit: () => undefined, state: newToolState(), supportsImages: true,
+    note: { id, file: path.join(dir, 'project.json'), dir: tmpDir() },
+  });
+  const listed = async (ctx: ToolContext) => {
+    const r = await executeTool(ctx, 'list_assets', { kind: null, query: null });
+    expect(r.isError, r.content).toBe(false);
+    return (JSON.parse(r.content).assets as { committedPath: string }[]).map((a) => a.committedPath);
+  };
+  const place = (asset: string, from: string, to: string) => call('add_broll', { anchor: { from, to }, treatment: 'side-card', asset, animation: null, params: {} });
+
+  it('fails if the first note to freeze a picture fails and leaves the ledger it made, advertising a missing picture', async () => {
+    const { root, dir, host, settingsDir, read, before } = await setup();
+    await fsp.writeFile(path.join(root, 'Library', 'Images', 'bread.png'), tinyPng());
+    expect(fs.existsSync(ledger(dir))).toBe(false);
+    const failing = new ScriptedModel([
+      { toolCalls: [place('Library/Images/bread.png', 'w29', 'w30')] },
+      new AIError('network', 'I could not reach the AI. Check your internet and try again.'),
+    ]);
+    await expect(createAI({ host, settingsDir, providerOverride: failing }).applyNote(dir, 'show my bread', () => undefined)).rejects.toMatchObject({ code: 'network' });
+    expect(await read()).toBe(before);
+    expect(fs.existsSync(ledger(dir))).toBe(false);
+    expect(await listed(toolCtx(root, dir, host, 'next'))).toEqual([]);
+  });
+
+  it('fails if a picture frozen by a note that a crash cut short is offered to the notes after it', async () => {
+    const { root, dir, host, settingsDir, read } = await setup();
+    await fsp.writeFile(path.join(root, 'Library', 'Images', 'loaf.png'), tinyPng([20, 20, 220]));
+    await fsp.writeFile(path.join(root, 'Library', 'Images', 'bread.png'), tinyPng());
+    await createAI({ host, settingsDir, providerOverride: new ScriptedModel([{ toolCalls: [place('Library/Images/loaf.png', 'w29', 'w30')] }, finish('Added the loaf.')]) })
+      .applyNote(dir, 'show my loaf', () => undefined, undefined, { id: 'saved-note' });
+    const loaf = JSON.parse(await read()).broll.find((b: { anchor: { from: string } }) => b.anchor.from === 'w29').asset;
+    // another note froze the bread, and the app stopped (a crash, a power cut) before project.json named that note
+    const crashed = toolCtx(root, dir, host, 'crashed-note');
+    const asked = await executeTool(crashed, 'resolve_asset', { kind: 'image', intent: 'Library/Images/bread.png', licensePolicy: null });
+    expect(asked.isError, asked.content).toBe(false);
+    const committed = await executeTool(crashed, 'resolve_asset', { kind: 'image', intent: 'bread', phase: 'commit', candidateId: JSON.parse(asked.content).candidates[0].id });
+    expect(committed.isError, committed.content).toBe(false);
+    const bread = JSON.parse(committed.content).asset.committedPath;
+    expect((await records(dir)).map((r) => r.committedPath)).toEqual([loaf, bread]);
+
+    expect(await listed(toolCtx(root, dir, host, 'next'))).toEqual([loaf]);
+    // the note running still sees what it froze itself
+    expect(await listed(crashed)).toEqual([loaf, bread]);
+  });
+});
+
 describe('a note that finishes is saved in one write', () => {
   it('the note, its reply and the rule to ask about are in project.json and its version, and My style waits for the app', async () => {
     const { root, dir, host, settingsDir, read } = await setup();
