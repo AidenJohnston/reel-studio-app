@@ -95,10 +95,11 @@ describe('a note that does not finish leaves the project as it was', () => {
     const m = new ScriptedModel([
       { toolCalls: [call('set_gap_cap', { seconds: 0.4 })] },
       async () => {
-        // a manual change and its render save Version 2 meanwhile
+        // a manual change and its render save Version 2 meanwhile, joined with the token of whoever has the project
         const p = JSON.parse(await read());
         await fsp.writeFile(path.join(dir, 'project.json'), JSON.stringify({ ...p, title: 'Renamed by hand' }, null, 2));
-        await host.runEngine('render', ['--project', dir]);
+        const { token } = JSON.parse(await fsp.readFile(path.join(dir, OWNER_LOCK), 'utf8'));
+        await host.runEngine('render', ['--project', dir, '--owner', token]);
         saved = await folder(v2);
         return finish('I gave the pauses more room.');
       },
@@ -320,9 +321,11 @@ describe('a saved note stays saved', () => {
     expect(JSON.parse(await read()).version).toBe(2);
     // My style turns unreadable once Version 3 is saved: the last read, for the rules to propose, fails
     const checks = StyleStore.prototype.checks;
+    let failed = false;
     const spy = vi.spyOn(StyleStore.prototype, 'checks').mockImplementation(async function (this: unknown) {
-      if (JSON.parse(await read()).version === 3) throw Object.assign(new Error('EACCES: permission denied, open style.json'), { code: 'EACCES' });
-      return checks.call(this as StyleStore);
+      if (JSON.parse(await read()).version !== 3) return checks.call(this as StyleStore);
+      failed = true;
+      throw Object.assign(new Error('EACCES: permission denied, open style.json'), { code: 'EACCES' });
     });
     let r;
     try {
@@ -331,7 +334,7 @@ describe('a saved note stays saved', () => {
     } finally {
       spy.mockRestore();
     }
-    expect(spy).toHaveBeenCalled();
+    expect(failed).toBe(true);
     expect(r).toMatchObject({ version: 3, summary: expect.stringContaining('Added the bread.') });
     const saved = JSON.parse(await read());
     expect(saved.notes.at(-1)).toMatchObject({ id: 'job-bread', version: 3 });

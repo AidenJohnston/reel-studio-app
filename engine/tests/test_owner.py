@@ -63,11 +63,12 @@ def test_fails_if_a_command_run_by_hand_lets_another_writer_in_while_it_runs(tmp
         assert again.value.code == "PROJECT_OPEN"
         assert last_event(project, "render")["code"] == "PROJECT_OPEN"
         assert last_event(project, "render", "--owner", "made up")["code"] == "NOT_OWNER"
-    # let go when it ends, and the work folder it made for the lock goes with it
-    assert not (project / "work").exists()
-    # a command that fails lets go too
+    assert not lock.exists()        # let go when it ends
+    # a command that fails lets go too, and one on a folder that isn't there leaves none behind
     assert last_event(project, "render")["code"] == "NO_PROJECT"
     assert not lock.exists()
+    assert last_event(tmp_path / "typo", "render")["code"] == "NO_PROJECT"
+    assert not (tmp_path / "typo").exists()
 
 
 def test_the_preview_copy_builds_while_reel_studio_has_the_project_open(tmp_path):

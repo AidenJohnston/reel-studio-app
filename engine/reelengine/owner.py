@@ -48,7 +48,7 @@ def claim(project_dir: Path, owner: Optional[str]) -> Iterator[None]:
     if os.environ.get(APP_ENV) == "1":
         yield
         return
-    # folders this claim makes are taken away with it: a command on a mistyped path leaves nothing behind
+    # folders this claim makes go again when the command fails: one on a mistyped path leaves nothing behind
     made = [d for d in (lock.parent, *lock.parent.parents) if not d.exists()]
     lock.parent.mkdir(parents=True, exist_ok=True)
     token = uuid.uuid4().hex
@@ -58,12 +58,14 @@ def claim(project_dir: Path, owner: Optional[str]) -> Iterator[None]:
         raise _open(lock) from None
     with os.fdopen(fd, "w", encoding="utf-8") as fh:
         json.dump({"app": "reelengine", "pid": os.getpid(), "token": token}, fh)
+    failed = True
     try:
         yield
+        failed = False
     finally:
         if _token(lock) == token:
             lock.unlink(missing_ok=True)
-        for d in made:
+        for d in made if failed else ():
             try:
                 d.rmdir()
             except OSError:
