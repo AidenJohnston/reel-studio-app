@@ -251,3 +251,38 @@ test('when a limit stops the look, Learn from my past edits says older edits may
     await app.close().catch(() => {})
   }
 })
+
+test('a rule\'s words cannot change while Save is still saving them', async () => {
+  const mine = mkdtempSync(join(BASE, 'style-'))
+  const root = join(mine, 'Documents', 'Reel Studio')
+  mkdirSync(root, { recursive: true })
+  writeFileSync(join(root, 'My style.json'), JSON.stringify({ version: 1, rules: [{ id: 'r1', text: 'Keep music quieter under talking.', createdAt: '2026-10-22T00:00:00.000Z' }] }))
+  const { app, page } = await launch({ REELSTUDIO_ROOT: root, REELSTUDIO_USER_DATA: join(mine, 'user data') })
+  try {
+    await passFirstRun(page)
+    await page.getByTestId('nav-style').click()
+    // the save waits in main until the test lets it finish
+    await app.evaluate(({ ipcMain }) => {
+      const g = globalThis as { finishStyleSave?: () => void }
+      ipcMain.removeHandler('style:update')
+      ipcMain.handle('style:update', () => new Promise((done) => (g.finishStyleSave = () => done({ ok: true, value: null }))))
+    })
+    await page.getByRole('button', { name: 'Music: Keep music quieter under talking' }).click()
+    await page.getByRole('button', { name: 'Edit "Keep music quieter under talking"' }).click()
+    const input = page.getByTestId('style-edit-input')
+    await input.fill('Keep music much quieter under talking')
+    await page.keyboard.press('Enter')
+    await expect.poll(() => app.evaluate(() => typeof (globalThis as { finishStyleSave?: unknown }).finishStyleSave)).toBe('function')
+
+    // words typed now would be thrown away when the save closes the row
+    await page.keyboard.type(' at the start')
+    await expect(input).toHaveValue('Keep music much quieter under talking')
+    await page.keyboard.press('Escape')
+    await expect(input).toBeVisible()
+
+    await app.evaluate(() => (globalThis as { finishStyleSave?: () => void }).finishStyleSave?.())
+    await expect(input).toHaveCount(0)
+  } finally {
+    await app.close().catch(() => {})
+  }
+})

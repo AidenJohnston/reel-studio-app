@@ -14,9 +14,9 @@ export function groupAlive(pid: number): boolean {
   }
 }
 
-async function goneWithin(pid: number, ms: number): Promise<boolean> {
-  for (const end = Date.now() + ms; Date.now() < end; await sleep(50)) if (!groupAlive(pid)) return true
-  return !groupAlive(pid)
+async function within(ms: number, gone: () => boolean): Promise<boolean> {
+  for (const end = Date.now() + ms; Date.now() < end; await sleep(50)) if (gone()) return true
+  return gone()
 }
 
 /** Only ever the group: once the engine and its group are gone, its pid may already be someone else's. */
@@ -30,16 +30,25 @@ function signalGroup(pid: number, signal: NodeJS.Signals): void {
 
 /** Ends the process and everything it started (SIGKILL after 1.5 s) and settles once they have exited:
  * false when something is still alive 5 s after SIGKILL. On Windows the engine's Job Object ends its
- * children with it (engine/reelengine/contain.py), and taskkill /T ends the whole tree. */
+ * children with it (engine/reelengine/contain.py), and taskkill /T ends the whole tree; false when the
+ * process itself is still alive 5 s later. */
 export async function killTree(pid: number): Promise<boolean> {
   if (process.platform === 'win32') {
-    await new Promise<void>((resolve) => execFile('taskkill', ['/pid', String(pid), '/T', '/F'], { windowsHide: true }, () => resolve()))
-    return true
+    await new Promise<void>((resolve) => {
+      try {
+        execFile('taskkill', ['/pid', String(pid), '/T', '/F'], { windowsHide: true }, () => resolve())
+      } catch {
+        resolve() // Windows refused to start it at all (spawn UNKNOWN): the check below decides
+      }
+    })
+    // taskkill can fail (access denied, or it could not be started): only the exit shows the engine
+    // stopped. A number Windows has already handed on reads as alive too, which keeps the video closed.
+    return within(5000, () => !isAlive(pid))
   }
   signalGroup(pid, 'SIGTERM')
-  if (await goneWithin(pid, 1500)) return true
+  if (await within(1500, () => !groupAlive(pid))) return true
   signalGroup(pid, 'SIGKILL')
-  return goneWithin(pid, 5000)
+  return within(5000, () => !groupAlive(pid))
 }
 
 export function isAlive(pid: number): boolean {

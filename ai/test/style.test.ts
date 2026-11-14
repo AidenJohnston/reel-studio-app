@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import * as fsp from 'node:fs/promises';
 import * as path from 'node:path';
-import { StyleStore, createAI, executeTool, newToolState } from '../src';
+import { AIError, StyleStore, createAI, executeTool, newToolState } from '../src';
 import { FakeHost, ScriptedModel, call, makeProject, tmpDir } from './helpers';
 
 describe('a damaged My style.json', () => {
@@ -75,6 +75,16 @@ describe('asking again for a rule paused in My style turns it back on', () => {
     expect(await new StyleStore(() => root).asPromptText()).toBe('- Put a yellow box behind the captions.');
   });
 
+  it('add() says it turned the rule back on only on the call that did, so a note undoes only its own change', async () => {
+    const root = tmpDir('style ');
+    const style = new StyleStore(() => root);
+    const rule = (await style.add('Put a yellow box behind the captions.')).rule;
+    await style.update(rule.id, { paused: true });
+    expect(await style.add('put a yellow box behind the captions')).toMatchObject({ added: false, resumed: true, rule: { id: rule.id } });
+    // turned on by someone else since: this call changed nothing
+    expect(await style.add('put a yellow box behind the captions')).toMatchObject({ added: false, resumed: false });
+  });
+
   it('when the AI proposes it for a note that says "always"', async () => {
     const { root, dir } = await makeProject();
     const style = new StyleStore(() => root);
@@ -87,5 +97,22 @@ describe('asking again for a rule paused in My style turns it back on', () => {
     expect(await style.asPromptText()).toBe('- Put a yellow box behind the captions.');
     // the rule was there before this note, so undoing the note must not delete it
     expect(ctx.state.styleRuleIds).toEqual([]);
+  });
+
+  // a note saves My style only with the note itself (editor.ts saveNote), so a failed one changed nothing there
+  it('and a note that asks for it again, then fails, leaves it paused', async () => {
+    const { root, dir } = await makeProject();
+    const style = new StyleStore(() => root);
+    const rule = (await style.add('Put a yellow box behind the captions.')).rule;
+    await style.update(rule.id, { paused: true });
+    const m = new ScriptedModel([
+      { toolCalls: [call('add_style_rule', { rule: 'Put a yellow box behind the captions.' }), call('set_gap_cap', { seconds: 0.4 })] },
+      new AIError('chatgpt_usage_limit', 'limit'),
+    ]);
+    const ai = createAI({ host: new FakeHost(root), settingsDir: tmpDir('settings '), providerOverride: m });
+
+    await expect(ai.applyNote(dir, 'always put a yellow box behind the captions', () => undefined)).rejects.toMatchObject({ code: 'chatgpt_usage_limit' });
+    expect(await style.list()).toEqual([expect.objectContaining({ id: rule.id, paused: true })]);
+    expect(await style.asPromptText()).toBe('(none yet)');
   });
 });

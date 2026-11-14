@@ -53,6 +53,18 @@ it('fails if a version that changed only its pace has no title, or a rewording o
   expect(acceptRewrite({ title: 'Shorter cut, no music, other moments', summary: 'cut 20 words, no music, other moments' }, [...cutAndMusic, ...reseed], cutWords)).not.toBeNull()
 })
 
+it('rejects a summary that drops part of one change, and keeps one that says all of it', () => {
+  const facts = [
+    { kind: 'captions.style', field: 'size', before: 105, after: 126 },
+    { kind: 'captions.corrections', before: [], after: [{ from: 'a', to: 'b' }, { from: 'c', to: 'd' }, { from: 'e', to: 'f' }] }
+  ]
+  expect(describeFacts(facts, cutWords)).toBe('bigger subtitles, fixed 3 words')
+  expect(acceptRewrite({ title: 'Bigger subtitles', summary: 'bigger subtitles' }, facts, cutWords)).toBeNull()
+  expect(acceptRewrite({ title: 'Bigger subtitles', summary: 'fixed 3 words' }, facts, cutWords)).toBeNull()
+  const full = { title: 'Bigger subtitles', summary: 'bigger subtitles, fixed three words' }
+  expect(acceptRewrite(full, facts, cutWords)).toEqual(full)
+})
+
 it('keeps a complete rewording or a title ending in the app\'s own "and more" form', () => {
   const facts = [...cutAndMusic, { kind: 'post.caption', before: '', after: 'Bread' }]
   const summary = 'cut 20 words, no music, new post caption'

@@ -76,6 +76,9 @@ export interface AppState {
   /** The files Version 1 copies its video from, kept until the copy is in (project.json written): a first edit stopped
    * during the copy copies them again (main/index.ts startFirstEdit). */
   copyFrom?: string[]
+  /** A job ended without removing its unfinished versions (removal refused, as Windows does while a file
+   * is open): the next start, or the next job on the project, removes them (settleInterrupted). */
+  cleanupOwed?: boolean
 }
 
 const EMPTY_STATE: AppState = { chat: [], job: null, status: 'new', lastError: null }
@@ -412,7 +415,7 @@ export async function listVersions(dir: string): Promise<VersionInfo[]> {
     return []
   }
   // docs/versions.md: a version is a `vN` folder with `export.mp4`, N up to project.json's `version`
-  // (a higher one is a render that was never saved, which the next final render replaces). Drafts
+  // (a higher one is a note or a render that was never saved, which the next final render replaces). Drafts
   // live in `versions/preview/` and are overwritten; they only show (as n = 0, "Preview") when no final version exists yet,
   // e.g. when an AI run's final render failed.
   const out: VersionInfo[] = []
@@ -531,10 +534,26 @@ export async function cleanPartialVersions(dir: string): Promise<string[]> {
   return removed
 }
 
+/** Removes what an ended job left (cleanPartialVersions, and a note's work/notes). False when a removal
+ * was refused, as Windows does while a file is open: the caller keeps cleanupOwed for a later try. Any
+ * other failure throws. */
+async function removeLeftovers(dir: string): Promise<boolean> {
+  try {
+    await cleanPartialVersions(dir)
+    // a note's private copy and drafts (ai editor.ts applyNote), which it deletes itself unless the app died
+    await fs.rm(join(dir, 'work', 'notes'), { recursive: true, force: true })
+    return true
+  } catch (e) {
+    if ([...WINDOWS_LOCK, 'ENOTEMPTY'].includes((e as NodeJS.ErrnoException).code ?? '')) return false
+    throw e
+  }
+}
+
 /**
  * Called once at startup, before any job can run: a project whose app.json still says a job is
  * running was interrupted (quit, crash, power cut). Clean it up and mark it so the UI can offer
- * to pick up where it left off.
+ * to pick up where it left off. One whose job could not remove its unfinished versions
+ * (cleanupOwed) only gets them removed.
  */
 export async function recoverInterrupted(stillRunning: string[] = []): Promise<string[]> {
   const recovered: string[] = []
@@ -570,20 +589,24 @@ export async function settleInterrupted(slug: string): Promise<'settled' | 'unre
   if (!existsSync(join(dir, 'app.json'))) return 'nothing'
   const s = await readAppState(slug).catch(() => null)
   if (!s) return 'unreadable'
-  if (!s.job) return 'nothing'
-  const saved = s.job.kind === 'note' ? await savedNote(dir, s.job.noteId ?? s.job.id) : null
+  if (!s.job && !s.cleanupOwed) return 'nothing'
+  const saved = s.job?.kind === 'note' ? await savedNote(dir, s.job.noteId ?? s.job.id) : null
   if (saved === UNREADABLE) return 'unreadable'
   // an Edit it myself change saved just before the app closed: its version is made (hand-edit.ts)
-  const hand = s.job.kind === 'rerender' && s.job.noteId ? s.queue?.find((q) => q.id === s.job!.noteId && q.hand) : undefined
+  const hand = s.job?.kind === 'rerender' && s.job.noteId ? s.queue?.find((q) => q.id === s.job!.noteId && q.hand) : undefined
   const handSaved = hand ? await readJson<{ version?: number; handEdits?: unknown } | null>(join(dir, 'project.json'), null) : null
   const handVersion = Array.isArray(handSaved?.handEdits) && handSaved.handEdits.includes(hand!.id) ? Number(handSaved.version) : null
-  await cleanPartialVersions(dir)
-  // a note's private copy and drafts (ai editor.ts applyNote), which it deletes itself unless the app died
-  await fs.rm(join(dir, 'work', 'notes'), { recursive: true, force: true })
+  // a removal still refused keeps the mark for a later try; the job is settled all the same, so the other
+  // projects, and the next job on this one, go ahead
+  const cleaned = await removeLeftovers(dir)
+  if (!s.job && !cleaned) return 'nothing'
   await updateAppState(slug, (st) => {
+    if (cleaned) delete st.cleanupOwed
+    else st.cleanupOwed = true
+    if (!st.job) return // the job itself ended and said so: only its clean-up was left
     // a script or a look for more reels writes no version: one cut short changes nothing to finish
-    if (st.job?.kind === 'script' || st.job?.kind === 'propose') settleNote(st, st.job.id, 'stopped')
-    else st.status = st.job?.kind === 'first-edit' || !existsSync(join(dir, 'versions')) ? 'interrupted' : 'ready'
+    if (st.job.kind === 'script' || st.job.kind === 'propose') settleNote(st, st.job.id, 'stopped')
+    else st.status = st.job.kind === 'first-edit' || !existsSync(join(dir, 'versions')) ? 'interrupted' : 'ready'
     if (saved) {
       const reply = saved.reply ?? `I made your change. It is Version ${saved.version}.`
       st.chat.push(...replyChat(styleConsent(reply, saved.styleRulesAdded, saved.styleSuggestions), saved.version).map(stamp))

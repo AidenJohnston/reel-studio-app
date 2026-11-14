@@ -818,7 +818,8 @@ export interface StyleRule {
   /** Learned from another editor's export (My style, Learn from my past edits): its file name, and the editor
    * when one file was read (a rule kept before editors were remembered has none; shared/memory.ts guesses). */
   imported?: { file: string; editor?: EditorName }
-  consent?: { proposal: string; at: string }
+  /** `also`: other questions about this rule the person said Yes to after it was saved */
+  consent?: { proposal: string; at: string; also?: string[] }
   /** When its words last changed. Pausing does not count, so a paused rule keeps its place in the list. */
   updatedAt?: string
   /** Typed in by the person with Add a rule, not learned from a note or an export. */

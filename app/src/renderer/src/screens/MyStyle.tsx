@@ -49,6 +49,9 @@ export function MyStyle() {
   const [rules, setRules] = useState<StyleRule[] | null>(null)
   const [open, setOpen] = useState<string | null>(null)
   const [editing, setEditing] = useState<{ id: string; text: string } | null>(null)
+  // While the words are being saved the row stays open but cannot change: closing it afterwards must not throw
+  // away words typed during the save, or close another rule opened in the meantime.
+  const [saving, setSaving] = useState(false)
   const [adding, setAdding] = useState<string | null>(null)
   const [forgot, setForgot] = useState<{ rule: StyleRule; at: number } | null>(null)
   const [refocus, setRefocus] = useState<string | null>(null)
@@ -59,6 +62,7 @@ export function MyStyle() {
   // suggestions waiting above the list: the empty page's "Nothing learned yet" would contradict them
   const [suggested, setSuggested] = useState(0)
   const editButtons = useRef(new Map<string, HTMLButtonElement>())
+  const editInput = useRef<HTMLInputElement>(null)
   const forgetButtons = useRef(new Map<string, HTMLButtonElement>())
   const addButton = useRef<HTMLButtonElement>(null)
   // Undo's countdown: `due` while it runs, `left` while the pointer or keyboard focus holds it
@@ -110,9 +114,12 @@ export function MyStyle() {
   }
   const save = async (e: FormEvent) => {
     e.preventDefault()
-    if (!editing) return
+    if (!editing || saving) return
     const { id, text } = editing
-    if (await run(() => reel.style.update(id, { text }))) stopEditing(id)
+    setSaving(true)
+    const saved = await run(() => reel.style.update(id, { text }))
+    setSaving(false)
+    if (saved) stopEditing(id)
   }
   const addRule = async (e: FormEvent) => {
     e.preventDefault()
@@ -366,20 +373,22 @@ export function MyStyle() {
             if (editing?.id === r.id) {
               return (
                 <li key={r.id}>
-                  <form className="style-form" onSubmit={save} onKeyDown={(e) => e.key === 'Escape' && stopEditing(r.id)}>
+                  <form className="style-form" onSubmit={save} onKeyDown={(e) => e.key === 'Escape' && !saving && stopEditing(r.id)} aria-busy={saving}>
                     <input
                       className="input"
                       value={editing.text}
                       onChange={(e) => setEditing({ id: r.id, text: e.target.value })}
+                      readOnly={saving}
                       aria-label="Rule"
                       aria-describedby={r.payload || r.check ? `edit-hint-${r.id}` : undefined}
+                      ref={editInput}
                       autoFocus
                       data-testid="style-edit-input"
                     />
-                    <button className="btn small" type="submit" disabled={!editing.text.trim()}>
+                    <button className="btn small" type="submit" disabled={saving || !editing.text.trim()}>
                       Save
                     </button>
-                    <button className="btn small ghost" type="button" onClick={() => stopEditing(r.id)}>
+                    <button className="btn small ghost" type="button" onClick={() => stopEditing(r.id)} disabled={saving}>
                       Cancel
                     </button>
                   </form>
@@ -445,7 +454,11 @@ export function MyStyle() {
                           if (el) editButtons.current.set(r.id, el)
                           else editButtons.current.delete(r.id)
                         }}
-                        onClick={() => setEditing({ id: r.id, text: r.text })}
+                        onClick={() => {
+                          // another rule is still saving its words: go back to it rather than close it mid-save
+                          if (saving) editInput.current?.focus()
+                          else setEditing({ id: r.id, text: r.text })
+                        }}
                         aria-label={`Edit "${line}"`}
                       >
                         <Icon name="pencil" size={14} />

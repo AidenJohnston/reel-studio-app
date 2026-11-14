@@ -123,7 +123,10 @@ words for that change claim, so "Cut 2 words" for words brought back, or "Cut a 
   run that made the version, the checker's included: provider, the model asked for, the model and CLI version the
   provider reported, effort, and tokens including cache reads and writes. A value the provider did not report is the
   string `"not reported"`, never 0. A note writes it into its new version folder before `project.json` points at
-  that version; a note that made no version writes none. It is measurement only; the app does not show it.
+  that version. A run that ends on a version it did not make (a note that changed only the post caption, a first
+  edit run again that got its saved version back) leaves that folder alone and writes the same record, with the
+  `version` it ended on, to `work/ai-runs/<note id>.json` (`first-edit-<uuid>.json` for a first edit). It is
+  measurement only; the app does not show it.
 - **A change asked at a moment** (the button under the player) names the words on screen. The app
   reads them from the version being watched: `duration` and `segmentsDetail` (source, src_start,
   src_end, out_start per kept span) in `versions/vN/render.json`, or `versions/preview/render_draft.json`
