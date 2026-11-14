@@ -251,9 +251,15 @@ function projectView(ctx: ToolContext, p: Project, t: Transcript): unknown {
 async function engine(ctx: ToolContext, command: string, extra: string[] = [], stageMessage?: string): Promise<any> {
   if (stageMessage) ctx.emit({ type: 'status', message: stageMessage });
   return ctx.host.runEngine(command, ['--project', ctx.projectDir, ...extra], (pr) => {
+    // A render's last step says the video is ready, but a render inside an AI task is a preview or the
+    // final before the task's own end: "Your video is ready" would show while the AI is still working.
+    if (command === 'render' && RENDER_DONE.test(pr.message)) return;
     ctx.emit({ type: 'status', message: pr.message || stageMessage || 'Working', pct: pr.pct });
   }, ctx.signal);
 }
+
+/** The engine's (and the dev engine's) last render step. */
+const RENDER_DONE = /^(your video is ready|done)\.?$/i;
 
 /** Stretches of the cut where nothing changes on screen (no b-roll, no zoom; the opening hook title
  * does not count), longer than `min` seconds, with the words said in each. The model's own count of
@@ -416,6 +422,74 @@ export async function doRender(ctx: ToolContext, draft: boolean): Promise<Render
   ctx.state.renders.push(info);
   ctx.emit({ type: 'render', version, draft, ...(result?.file ? { file: String(result.file) } : {}) });
   return info;
+}
+
+/** What a b-roll item is, in a status line: the treatment decides, never the word "picture" for all. */
+function shownAs(treatment: string | undefined): string {
+  return treatment === 'animation' ? 'animation' : treatment === 'text-pop' ? 'words on screen' : 'picture';
+}
+
+/** What one edit is about to do, in plain words from its own arguments and the project it changes
+ * ("Cutting 3 words at 0:31"), for the status line. Undefined when there is nothing more specific to
+ * say than the tool's step. The arguments are the model's, not yet validated. */
+export function operationStatus(ctx: ToolContext, name: string, args: any): string | undefined {
+  const p = ctx.project; const t = ctx.transcript;
+  if (!p || !t) return undefined;
+  const times = approxOutputTimes(t, p.cut.keep, p.cut.gapCap);
+  const at = (id: unknown): string => {
+    const s = typeof id === 'string' ? times.get(id)?.s : undefined;
+    if (s === undefined) return '';
+    const r = Math.round(s);
+    return ` at ${Math.floor(r / 60)}:${String(r % 60).padStart(2, '0')}`;
+  };
+  const words = (n: number) => (n === 1 ? 'a word' : `${n} words`);
+  const broll = typeof args?.id === 'string' ? p.broll.find((b) => b.id === args.id) : undefined;
+  switch (name) {
+    case 'set_gap_cap':
+      if (typeof args?.seconds !== 'number' || args.seconds === p.cut.gapCap) return undefined;
+      return args.seconds < p.cut.gapCap ? 'Tightening the pauses' : 'Giving the pauses more room';
+    case 'set_cut': {
+      if (!Array.isArray(args?.keep)) return undefined;
+      const next = normalizeKeep(t, args.keep);
+      if (next.problems.length) return undefined;
+      const before = keptWords(t, p.cut.keep).map((w) => w.id);
+      if (!before.length) return undefined; // the first pick of takes
+      const after = new Set(keptWords(t, next.keep).map((w) => w.id));
+      const gone = before.flatMap((id, i) => (after.has(id) ? [] : [i]));
+      const back = after.size - (before.length - gone.length);
+      // one stretch taken out at one moment; anything bigger is picking takes
+      if (gone.length && !back && gone.at(-1)! - gone[0] === gone.length - 1) return `Cutting ${words(gone.length)}${at(before[gone[0]])}`;
+      if (back > 0 && !gone.length) return `Bringing back ${words(back)}`;
+      return undefined;
+    }
+    case 'add_broll':
+      return `Adding ${args?.treatment === 'animation' || args?.animation ? 'an animation' : args?.treatment === 'text-pop' ? 'words on screen' : 'a picture'}${at(args?.anchor?.from)}`;
+    case 'update_broll':
+      return broll ? `Changing the ${shownAs(broll.treatment)}${at(broll.anchor.from)}` : undefined;
+    case 'remove_broll':
+      return broll ? `Taking out the ${shownAs(broll.treatment)}${at(broll.anchor.from)}` : undefined;
+    case 'set_caption_style': {
+      const size = p.captions.style.size;
+      if (args?.enabled === false) return p.captions.enabled ? 'Turning the subtitles off' : undefined;
+      const shown = p.captions.enabled || args?.enabled === true;
+      if (shown && typeof args?.size === 'number' && typeof size === 'number' && args.size !== size) return `Making the subtitles ${args.size > size ? 'bigger' : 'smaller'}`;
+      return p.captions.enabled ? 'Changing how the subtitles look' : args?.enabled === true ? 'Turning the subtitles on' : undefined;
+    }
+    case 'choose_music': {
+      // missing arguments are null (executeTool's fillNulls); null + a level keeps the song: only null alone takes it out
+      const track = args?.track ?? null; const level = args?.level ?? null;
+      const existingTrack = (ref: string | null): boolean => {
+        try { return !!ref && !!resolveAsset(ctx, ref); } catch { return false; }
+      };
+      if (track === null && !level) return p.music.track ? 'Taking out the music' : undefined;
+      if (typeof track === 'string' && track !== p.music.track && existingTrack(track)) return `Adding the song "${path.basename(track, path.extname(track))}"`;
+      return level && level !== p.music.level && p.music.enabled && existingTrack(p.music.track) ? 'Changing the music volume' : undefined;
+    }
+    case 'set_zoom':
+      return Array.isArray(args?.zooms) && !args.zooms.length && p.zooms.length ? 'Taking out the zooms' : undefined;
+    default:
+      return undefined;
+  }
 }
 
 const MIME: Record<string, string> = { '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.webp': 'image/webp', '.gif': 'image/gif' };
