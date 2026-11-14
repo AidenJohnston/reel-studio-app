@@ -9,6 +9,8 @@ and for video the audio at the same offset with close levels.
 """
 from __future__ import annotations
 
+import bisect
+import collections
 import itertools
 import math
 from pathlib import Path
@@ -111,43 +113,63 @@ def _wrong_size(got: tuple, want: tuple):
     return None
 
 
+def _nearest(pts: list, t: float) -> int:
+    """Index of the reference frame shown nearest output second `t`."""
+    j = bisect.bisect_left(pts, t)
+    if j == 0:
+        return 0
+    if j == len(pts):
+        return len(pts) - 1
+    return j if pts[j] - t < t - pts[j - 1] else j - 1
+
+
 def check_preview_video(ffmpeg: str, ffprobe: str, ref: Path, cand: Path, captions: list, th: dict,
-                        fps: float, want: tuple, start: float = 0.0, end: float = math.inf) -> dict:
+                        fps: float, want: tuple, start: float = 0.0, end: float = math.inf,
+                        preview_fps: Optional[float] = None) -> dict:
     """A draft (all of the reference) or a window (the reference's output seconds [start, end))
     against the reference. The range comes from the request, not the candidate, so a short output
-    fails the frame count; the size comes from the output format (`want`)."""
+    fails the frame count; the size comes from the output format (`want`). The reference final runs
+    at `fps`, a preview at `preview_fps` (replay.preview_rate; 60 -> 30): each preview frame is
+    compared with the reference frame nearest its time on the preview's own clock."""
     failures = []
     w, h = media.video_size(ffprobe, cand)
     bad = _wrong_size((w, h), want)
     if bad:
         return bad
+    pfps = fps if preview_fps is None else preview_fps
     rp_all = media.video_pts(ffprobe, ref)
     cp = media.video_pts(ffprobe, cand)
     eps = 1e-6
-    picked = [i for i, t in enumerate(rp_all) if start - eps <= t < end - eps]
-    why = compare.timestamps_match([rp_all[i] - start for i in picked], cp, tol=0.5 / fps)
+    in_range = [i for i, t in enumerate(rp_all) if start - eps <= t < end - eps]
+    times = []
+    if in_range:
+        t0 = rp_all[in_range[0]]
+        span = rp_all[in_range[-1]] + 1.0 / fps - t0
+        times = [t0 + k / pfps for k in range(round(span * pfps))]
+    sub = rp_all[in_range[0]:in_range[-1] + 1] if in_range else []
+    picked = [in_range[0] + _nearest(sub, t) for t in times]
+    why = compare.timestamps_match([t - start for t in times], cp, tol=0.5 / pfps)
     if why:
         failures.append(f"timestamps: {why}")
     band = _band(captions, w, h, w / media.video_size(ffprobe, ref)[0])
     tally = Tally()
-    want = set(picked)
+    need = collections.Counter(picked)
     cand_frames = media.iter_frames(ffmpeg, cand, w, h)
     last = max(picked, default=-1)
     compared = 0
     for i, a in enumerate(media.iter_frames(ffmpeg, ref, w, h)):
         if i > last:
             break
-        if i not in want:
-            continue
-        b = next(cand_frames, None)
-        if b is None:
-            break
-        tally.add(rp_all[i], compare.frame_metrics(a, b, band))
-        compared += 1
+        for _ in range(need.get(i, 0)):
+            b = next(cand_frames, None)
+            if b is None:
+                break
+            tally.add(rp_all[i], compare.frame_metrics(a, b, band))
+            compared += 1
     if compared != len(picked) or next(cand_frames, None) is not None:
         failures.append(f"decoded {compared} comparable frames, expected {len(picked)}")
     rows = _preview_rows(tally, th)
-    ra = media.audio_mono(ffmpeg, ref, start=start, duration=len(picked) / fps)
+    ra = media.audio_mono(ffmpeg, ref, start=start, duration=len(picked) / pfps)
     try:
         ca = media.audio_mono(ffmpeg, cand)
     except RuntimeError as e:
@@ -167,9 +189,12 @@ def check_preview_video(ffmpeg: str, ffprobe: str, ref: Path, cand: Path, captio
 
 
 def check_still(ffmpeg: str, ffprobe: str, ref: Path, png: Path, t: float, captions: list, th: dict,
-                want: tuple) -> dict:
-    """One still `frames --times t` made: the first reference frame at or after t (what ffmpeg's
-    accurate input seek in frames.py returns), scaled to the required still size `want`."""
+                want: tuple, preview_fps: Optional[float] = None) -> dict:
+    """One still `frames --times t` made from a draft: the first draft frame at or after t (what
+    ffmpeg's accurate input seek in frames.py returns), scaled to the required still size `want`.
+    The draft runs at `preview_fps`, so that frame is found on the preview's clock and compared with
+    the reference frame nearest it, the same rule as check_preview_video. Without a preview rate the
+    draft runs on the reference's own clock."""
     b = media.read_image(png)
     h, w = b.shape[:2]
     bad = _wrong_size((w, h), want)
@@ -177,7 +202,10 @@ def check_still(ffmpeg: str, ffprobe: str, ref: Path, png: Path, t: float, capti
         return bad
     rp = media.video_pts(ffprobe, ref)
     # frames.py rounds its FFmpeg seek to milliseconds, which can cross a fractional-rate frame.
-    idx = next((i for i, x in enumerate(rp) if x >= round(t, 3) - 1e-6), len(rp) - 1)
+    if preview_fps is None:
+        idx = next((i for i, x in enumerate(rp) if x >= round(t, 3) - 1e-6), len(rp) - 1)
+    else:
+        idx = _nearest(rp, math.ceil(round(t, 3) * preview_fps - 1e-6) / preview_fps)
     a: Optional[object] = None
     for i, fr in enumerate(media.iter_frames(ffmpeg, ref, w, h)):
         if i == idx:

@@ -8,7 +8,7 @@ import type { UpdateState } from '../shared/update'
 async function call<T>(channel: string, ...args: unknown[]): Promise<T> {
   const r = (await ipcRenderer.invoke(channel, ...args)) as
     | { ok: true; value: T }
-    | { ok: false; error: { code: string; userMessage: string } }
+    | { ok: false; error: { code: string; userMessage: string; link?: string; field?: string } }
   if (r.ok) return r.value
   throw r.error
 }
@@ -76,6 +76,14 @@ const api: ReelApi = {
     disconnect: () => call('linkedin:disconnect'),
     publish: (input) => call('linkedin:publish', input)
   },
+  support: {
+    capture: () => call('support:capture'),
+    prepare: (d) => call('support:prepare', d),
+    send: (id) => call('support:send', id),
+    discard: () => call('support:discard'),
+    copy: (id) => call('support:copy', id),
+    email: (id) => call('support:email', id)
+  },
   app: {
     info: () => call('app:info'),
     clipboardFiles: () => call('app:clipboardFiles'),
@@ -84,6 +92,7 @@ const api: ReelApi = {
     finishFirstRun: () => call('app:finishFirstRun'),
     openFolder: (p) => call('app:openFolder', p),
     copyText: (t) => call('app:copyText', t),
+    copyDiagnostics: () => call('app:copyDiagnostics'),
     dimTitleBar: (on) => call('app:dimTitleBar', on),
     titleBarOnStage: (on) => call('app:titleBarOnStage', on),
     pathForFile: (f) => webUtils.getPathForFile(f),
@@ -305,6 +314,9 @@ const api: ReelApi = {
     importMarkdown: (slug, markdown) => call('plan:change', slug, { kind: 'import', markdown }),
     propose: (slug) => call('plan:propose', slug),
     makeVersion1: (slug) => call('plan:makeVersion1', slug)
+  },
+  mirror: {
+    answer: (slug, messageId, action) => call('mirror:answer', slug, messageId, action)
   },
   dev: {
     renderTestAnimation: (out, full, template, params) => call('dev:renderTestAnimation', out, full, template, params)

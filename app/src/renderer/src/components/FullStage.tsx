@@ -89,6 +89,8 @@ export function FullStage({
   const giveBack = useRef<(() => void) | null>(null)
 
   // F toggles; Esc leaves, before anything else on the page hears it (an open menu in the stage keeps its own Esc).
+  // Cmd/Ctrl+Z stops here too: the edit panel behind the stage is out of sight, and its undo would drop edits nobody
+  // sees go (#133, c8c003c4). Share's Cmd/Ctrl+E still gets through, and the stage steps aside for it.
   useEffect(() => {
     const key = (e: KeyboardEvent) => {
       if (document.querySelector('.modal-backdrop')) return
@@ -97,6 +99,9 @@ export function FullStage({
         e.preventDefault()
         e.stopPropagation()
         change.current(false)
+      } else if (open && (e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'z') {
+        e.preventDefault()
+        e.stopPropagation()
       } else if (e.key.toLowerCase() === 'f' && !e.metaKey && !e.ctrlKey && !e.altKey && !e.shiftKey && !e.repeat && !textField(e.target) && (enabled || open)) {
         e.preventDefault()
         change.current(!open)

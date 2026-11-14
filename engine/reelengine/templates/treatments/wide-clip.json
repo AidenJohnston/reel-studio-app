@@ -1,0 +1,16 @@
+{
+  "id": "wide-clip",
+  "label": "Clip in its own framing",
+  "description": "Borrowed footage (a film, a news clip, someone else's video) kept in its own framing: full width, over a blurred copy of itself filling the frame, centred above the captions. Hides the speaker. Never starts within a second of a cut to another shot.",
+  "hidesFace": true,
+  "assetKinds": [
+    "video",
+    "image"
+  ],
+  "params": {
+    "in": {
+      "default": 0.0,
+      "help": "seconds into the clip to start"
+    }
+  }
+}

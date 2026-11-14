@@ -14,6 +14,11 @@ is never split, and only silence is ever removed.
 
 Cut points are snapped to the SOURCE frame grid, so each segment's picture (whole frames) and sound
 (sample-exact) have the same length and the concat cannot drift the picture against the sound.
+
+With a beat grid (music.onBeat has "cuts", beats.py), each jump cut (between kept ranges, or where a
+long pause was taken out) lands on the nearest beat it can reach by moving only the air before it: at
+most BEAT_REACH, never into the word before it, the next word in the source, or sound that plays
+again after the cut. A cut that can't reach a beat stays put.
 Pure functions; no ffmpeg in here.
 """
 from __future__ import annotations
@@ -21,8 +26,9 @@ from __future__ import annotations
 import bisect
 import math
 from dataclasses import dataclass, field
-from typing import Optional
+from typing import Optional, Sequence
 
+from . import beats as beatmod
 from .proto import EngineError
 from .render_ctx import Segment
 
@@ -31,6 +37,8 @@ MIN_SAVING = 0.08       # never splice for less than this
 AFTER_SHARE = 0.08      # of the kept air, at most this much stays with the OUTGOING word
 HEAD_LEAD = 0.10        # air before the very first word of the video
 TAIL_KEEP = 0.35        # ring-out after the very last word
+BEAT_REACH = 0.15       # a jump cut moves at most this far to land on a beat
+WORD_CLEAR = 0.03       # ...and stays this far clear of the words on either side
 EPS = 1e-6
 TRANSITIONS = ("hard", "j", "l", "smash", "match", "flash", "action")
 # joins whose bounds the engine searches for in the air around the cut (match.py)
@@ -294,6 +302,38 @@ def _spoken(ws: list) -> list:
     return out
 
 
+def air_around(seg: Segment, starts: list, ends: list, src_dur: float, nxt: Optional[tuple]) -> Optional[tuple]:
+    """(earliest, latest) source time `seg` may end at while the cut after it removes or keeps only silence:
+    WORD_CLEAR after the last word that ends by seg.src_end, WORD_CLEAR before the next word starts (or
+    the source's end), and never past where the next piece starts in the same source (its sound would
+    play twice). starts/ends: the source's words, in order. None when seg ends inside a word (a cut in
+    that word's own pause), which stays where it is."""
+    t = seg.src_end
+    k = bisect.bisect_left(starts, t - EPS)
+    if k and ends[k - 1] > t + EPS:
+        return None
+    lo = ends[k - 1] + WORD_CLEAR if k else t
+    hi = starts[k] - WORD_CLEAR if k < len(starts) else (src_dur or t)
+    if nxt and nxt[0] == seg.source and nxt[1] >= t - EPS:
+        hi = min(hi, nxt[1])
+    return min(lo, t), max(hi, t)
+
+
+def land_cut_on_beat(seg: Segment, lo: float, hi: float, fps: float, out: float, beats: Sequence[float]) -> float:
+    """Move the end of `seg` (which ends at output time `out`) within [lo, hi] and at most BEAT_REACH, so
+    the cut after it lands on the nearest beat. Returns how far the cut moved (0 if no beat is in reach)."""
+    lo, hi = max(lo, seg.src_end - BEAT_REACH), min(hi, seg.src_end + BEAT_REACH)
+    b = beatmod.nearest(out, beats, out - (seg.src_end - lo), out + (hi - seg.src_end))
+    if b is None:
+        return 0.0
+    end = snap(seg.src_end + (b - out), fps)
+    if not lo - EPS <= end <= hi + EPS:          # the source frame grid rounded it out of reach
+        return 0.0
+    moved = round(end - seg.src_end, 6)
+    seg.src_end = end
+    return moved
+
+
 def clip_span(item: dict, sources: dict) -> tuple[float, float]:
     """Validate a clip and snap its bounds to the source frame grid without removing silence."""
     src = item["source"]
@@ -318,9 +358,13 @@ def clip_span(item: dict, sources: dict) -> tuple[float, float]:
 
 def build_timeline(words: list, keep: list, sources: dict, gap_cap: float = GAP_CAP,
                    min_saving: float = MIN_SAVING, join_fps: float = 30.0,
-                   match_points: Optional[dict] = None) -> Timeline:
+                   match_points: Optional[dict] = None, beats: Sequence[float] = ()) -> Timeline:
     """sources: {sid: {"duration": float, "fps": float}}. A keep item with `clip` plays that source span
     whole (multi-source); the word ranges between clips are merged and joined as before.
+
+    beats: output-clock beat times that the jump cuts land on (beats.synced), or empty: the cuts between
+    kept ranges and the cuts that take out a long pause inside one. A clip's bounds and a declared join
+    (J/L, smash, match, flash, action) keep their own timing.
 
     match_points: {keep index: match.plan verdict}. A matched verdict moves that join's bounds to the
     frames that line up; without one a match join plays as a hard cut (project.timeline asks match.py)."""
@@ -340,6 +384,12 @@ def build_timeline(words: list, keep: list, sources: dict, gap_cap: float = GAP_
                 first = k
             pending.append(item)
     runs.extend(join_runs(words, pending, first))
+    by_src: dict = {}
+    for w in words:
+        st, en = by_src.setdefault(w["source"], ([], []))
+        st.append(w["s"])
+        en.append(w["e"])
+    clip_segs: set = set()
     segments, words_out, first_pos = [], [], {}
     joins, unmoved = [], []
     out = 0.0
@@ -369,9 +419,22 @@ def build_timeline(words: list, keep: list, sources: dict, gap_cap: float = GAP_
                 segments[-1].src_end = point["outEnd"]
                 pieces[0] = (point["inStart"], pieces[0][1])
         run_segs = []
+        is_clip = isinstance(run, dict)
+        joined = not is_clip and any(wi == i0 for wi, _, _, _ in markers)
         for s, e in pieces:
+            prev = run_segs[-1] if run_segs else (segments[-1] if segments else None)
+            # a jump cut lands on a beat; a clip's bounds, and a cut with a declared join (whose timing is
+            # the join's: J/L handles, a smash, the frames a match lined up) stay where they are
+            if (beats and prev is not None and not is_clip and id(prev) not in clip_segs
+                    and (run_segs or not joined)):
+                p_meta = sources.get(prev.source) or {}
+                air = air_around(prev, *by_src.get(prev.source, ([], [])), float(p_meta.get("duration") or 0.0), (src, s))
+                if air:
+                    out += land_cut_on_beat(prev, *air, float(p_meta.get("fps") or 30.0), out, beats)
             seg = Segment(source=src, src_start=s, src_end=e, out_start=round(out, 6))
             run_segs.append(seg)
+            if is_clip:
+                clip_segs.add(id(seg))
             out += e - s
         if not run_segs:
             continue

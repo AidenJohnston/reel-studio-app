@@ -1,13 +1,16 @@
 import { spawn } from 'node:child_process'
-import { constants, existsSync, promises as fs } from 'node:fs'
+import { constants, createReadStream, createWriteStream, existsSync, promises as fs } from 'node:fs'
 import { basename, join } from 'node:path'
+import { pipeline } from 'node:stream/promises'
 import { fallbackCoverSeconds, outputGroups, platformRule, sameVideo, secondTryProblem, type FinishedVideo, type Platform, type PlatformTry } from '../shared/platforms'
 import type { PlatformExportResult } from '../shared/api'
 import type { RunEngine } from './engine'
 
 const STAGE_PREFIX = '.platform-export-'
-// A clone on APFS and other copy-on-write disks; a plain copy elsewhere. Never replaces a file.
-const COMMIT = constants.COPYFILE_EXCL | constants.COPYFILE_FICLONE
+// A clone on APFS and other copy-on-write disks, or an error. Never replaces a file.
+const CLONE = constants.COPYFILE_EXCL | constants.COPYFILE_FICLONE_FORCE
+// What a disk or system that cannot clone answers (Windows: ENOSYS; macOS off APFS: ENOTSUP).
+const NO_CLONE = new Set(['ENOSYS', 'ENOTSUP', 'EOPNOTSUPP', 'EXDEV', 'ENOTTY', 'EINVAL'])
 const SET = ['.mp4', ' cover.jpg', ' caption.txt']
 
 /** One version of the post and the platforms that receive it. */
@@ -76,7 +79,8 @@ function freeNumber(folder: string, bases: string[]): string {
 /**
  * One video, cover and caption file per platform and try. The render is copied as it is unless a platform needs its
  * audio redone or the file is over its size limit. A Try 2 on Try 1's video gets a cover and caption only.
- * Nothing is left behind if this fails or stops.
+ * Nothing is left behind if this fails or stops, except the staging folder of an engine that would not stop
+ * (ENGINE_STUCK), which the next start removes.
  */
 export async function exportPlatforms({ tries: requested, folder, runEngine, signal, onProgress }: {
   tries: Tries<ExportTry>
@@ -91,6 +95,8 @@ export async function exportPlatforms({ tries: requested, folder, runEngine, sig
   const stage = await makeStagingFolder(folder)
   const placed: string[] = []
   const two = tries.length > 1
+  // An engine that would not stop (ENGINE_STUCK, engine.ts) may still be writing into the staging folder.
+  let stuck = false
   try {
     const staged: { cover: string; caption: string; outputFor: Map<Platform, string>; sharedVideo: boolean }[] = []
     for (const [t, item] of tries.entries()) {
@@ -139,7 +145,7 @@ export async function exportPlatforms({ tries: requested, folder, runEngine, sig
           cover: join(folder, `${stem} cover.jpg`), captionFile: join(folder, `${stem} caption.txt`), caption: item.caption
         }
         const copies = [...(sharedVideo ? [] : [[outputFor.get(platform) ?? item.source, file.video]]), [cover, file.cover], [caption, file.captionFile]]
-        for (const [from, to] of copies) await place(from, to, stage, placed)
+        for (const [from, to] of copies) await place(from, to, stage, placed, signal)
         files.push(file)
       }
     }
@@ -149,32 +155,52 @@ export async function exportPlatforms({ tries: requested, folder, runEngine, sig
     // Windows can hold a just-written file for a moment; a removal that still fails must not hide why we stopped.
     // Node documents maxRetries as ignored unless recursive is true, so it is set even for a single file.
     await Promise.allSettled(placed.map((file) => fs.rm(file, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 })))
-    throw signal?.aborted ? { code: 'CANCELLED', userMessage: 'Stopped.' } : error
+    // Stop aborts the signal before the runner finds the engine would not end: that is still ENGINE_STUCK, so the job
+    // keeps the project closed (jobs.ts) and the dialog says to restart, instead of a normal "Stopped." (#175's fix
+    // for #147 after #137)
+    stuck = (error as { code?: string })?.code === 'ENGINE_STUCK'
+    throw signal?.aborted && !stuck ? { code: 'CANCELLED', userMessage: 'Stopped.' } : error
   } finally {
-    // Windows keeps a stopped ffmpeg's output locked for a moment; the startup sweep removes what is left.
-    await fs.rm(stage, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 }).catch(() => undefined)
+    // Windows keeps a stopped ffmpeg's output locked for a moment; the startup sweep removes what is left. A stuck
+    // engine's folder is left to that sweep, which runs after leftover engines are stopped (index.ts settleLastRun).
+    if (!stuck) await fs.rm(stage, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 }).catch(() => undefined)
   }
 }
 
 /**
  * Puts a copy of `from` at `dest` whole or not at all, and never over an existing file: the copy is made in the
  * staging folder and hard-linked into place. `dest` is recorded first, so a rollback also removes a copy that stopped
- * halfway on a drive without hard links.
+ * halfway on a drive without hard links. Stop ends it between steps and in the middle of a copy (#147, b52a6dc8).
  */
-async function place(from: string, dest: string, stage: string, placed: string[]): Promise<void> {
+async function place(from: string, dest: string, stage: string, placed: string[], signal?: AbortSignal): Promise<void> {
+  signal?.throwIfAborted()
   const part = join(stage, basename(dest))
-  await fs.copyFile(from, part, COMMIT)
+  await copy(from, part, signal)
+  signal?.throwIfAborted()
   placed.push(dest)
   try {
     await fs.link(part, dest).catch((error: NodeJS.ErrnoException) => {
       if (error.code === 'EEXIST') throw error
       // exFAT and FAT drives have no hard links.
-      return fs.copyFile(part, dest, constants.COPYFILE_EXCL)
+      return copy(part, dest, signal)
     })
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'EEXIST') placed.pop() // someone else's file: leave it alone
     throw error
   }
+  // A linked copy shares its data with `dest`; an unlinked one is a second full video, so it goes now, not when the
+  // export ends. One Windows still holds is left to the staging folder's cleanup.
+  await fs.rm(part, { force: true }).catch(() => undefined)
+}
+
+/** A clone where the disk can make one; otherwise a streamed copy that Stop ends midway. Never replaces a file. */
+async function copy(from: string, to: string, signal?: AbortSignal): Promise<void> {
+  try {
+    return await fs.copyFile(from, to, CLONE)
+  } catch (error) {
+    if (!NO_CLONE.has((error as NodeJS.ErrnoException).code ?? '')) throw error
+  }
+  await pipeline(createReadStream(from, { highWaterMark: 1 << 20 }), createWriteStream(to, { flags: 'wx' }), { signal })
 }
 
 /** Staging folders left by a crash or a force quit during an export. */

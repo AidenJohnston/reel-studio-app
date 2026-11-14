@@ -11,10 +11,11 @@ This document describes how the pieces fit together. Section numbers are referen
    user's own files, images found online, or generated animation cards), makes a cover, and writes a post
    caption with 5 hashtags.
 3. The user watches the result and types **notes** in plain English ("music too loud at the start", "put the
-   price on 'twenty bucks'"), from the button under the player. A note about the moment on screen names the words
-   on screen then, read from the version being watched (`At 0:14 (around "...", words w80, w81): cut
-   this part`), and the AI anchors the change on those word ids. Each note makes a new version (v1, v2, v3...). Notes that are lasting
-   preferences are saved to **My style** and apply to every future video.
+   price on 'twenty bucks'") in the note box under the Notes panel. Its moment chip attaches the moment on
+   screen (by itself once the person stops on one, or for a note that says "here"); a note about that moment
+   names the words on screen then, read from the version being watched (`At 0:14 (around "...", words w80,
+   w81): cut this part`), and the AI anchors the change on those word ids. Each note makes a new version (v1,
+   v2, v3...). Notes that are lasting preferences are saved to **My style** and apply to every future video.
 4. **Export** writes the finished mp4, the cover and the caption text to a folder.
 
 The app works with no AI connected: transcription, a deterministic cut, captions, music on a chosen song
@@ -113,7 +114,8 @@ anchors to output time at render.
   "createdAt": "ISO", "updatedAt": "ISO", "version": 3,          // last rendered version number
   "format": { "width": 1080, "height": 1920, "fps": 30 },
   "sources": [ { "id": "s1", "path": "media/take01.mp4", "duration": 241.3, "fps": 29.97, "width": 1080, "height": 1920, "rotation": 0 } ],
-      // optional "mirror": true = the take is mirrored (front camera), the render flips the picture (schema-changes.md)
+      // optional "mirror": true = the take is mirrored (front camera), the render flips the picture (schema-changes.md);
+      // optional "mirrorCheck": what init saw when it looked for a mirrored take (mirror_detect.py), never read by the render
   "transcript": { "file": "work/transcript.json", "language": "en" },
       // transcript.json = { "words": [ { "id": "w0", "source": "s1", "s": 0.085, "e": 0.245, "w": "This" }, ... ] }
       // word ids are stable for the life of the project (re-transcription keeps ids by time overlap)
@@ -179,7 +181,8 @@ event may carry `ready`, a file the app can show right away: `{"kind":"still","t
 |---|---|
 | `probe <file>` | duration, fps, size, rotation, has audio, kind guess (`talking_head` / `broll_video` / `music` / `image` / `unknown`) |
 | `classify --root <root> <file>...` | sorts dropped files into the Library folders |
-| `init --project <dir> --title T <files>...` | creates the project folder and project.json, copies media |
+| `init --project <dir> --title T <files>...` | creates the project folder and project.json, copies media; looks at each take for a mirrored picture (`detect-mirror`), records it in `sources[].mirrorCheck` and flips a clearly mirrored one (`sources[].mirror`) |
+| `detect-mirror <file>` | does a take look mirrored? Reads the writing in 4 frames as filmed and flipped with the OS's own text recognition (Windows.Media.Ocr, macOS Vision) and counts everyday words (the speech model's vocabulary) each way; an iPhone file's lens tag rules out a back-camera take. `mirrored` (init flips it) / `maybe-mirrored` (the app asks) / `as-filmed` / `unsure` / `unknown` (no text recognition, no model yet) |
 | `transcribe` | faster-whisper word timestamps -> `work/transcript.json` with stable ids |
 | `analyze` | audio envelope, pause list, retake groups (lines said more than once), face box track, a deterministic default cut |
 | `autocut` | writes a deterministic baseline `cut.keep`; the AI then refines it |
@@ -188,6 +191,7 @@ event may carry `ready`, a file the app can show right away: `{"kind":"still","t
 | `match-joins [--keep <json>] [--every] [--project-file <f>]` | for each match join of the cut (or, with `--every`, each join that could hold one): whether the frames around it line up, its output time and why not (`match.py`) |
 | `pace-preview` | for no pace and each cut-style preset: picture changes a minute and in the first 5 seconds, from the plan a render would make, without encoding |
 | `proxy` | makes the preview copy of each take bigger than 1080p or HDR: `work/proxy/<sid>-<key>.mp4` (H.264, every frame a keyframe, short side 1080, SDR, no sound) + its `.json` sidecar. Drafts and windows read it when it matches the take as it is now; finals and covers read the original. The app starts it after import, at below-normal priority |
+| `anim-jobs [--project-file <f>]` | animation clips the current cut needs re-rendered (beats re-timed to their words): `{jobs: [{id, template, params, fps, out}]}` |
 | `cover` | renders cover.png only |
 | `verify <mp4>` | A/V sync, loudness (-14 LUFS target), duration, black frames, caption-safe placement report, checked against that render's own manifest |
 | `moments [--mark] [--no-draft] [--project-file <f> --out <dir>]` | what changed on screen since the state last shown (`work/moments/base.json`, or `moments-base.json` beside a note's `--project-file`), as output intervals (`moments.py`): stills inside them (at most 3, sent as `ready` as each is drawn), the 2 s window around the first (`ready`), then the draft (into `--out`, as `render --draft --out` does; `--job-id`, `--parent` and `--merge-parent` are passed on to it); the result has `intervals`, `changes`, `stills`, `window` and `draft` (the render result). The base becomes this state only when the run finishes. `--mark` only writes the base |
@@ -207,7 +211,7 @@ x64. Encoders: libx264 for the final export; drafts use `h264_videotoolbox` on m
 | Area | Modules |
 |---|---|
 | Core | `cli.py`, `project.py` (load/save/validate, word-anchor to output-time mapping), `schema/`, `probe.py`, `classify.py`, `transcribe.py`, `analyze.py` (pauses, retakes, default cut), `cut.py`, `match.py` (match cuts: the frames around a join that line up, searched in its pause and cached; `project.timeline` applies them so every kind of render cuts on the same frames), `captions.py`, `render.py` (orchestration and the final ffmpeg graph), `verify.py`, `frames.py`, `doctor.py` |
-| Compositing | `broll.py` (treatments to layers), `placement.py` (face-aware safe boxes), `zoom.py`, `music.py` (track analysis, level presets, automation, ducking, loudness), `cover.py`, `assets.py` (images from the web, media from a link via yt-dlp), `templates/` |
+| Compositing | `broll.py` (treatments to layers), `placement.py` (face-aware safe boxes), `zoom.py`, `music.py` (track analysis, level presets, automation, ducking, drops, the reverb throw, loudness), `beats.py` (the stored beat grid and landing moments on it), `sfx.py` (sound effects), `cover.py`, `assets.py` (images from the web, media from a link via yt-dlp), `templates/` |
 
 The core renders by composing: cut video (+ zooms) -> overlay layers by z -> captions burned last -> mux the
 mixed audio. Captions always sit on top of b-roll. Graphics stay out of the eyes-to-chin zone and the caption
@@ -246,6 +250,8 @@ startAt, level)`, `set_music_automation`, `add_broll(anchor, treatment, asset, p
 backwards in the frames it looks at, or when a note says the video is mirrored), `resolve_asset(kind, intent, phase, candidateId)`, `list_assets`, `preview_asset`, `export_asset_credits`, `search_images(query)` / `fetch_image(url)`, `capture_website(url)` (a screenshot of a public web page in a locked-down offscreen window, for an app or site the speaker names), `make_animation(template, params)`, `set_zoom`,
 `set_sfx` (built-in sound effects, each hitting on a word, a b-roll's appearance or a cut; the engine plays at
 most one every 2 seconds, under the voice),
+`set_sound_moments(onBeat, drops, reverbThrow)` (jump cuts, zooms and b-roll entrances on the song's stored beat
+grid; the music dropping out for a named line and back on the next beat; an echo tail on the last word),
 `set_cover(atSourceTime, text)`, `write_post(caption, hashtags[5], keywords)`, `add_style_rule(rule, check)`,
 `lint_edit` (deterministic repairs and issues, see `docs/edit-lint.md`), `render_draft` (runs the same lint before encoding), `look_at_frames(times)` (returns images for vision models), `finish(summary_for_user)`.
 Only the runs that name them get `propose_plan` and `update_plan_row`, the Plan document's tools ([plan.md](plan.md)).
@@ -361,8 +367,15 @@ Treatments (`engine/reelengine/templates/treatments/` and `broll.py`): `card-abo
 the face, slight tilt, sized to read), `full-frame` (covers the frame, face hidden), `phone-card` (asset in a
 phone frame, beside the face), `side-card` (left or right of the face), `text-pop` (big words above the head),
 `post-wall` (a grid of images building one per word), `icon-wall`, `split-top` (asset on the top half, speaker
-on the bottom half), `animation`, and `text-behind` (big words behind the speaker). Each treatment is a
-deterministic layout from (asset, face track, frame size, params).
+on the bottom half), `animation`, `text-behind` (big words behind the speaker), and the cards an editor uses every day: `title-card` (the hook or a title, words
+filling a white label; the opening hook square), `panel-card` (a screenshot framed on a white panel, or words set on
+one), `logo-row` (real logos in a row, bare; a lone logo gets its name beside it), `phone-row` (2 to 4 phones side
+by side), `circle-callout` (a screenshot, then a red loop drawn around one spot on it on its word), `wide-clip`
+(borrowed footage in its own framing, full width over a blurred copy of itself) and `receipt` (a screenshot as proof,
+labelled with its source). Any still may carry `params.cropBox` and `params.blurBoxes` (to hide names or faces),
+and any card may `params.join` the card before it: it stacks on it, smaller, and they leave together. Each treatment
+is a deterministic layout from (asset, face track, frame size, params).
+
 
 `text-behind` draws its words as a layer, then a `matte` layer above them: the speaker cut out of the footage.
 `segment.py` makes the matte, a grey clip of the window, with PP-HumanSeg (OpenCV Model Zoo, downloaded once and
@@ -379,6 +392,10 @@ camera whose face fills more of the frame, held 2 to 7 s, never changed across a
 The picture, face placement (`source_spans`) and the speaker cut-out read that list; everything about words and
 sound reads `out_timeline`. Tested only on two cameras made from one take; real multi-camera footage is untested.
 
+**Timing rules.** Every card holds at least 2 s: one that would replace it sooner waits (or joins it). Cards cut in
+and out hard, never fade. A borrowed clip never cuts to another shot in its first second: its in-point moves past
+the cut.
+
 **Placement rule.** The protected zone is the **eyes-to-chin** region (eyes, nose and mouth: from just above
 the eyebrows to the chin, outer eye corners plus a margin) and the **caption band**, not the whole face box.
 It comes from YuNet's eye and mouth landmarks, else from the face box's proportions. Cards may cover hair, the
@@ -394,13 +411,23 @@ forehead down to just above the brows, and the sides of the head.
   smaller over the hair on one side.
 - Split view is the last resort, used only when even the relaxed zone leaves no readable placement; the render
   result reports every such fallback in plain words.
-- `full-frame`, `post-wall` and `split-top` cover or move the face on purpose.
+- `full-frame`, `post-wall`, `split-top` and `wide-clip` cover or move the face on purpose; so may `phone-row`
+  (a phone demo), which stays above the captions.
 - Default look: a short tilt (about 2-3 degrees) on stills; clips stay level.
 
 **Animations** (`templates/animations/`): HTML templates (`stat-count-up`, `big-quote`, `list-reveal`,
 `logo-pop`, `price-tag`, `typing-terminal`, and `compose`, which the AI builds from rows of typed parts), each exposing `window.__setup(params)` and `window.__seek(t)`.
 The Electron main process renders them in an offscreen window frame by frame into ffmpeg, producing a
-transparent layer. No CDN is used at run time; any JS is vendored.
+transparent layer. No CDN is used at run time; any JS is vendored. A frame is a pure function of frame time
+(one paused timeline, no clock, timers or randomness; `templates/animations` tests check it).
+
+An animation follows a re-cut. Its beats (each quote word, list item, label or typed line) and its free region
+above the face come from the words of its anchor, so `engine/reelengine/anim_timing.py` re-times every
+animation against the current cut. When that differs from what its clip was rendered with, the clip to play is
+`work/animations/<template>-<key>.mov`, keyed by the spec and the re-timed params: the same project.json
+always plays the same clip. Before every `render` the app asks `anim-jobs` which of those are missing and
+renders them (`app/src/main/anim-retime.ts`); until one exists the old clip plays and layers.json says
+`retime: "pending"`.
 
 ## 8. App and AI interface
 

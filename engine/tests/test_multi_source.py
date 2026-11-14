@@ -108,7 +108,7 @@ def test_reordering_clips_moves_source_anchored_broll(tmp_path, media):
     keep = [clip("c1", "s1", 0, 1), clip("c2", "s2", 2, 4), clip("c3", "s1", 4, 6)]
     pdir, p = make_project(tmp_path, {s: media[s] for s in ("s1", "s2")}, keep)
     p["broll"] = [{"id": "b1", "anchor": {"source": "s2", "s": 2.5, "e": 3.0},
-                   "leadIn": 0, "treatment": "text-pop", "params": {"text": "GOAL", "hold": 0.5}}]
+                   "leadIn": 0, "treatment": "text-pop", "params": {"text": "GOAL"}}]
     project.save(pdir, p)
 
     def window():
@@ -122,8 +122,9 @@ def test_reordering_clips_moves_source_anchored_broll(tmp_path, media):
     before = window()
     p["cut"]["keep"] = [keep[1], keep[2], keep[0]]
     after = window()
-    assert before == pytest.approx((1.5, 2.05))
-    assert after == pytest.approx((0.5, 1.05))
+    # every card holds 2 s (#173), so the window is where the anchor lands plus that hold
+    assert before == pytest.approx((1.5, 3.5))
+    assert after == pytest.approx((0.5, 2.5))
     # Trimming away the anchor removes the overlay instead of leaving it at its old output time.
     p["cut"]["keep"] = [clip("c2", "s2", 3.5, 4)]
     tl = project.timeline(pdir, p)

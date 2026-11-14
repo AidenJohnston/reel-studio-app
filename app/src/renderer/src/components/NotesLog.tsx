@@ -8,6 +8,7 @@ import { reel, userMessage } from '../api'
 import { Icon } from './icons'
 import { Button, PickFiles } from './ui'
 import { AttachmentThumb } from './NoteAttachments'
+import { openReportProblem } from './ReportProblem'
 import { Thinking } from './ui'
 import { EditChecks } from './EditChecks'
 
@@ -59,7 +60,7 @@ export type FirstState =
   /** `why`: paused without you, and when it goes on (shared/pause.ts); null when the person pressed Stop */
   | { kind: 'paused'; why: string | null }
   /** `another`: the file is the cause (or was never copied in), so the way on is another video, not Try again */
-  | { kind: 'failed'; why: string; extra?: ReactNode; another?: 'primary' | 'secondary' }
+  | { kind: 'failed'; why: string; code?: string; extra?: ReactNode; another?: 'primary' | 'secondary' }
 
 const VIDEO_TYPES = 'video/*,.mov,.mp4,.m4v'
 
@@ -224,7 +225,8 @@ export function NotesLog({
           {madeWith?.[v] && (
             <>
               <span className="t by" title={`Made with ${madeWith[v]}`} data-testid={`version-model-${v}`}>
-                {madeWith[v]}
+                {/* cut short from the end when the row is narrow, so the article goes: "Cod…" says more than "the …" */}
+                {madeWith[v].replace(/^the\s+/i, '')}
               </span>
               <span className="sep" aria-hidden>
                 ·
@@ -313,6 +315,9 @@ export function NotesLog({
               </Button>
             </>
           )}
+          <Button kind="tertiary" size="small" onClick={() => openReportProblem(`${f.why}${f.code ? ` (${f.code})` : ''}`)} data-testid="failed-report">
+            Report a problem
+          </Button>
         </div>
         {f.extra}
       </>

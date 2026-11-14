@@ -20,11 +20,11 @@ import {
   snapshotVersion, LIBRARY_FOLDERS, anchorText, writeFileAtomic, keptWords, projectBytes, versionDir, loadTranscript,
 } from './project';
 import { extractJson } from './providers/cli';
-import { CheckRecord, CheckRound, MAX_REPAIRS, askChecker, askHarnessChecker, checkerEvidence, repairTask, saveCheck, unresolvedLine } from './checker';
+import { CheckRecord, CheckRound, MAX_REPAIRS, askChecker, askHarnessChecker, checkerEvidence, repairTask, saveCheck, saveKeptCheck, unresolvedLine } from './checker';
 import { writeAiRun, writeKeptAiRun } from './provenance';
 import * as fsp from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
-import { refuseIfOpen } from './owner';
+import { assertOwner, refuseIfOpen } from './owner';
 import { MergeRequest, MergeResult } from './version-merge';
 import type { NoteSteer } from './steer';
 import type { Helper } from './helpers';
@@ -89,6 +89,11 @@ function mediaSeconds(p: Project): number {
 
 /** Runs transcribe + analyze if the project has no transcript yet. The face track needs no words,
  * so it is found WHILE the speech model listens (`analyze --faces-only`); `analyze` then reuses it. */
+/** set_mirror's refusals, for the app's "It still looks mirrored to me. Flip it?" (none: no field). */
+function declinedFlips(state: ToolState): { mirrorDeclined?: string[] } {
+  return state.mirrorDeclined?.length ? { mirrorDeclined: state.mirrorDeclined } : {};
+}
+
 export async function ensureAnalyzed(deps: EditorDeps, projectDir: string, onEvent: (e: AgentEvent) => void, signal?: AbortSignal): Promise<void> {
   const p = await loadProject(projectDir);
   const mediaSec = mediaSeconds(p);
@@ -222,13 +227,15 @@ const ledgerBytes = (projectDir: string) => fsp.stat(path.join(projectDir, LEDGE
   if (e?.code === 'ENOENT') return null; throw e;
 });
 
-/** A failed note takes back the asset records it appended and the pictures it froze. Its downloads stay, unoffered,
- * like any unsaved note's (tools.ts projectAssets). */
+/** A failed note takes back the asset records it appended and the pictures it froze: the ledger goes back to its size
+ * before the note, or away when the note made it. Its downloads stay, unoffered, like any unsaved note's (tools.ts
+ * projectAssets). */
 async function restoreAssets(projectDir: string, assetsBefore: Set<string>, ledgerBefore: number | null): Promise<void> {
   for (const f of await listAssets(projectDir).catch(() => new Set<string>())) {
     if (f.startsWith('frozen/') && !assetsBefore.has(f)) await fsp.rm(path.join(projectDir, 'work', 'assets', f), { force: true, recursive: true }).catch(() => undefined);
   }
-  if (ledgerBefore !== null) await fsp.truncate(path.join(projectDir, LEDGER), ledgerBefore).catch(() => undefined);
+  const ledger = path.join(projectDir, LEDGER);
+  await (ledgerBefore === null ? fsp.rm(ledger, { force: true }) : fsp.truncate(ledger, ledgerBefore)).catch(() => undefined);
 }
 
 /** The caption's credit line follows the pictures the edit ends with (one removed after write_post
@@ -397,9 +404,16 @@ const withRulesReply = (summary: string, ctx: ToolContext, unreadable: StyleRule
  * approves meets them), minus ones already in My style. A kind this reel can't measure is asked as plain words. */
 async function checkedProposals(deps: EditorDeps, ctx: ToolContext, measuredBefore: Measured | null): Promise<{ styleChecks?: StyleCheckProposal[]; styleSuggestions: string[] }> {
   const measured = ctx.state.ruleChecks?.measured ?? measuredBefore;
-  const saved = new Set((await deps.style.checks()).active.map((r) => r.text));
-  const styleChecks: StyleCheckProposal[] = [];
   const styleSuggestions = [...ctx.state.styleSuggestions];
+  // Runs once the version is saved, so it must not fail the edit: with My style unreadable (EACCES, a damaged
+  // file) the checked proposals are dropped and the saved version stands.
+  const mine = await deps.style.checks().catch((e) => {
+    console.warn('Could not read My style to propose checked rules; the saved edit stands without them.', e);
+    return null;
+  });
+  if (!mine) return { styleSuggestions };
+  const saved = new Set(mine.active.map((r) => r.text));
+  const styleChecks: StyleCheckProposal[] = [];
   for (const { text, choice } of ctx.state.styleChecks ?? []) {
     const check = checkFromMeasured(choice, measured);
     if (!check) { if (!styleSuggestions.includes(text)) styleSuggestions.push(text); continue; }
@@ -500,7 +514,7 @@ First edit (stopped early).
 ${summary}
 `);
         await recordFirstEditRun(projectDir, version, baseVersion, ctx.state.aiCalls);
-        return { summary, version, styleRulesAdded: ctx.state.styleRulesAdded, ...(await checkedProposals(deps, ctx, measured)), changed: [...ctx.state.changed], notice: e.toJSON() };
+        return { summary, version, styleRulesAdded: ctx.state.styleRulesAdded, ...(await checkedProposals(deps, ctx, measured)), changed: [...ctx.state.changed], ...declinedFlips(ctx.state), notice: e.toJSON() };
       }
       throw e;
     }
@@ -514,7 +528,7 @@ ${summary}
     if (version > baseVersion) await snapshotVersion(projectDir, await loadProject(projectDir), version, `# v${version}\n\nFirst edit.\n\n${summary}\n`);
     await recordFirstEditRun(projectDir, version, baseVersion, ctx.state.aiCalls);
     onEvent({ type: 'status', message: 'Done', pct: 100 });
-    return { summary, version, styleRulesAdded: ctx.state.styleRulesAdded, ...(await checkedProposals(deps, ctx, measured)), changed: [...ctx.state.changed] };
+    return { summary, version, styleRulesAdded: ctx.state.styleRulesAdded, ...(await checkedProposals(deps, ctx, measured)), changed: [...ctx.state.changed], ...declinedFlips(ctx.state) };
   } finally {
     await ctx.moments?.stop();
   }
@@ -762,6 +776,8 @@ export async function applyNote(deps: EditorDeps, provider: ModelProvider | null
   let stuck = false;
   // the AI run's task, once it draws changed moments in the note's folder
   let drawing: ToolContext | undefined;
+  // project.json points at the note's version: from then on nothing it froze or recorded may be taken back
+  let published = false;
   try {
     let ctx = await begin();
     const { p: p0 } = await load(ctx);
@@ -846,9 +862,12 @@ export async function applyNote(deps: EditorDeps, provider: ModelProvider | null
     // A note run in an MCP harness (dev only) has no loop of ours for the fix: its reply still names any failing rule.
     const fix = deps.harness ? undefined : rulesFixer(deps, provider, ctx, onEvent, signal, note.trim() || undefined);
     const result = await saveNote(deps, ctx, base, baseVersion, { text: note.trim(), label, summary, attachments: recorded }, opts.saveStyleRules !== false, { fix, unreadable });
+    published = true;
     if (review && result.version !== undefined) {
       try {
-        await saveCheck(projectDir, result.version, review.record);
+        // a version this note got back (only its caption changed) keeps the check of the note that made it
+        if (result.version > baseVersion) await saveCheck(projectDir, result.version, review.record);
+        else await saveKeptCheck(projectDir, id, result.version, review.record);
       } catch (e) {
         console.warn(`Could not save check.json for v${result.version}; keeping the committed note.`, e);
       }
@@ -857,7 +876,13 @@ export async function applyNote(deps: EditorDeps, provider: ModelProvider | null
     started = p0;
   } catch (e) {
     stuck = engineStuck(e);
+    // Moments hides its engine's errors (moments.ts draw), so one that would not stop shows only once its run has
+    // been stopped: that comes before anything is taken back. The host then fails the edit with it (index.ts settle).
     if (!stuck) {
+      await drawing?.moments?.stop();
+      stuck = !!deps.stuck?.();
+    }
+    if (!stuck && !published) {
       await restoreCredits(projectDir, creditsBefore);
       await restoreAssets(projectDir, assetsBefore, ledgerBefore);
     }
@@ -866,9 +891,9 @@ export async function applyNote(deps: EditorDeps, provider: ModelProvider | null
     // A moments run writes its base and pictures in the note's folder: gone before the folder is. The
     // final render already stopped one; this is a failure, or a note that made no version.
     if (!stuck) await drawing?.moments?.stop();
-    // Only this note's scratch. saveNote handles failed finals; crash leftovers stay unpublished
-    // until the app's job lane clears them (app store.ts cleanPartialVersions).
-    if (!stuck) await fsp.rm(dir, CLEANUP_RM).catch(() => undefined);
+    // Only this note's scratch, and only once nothing of the note's may still write there. saveNote handles failed
+    // finals; crash leftovers stay unpublished until the app's job lane clears them (app store.ts cleanPartialVersions).
+    if (!stuck && !deps.stuck?.()) await fsp.rm(dir, CLEANUP_RM).catch(() => undefined);
   }
   // read from the saved project; a failure here only skips the question, never the saved note
   const version = committed.version;
@@ -992,7 +1017,7 @@ async function saveNote(deps: EditorDeps, ctx: ToolContext, base: Buffer, baseVe
     await writeFileAtomic(live, bytes, undefined, async () => {
       const stuck = deps.stuck?.();
       if (stuck) throw stuck;
-      if (!deps.owner) refuseIfOpen(ctx.projectDir);
+      if (deps.owner) assertOwner(ctx.projectDir, deps.owner); else refuseIfOpen(ctx.projectDir);
       await unchanged();
       if (ctx.signal?.aborted) throw new AIError('cancelled', 'Stopped.');
     });
@@ -1005,7 +1030,7 @@ async function saveNote(deps: EditorDeps, ctx: ToolContext, base: Buffer, baseVe
     } catch {
       // the note is saved: a My style write or a listener that fails now must not report it as failed
     }
-    return { summary: n.summary, ...(final ? { version } : {}), styleRulesAdded, styleSuggestions, changed: [...ctx.state.changed] };
+    return { summary: n.summary, ...(final ? { version } : {}), styleRulesAdded, styleSuggestions, changed: [...ctx.state.changed], ...declinedFlips(ctx.state) };
   } catch (e) {
     // Only our next unpublished number, under the edit lock, after the engine has settled.
     // A stuck engine may still be writing; recovery owns its files instead.

@@ -27,6 +27,8 @@ export function handEditJob(runEngine: RunEngine, slug: string, entry: QueuedNot
     const file = join(work, 'edit.json')
     const rel = ['work', 'hand', entry.id, 'edit.json'].join('/')
     const own = (args: string[]): string[] => (owner ? [...args, '--owner', owner] : args)
+    // an engine that would not stop may still write in work/hand/<id>: its folder stays, as the job keeps the project (jobs.ts)
+    let stuck = false
     try {
       emit({ type: 'status', message: HAND_MESSAGE, pct: 1, phase: 'final', aggregate: true })
       const base = await readProject(slug)
@@ -58,8 +60,11 @@ export function handEditJob(runEngine: RunEngine, slug: string, entry: QueuedNot
       await writeProject(slug, done, { durable: true, signal })
       emit({ type: 'render', version, draft: false, ...(r?.file ? { file: String(r.file) } : {}) })
       return { summary: versionMessage(version, entry.text), version, made: { by: 'hand', summary: entry.text } }
+    } catch (e) {
+      stuck = (e as { code?: unknown } | null)?.code === 'ENGINE_STUCK'
+      throw e
     } finally {
-      await fs.rm(work, { recursive: true, force: true }).catch(() => undefined)
+      if (!stuck) await fs.rm(work, { recursive: true, force: true }).catch(() => undefined)
     }
   }
 }

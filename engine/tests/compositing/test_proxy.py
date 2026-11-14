@@ -157,6 +157,30 @@ def test_a_still_is_drawn_from_what_a_draft_reads(tmp_path):
     assert not (r > 180 and g < 70 and b < 70), (r, g, b)             # decoded from the take
 
 
+def test_a_draft_whose_copy_fails_never_marks_its_encoder_failed(tmp_path, monkeypatch):
+    """A preview from a damaged copy is made again from the take with the same encoder first. The
+    retry used to switch encoder and input together, then save the GPU encoder as failed for days
+    although only the copy was broken."""
+    take = fx.synth_video(tmp_path / "media-src" / "take.mp4", dur=4.0)
+    pdir = _project(tmp_path, take, 1080, 1920, keep=((0.5, 3.0),))
+    copy = Path(proxy.run(pdir, short_side=540)["sources"]["s1"]["file"])
+    monkeypatch.setattr(render.tools, "draft_encoder", lambda: "h264_nvenc")
+    marked, runs = [], []
+    monkeypatch.setattr(render.tools, "mark_encoder_failed", marked.append)
+
+    def encode(cmd, dur, on_pct, **_):            # the copy can't be decoded; NVENC works
+        from_copy = any(isinstance(a, str) and Path(a).name == copy.name for a in cmd)
+        runs.append((cmd[cmd.index("-c:v") + 1], from_copy))
+        if from_copy:
+            raise render.EngineError("FFMPEG_FAILED", "Invalid data found when processing input", "x")
+        Path(cmd[-1]).write_bytes(b"")
+        return ""
+    monkeypatch.setattr(render.tools, "ffmpeg_progress", encode)
+    r = _draft(pdir)
+    assert runs == [("h264_nvenc", True), ("h264_nvenc", False)]
+    assert marked == [] and r["videoFrom"] == {"s1": "original"}
+
+
 def test_a_take_is_copied_by_one_build_at_a_time(tmp_path):
     take = fx.synth_video(tmp_path / "media-src" / "take.mp4", dur=3.0)
     pdir = _project(tmp_path, take, 1080, 1920, keep=((0.5, 2.0),))
@@ -166,6 +190,27 @@ def test_a_take_is_copied_by_one_build_at_a_time(tmp_path):
     assert proxy.run(pdir, short_side=540)["sources"]["s1"]["status"] == "busy"
     proxy._release_lock(other)                            # it finished or was killed
     assert proxy.run(pdir, short_side=540)["sources"]["s1"]["status"] == "built"
+
+
+def test_fails_if_a_build_writes_anything_outside_work_proxy(tmp_path):
+    """A build takes no part in project ownership and outlives the job that starts it (cli.py
+    NOT_PROJECT_WRITES, test_owner.py), which is safe only while it writes nothing but its own copies.
+    Here a trial a writer has yet to finish (.trial-transaction.json) must be left for that writer too."""
+    take = fx.synth_video(tmp_path / "media-src" / "take.mp4", dur=3.0)
+    pdir = _project(tmp_path, take, 1080, 1920, keep=((0.5, 2.0),))
+    proj = json.loads((pdir / "project.json").read_text(encoding="utf-8"))
+    (pdir / ".trial-transaction.json").write_text(json.dumps({
+        "version": 1, "before_project": proj, "after_project": dict(proj, title="after the trial"),
+        "before_trials": [], "after_trials": []}), encoding="utf-8")
+    copies = pdir / "work" / "proxy"
+
+    def outside() -> dict:
+        return {f.relative_to(pdir).as_posix(): f.read_bytes() for f in pdir.rglob("*")
+                if f.is_file() and copies not in f.parents}
+
+    before = outside()
+    assert proxy.run(pdir, short_side=540)["sources"]["s1"]["status"] == "built"
+    assert outside() == before
 
 
 @pytest.mark.parametrize("rotation", [0, 90])

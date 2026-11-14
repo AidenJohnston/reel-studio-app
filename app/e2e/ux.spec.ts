@@ -128,6 +128,15 @@ test('no AI: honest first version, one connect prompt, caption controls, a song 
   await expect(page.getByTestId('version-on-screen')).toHaveText('Version 2')
   await expect(page.getByTestId('version-title')).toHaveText('Bigger subtitles')
   await shot(page, 'ux-version-name')
+  // Edit it myself and a reply's buttons change the newest version (Reel.tsx openDrawer), so with an older one on
+  // screen they switch back to the newest first: what changes is what is shown (#130, c44b60f7)
+  await page.getByTestId('log-play-1').click()
+  await expect(page.getByTestId('version-on-screen')).toHaveText('Version 1')
+  await page.getByTestId('edit-myself').click()
+  await expect(page.getByTestId('drawer')).toBeVisible()
+  await expect(page.getByTestId('version-on-screen')).toHaveText('Version 2')
+  await page.getByTestId('drawer-close').click()
+  await expect(page.getByTestId('drawer')).toHaveCount(0)
 
   // A song the editor found outside the Library (#71): music.track is its frozen copy, and the Music tab names it
   // by its asset-ledger title, never the hash. The stand-in AI never freezes one, so put it there as resolve_asset does.

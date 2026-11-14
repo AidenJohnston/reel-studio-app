@@ -137,9 +137,10 @@ export function useNoteAttachments(slug: string, notify: Notify) {
     chipsRef.current = []
     setChips([])
   }, [])
+  /** A failed note's chips come back first; any attached while it was on its way stay after them. */
   const restore = useCallback((list: NoteAttachment[]) => {
-    chipsRef.current = list
-    setChips(list)
+    chipsRef.current = [...list, ...chipsRef.current.filter((c) => !list.some((f) => f.asset === c.asset))]
+    setChips(chipsRef.current)
   }, [])
 
   return { chips, busy, onPaste, onDropFiles, choose, remove, clear, restore }

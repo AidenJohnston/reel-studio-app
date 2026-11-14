@@ -43,8 +43,21 @@ import {
 } from './paths'
 import { offerMoveToApplications, writeErrorCode } from './move-to-applications'
 import { runSelfTest, selfTestArgs, type SelfTestResult } from './self-test'
-import { createEngineRunner, killAllEngines, toUserError, type RunEngine } from './engine'
-import { logDuration } from './diagnostics'
+import { createEngineRunner, killAllEngines, type RunEngine } from './engine'
+import { cpus, totalmem } from 'node:os'
+import {
+  DIAGNOSTICS_CHECK_MS,
+  DIAGNOSTICS_LOG_BYTES,
+  DIAGNOSTICS_LOG_LINES,
+  diagnosticsReport,
+  lastLines,
+  logDuration,
+  redactDiagnostics,
+  sharedDeadline,
+  timedOutText,
+  type CliFacts,
+  type Settled
+} from './diagnostics'
 import { handleMediaProtocol, registerMediaScheme } from './media'
 import {
   addChat,
@@ -84,6 +97,7 @@ import { createJobManager } from './jobs'
 import { createPauser, pauseFor, quitQuestion } from './pause'
 import { createNoteQueue, noteOutcome, type NoteToRun, type StartHand } from './note-queue'
 import { handEditJob, HAND_MESSAGE } from './hand-edit'
+import { recordMadeWith } from './made-with'
 import { refreshMemories } from './memory-loop'
 import { parseHandEdit } from '../shared/hand-edit'
 import { learnPicker } from '../shared/style-editors'
@@ -106,6 +120,7 @@ import type { AgentResult } from './ai-types'
 import { loadAI } from './ai'
 import type { AI, EngineHost } from './ai-types'
 import { closeAnimationRenderer, renderAnimation, TEST_TEMPLATE } from './animation'
+import { withAnimationRetiming } from './anim-retime'
 import { captureWebsite } from './capture'
 import { createModelManager } from './models'
 import { createWorkGate } from './work-gate'
@@ -152,7 +167,7 @@ import { exportPlatforms, sweepExportStaging, type ExportTry } from './platform-
 import { proposeTry } from './try-proposal'
 import { foldProposal, makeReels, prepareReel, startProposal, type ReelsDeps } from './propose-reels'
 import { versionMessage } from '../shared/describe'
-import { mergeSourcesPatch } from '../shared/mirror'
+import { MIRROR_ANSWERS, answerMirror, declinedQuestion, mergeSourcesPatch, mirrorNotices, type MirrorAnswer, type MirrorQuestion } from '../shared/mirror'
 import { assertWordCutEditable } from '../shared/cut'
 import { displayPath } from '../shared/display-path'
 import { channelOf } from '../shared/channel'
@@ -177,6 +192,8 @@ import { registerCompanionIpc } from './companion-ipc'
 import { insightsSummary } from './insights'
 import { timingOf, wrappedReport, type WrappedReel } from '../shared/wrapped'
 import { lanAddresses } from './phone-share'
+import { createSupport, encodeScreenshot, supportUrl } from './support'
+import { ipcErrorReply } from './ipc-error'
 
 const TEST = process.env.REELSTUDIO_TEST === '1'
 // Test builds stand in for macOS's answers (permissions.ts parseFakes), and for a Mac itself (platform=darwin), so a
@@ -258,7 +275,8 @@ const renderSlot = withRenderSlot(
   }),
   (owner, waiting) => jobs.waitingForRender(owner, waiting)
 )
-const runEngine: RunEngine = renderSlot.run
+// every render first re-times the animations the cut moved (anim-retime.ts), before it waits for the render slot
+const runEngine: RunEngine = withAnimationRetiming(renderSlot.run, renderAnimation, log)
 // Its own runner per build, with the same engine setup, so removing a project can wait for the exit.
 const proxies = createProxyBuilds(
   (hooks) =>
@@ -519,7 +537,7 @@ async function startNote(slug: string, { id: noteId, text: own, attachments, mom
       // what it says back while it works reaches the progress card in the person's own words
       const aiText = [aiNoteText(own, moment), ...(steers ?? []).map((x) => aiNoteText(x.text, x.moment))].join('\n')
       const r: AgentResult = await ai.applyNote(dir, aiText, forPerson(emit, aiText, text), signal, opts)
-      await recordMadeWith(dir, r)
+      await recordMadeWith(dir, r, before).catch((e) => log(`[ai] made-with: ${String(e)}`))
       if (r.changed.length && r.version !== undefined && ai.rewordVersion) {
         void titleVersion(slug, r.version, ai.rewordVersion.bind(ai), AbortSignal.timeout(60_000)).catch((e) =>
           log(`[ai] version title: ${String(e?.message ?? e)}`)
@@ -527,7 +545,7 @@ async function startNote(slug: string, { id: noteId, text: own, attachments, mom
       }
       const extra = r.notice?.userMessage ? ` ${r.notice.userMessage}` : ''
       // the editor's summary may echo aiText, moment and word ids included
-      const reply = await replyAskingAboutStyle(r, personText(r.summary, aiText, text) + extra)
+      const reply = await replyAskingAboutStyle(slug, r, personText(r.summary, aiText, text) + extra)
       return { ...reply, outcome: noteOutcome(before, r), made: { by: 'note', summary: text } }
     },
     { note: text || attachments.map((f) => f.name).join(', '), record, pause: (e) => pauseFor(e, pauseCtx('note', startedAt, editor)) }
@@ -640,7 +658,7 @@ const updates = createUpdater({
         log,
         devFeedFile: TEST_FEED ? updateConfig ?? undefined : undefined,
         onError: (e) => updates.installFailed(e),
-        install: process.platform === 'win32' ? windowsInstaller(app.getVersion()) : macBundleCheck(app.getVersion())
+        install: process.platform === 'win32' ? windowsInstaller(app.getVersion()) : macBundleCheck(app.getVersion(), siteFeed.staging)
       }),
   load: loadSettings,
   save: saveSettings,
@@ -688,10 +706,9 @@ function handle(channel: string, fn: Handler): void {
       validateIpcArgs(channel, args)
       return { ok: true, value: await fn(e, ...args) }
     } catch (err) {
-      const u = toUserError(err)
-      log(`[ipc ${channel}] ${u.code}: ${u.message ?? u.userMessage}`)
-      const link = (err as { link?: unknown })?.link
-      return { ok: false, error: { code: u.code, userMessage: u.userMessage, ...(typeof link === 'string' ? { link } : {}) } }
+      const { message, ...error } = ipcErrorReply(err)
+      log(`[ipc ${channel}] ${error.code}: ${message ?? error.userMessage}`)
+      return { ok: false, error }
     }
   })
 }
@@ -705,6 +722,116 @@ let accountNameRead: Promise<string | null> | null = null
 /** firstRunAgain as it was when this launch started (settings.ts showsFirstRun). */
 let firstRunAgainAtLaunch = false
 const firstRunShows = async (): Promise<boolean> => showsFirstRun(await loadSettings(), firstRunAgainAtLaunch)
+
+// ---- Copy diagnostics (Settings > About; Help on a Mac) -----------------------------------------------------------
+async function readLogTail(): Promise<string> {
+  try {
+    const fh = await fs.open(logFile(), 'r')
+    try {
+      const { size } = await fh.stat()
+      const len = Math.min(size, DIAGNOSTICS_LOG_BYTES)
+      const buf = Buffer.alloc(len)
+      await fh.read(buf, 0, len, size - len)
+      return lastLines(buf.toString('utf8'), DIAGNOSTICS_LOG_LINES, size > len)
+    } finally {
+      await fh.close()
+    }
+  } catch {
+    return ''
+  }
+}
+
+/** The diagnostics text, redacted. Only the state, version and plan kind of each CLI go in, never a path. */
+async function diagnosticsText(): Promise<string> {
+  // Every check shares one deadline: a CLI that hangs (or ignores its stop signal) must not hold the report back.
+  const deadline = sharedDeadline(DIAGNOSTICS_CHECK_MS)
+  const call = <T>(fn: () => T | Promise<T>): Promise<Settled<T>> => deadline.within(Promise.resolve().then(fn))
+  const [rActive, rClaude, rCodex, rModel, rLog] = await Promise.all([
+    call(() => ai.active()),
+    call(() => ai.claudeCodeStatus?.() ?? null),
+    call(() => ai.codexStatus?.() ?? null),
+    call(() => models.status()),
+    call(() => readLogTail())
+  ])
+  deadline.done()
+  const r = { active: rActive, claude: rClaude, codex: rCodex, model: rModel, log: rLog }
+  const late = timedOutText(DIAGNOSTICS_CHECK_MS)
+  const value = <T>(s: Settled<T>): T | null => (s.ok ? s.value : null)
+  const names: Record<keyof typeof r, string> = {
+    active: 'AI editor',
+    claude: 'Claude Code app',
+    codex: 'Codex app',
+    model: 'listening model',
+    log: 'log'
+  }
+  const timedOut = (Object.keys(r) as (keyof typeof r)[]).filter((k) => {
+    const s = r[k]
+    return !s.ok && s.reason === 'timeout'
+  })
+  const active = value(r.active)
+  const model = value(r.model)
+  const logTail = r.log.ok ? r.log.value : `(${r.log.reason === 'timeout' ? late : 'could not read the log'})`
+  const facts = (s: Settled<{ state: string; version?: string; plan?: string } | null>): CliFacts | null => {
+    if (!s.ok) return { state: s.reason === 'timeout' ? late : 'check failed' }
+    const c = s.value
+    return c ? { state: c.state, ...(c.version ? { version: c.version } : {}), ...(c.plan ? { plan: c.plan } : {}) } : null
+  }
+  const mac = process.platform === 'darwin'
+  const osName = mac ? 'macOS' : process.platform === 'win32' ? 'Windows' : process.platform
+  const text = diagnosticsReport(
+    {
+      appVersion: app.getVersion(),
+      packaged: app.isPackaged,
+      os: `${osName} ${process.getSystemVersion()}`,
+      arch: process.arch,
+      cpu: cpus()[0]?.model?.trim() || 'unknown',
+      memoryGb: Math.round(totalmem() / 1024 ** 3),
+      ...(app.runningUnderARM64Translation ? { translated: true } : {}),
+      ...(mac ? { inApplications: app.isInApplicationsFolder() } : {}),
+      electron: process.versions.electron,
+      engine: engineMode(),
+      aiEditor: active
+        ? `${active.label}, ${active.connected ? 'connected' : 'not connected'}${active.error ? ` (${active.error.code})` : ''}`
+        : r.active.ok ? 'unknown' : r.active.reason === 'timeout' ? late : 'check failed',
+      claudeCode: facts(r.claude),
+      codex: facts(r.codex),
+      listeningModel: !model
+        ? r.model.ok ? 'unknown' : r.model.reason === 'timeout' ? late : 'check failed'
+        : model.installed
+          ? `${model.name}, ready`
+          : model.downloading
+            ? `${model.name}, downloading (${Math.round(model.pct)}%)`
+            : `${model.name}, not downloaded${model.error ? ` (${model.error})` : ''}`,
+      ...(timedOut.length ? { timedOut: timedOut.map((k) => names[k]) } : {})
+    },
+    logTail,
+    new Date()
+  )
+  // One pass over the whole text: the log and every fact above (a CPU name or a plan kind cannot carry a path, but cheap).
+  return redactDiagnostics(text, app.getPath('home'))
+}
+
+/** Puts the diagnostics text on the clipboard ("Copy diagnostics" in Settings > About, and Help on a Mac). */
+async function copyDiagnostics(): Promise<void> {
+  await clipboard.writeText(await diagnosticsText())
+  log('[diagnostics] copied to the clipboard')
+}
+
+/** "Report a problem" (main/support.ts). */
+function osLine(): string {
+  const osName = process.platform === 'darwin' ? 'macOS' : process.platform === 'win32' ? 'Windows' : process.platform
+  return `${osName} ${process.getSystemVersion()} ${process.arch}`
+}
+const support = createSupport({
+  url: supportUrl(process.env, log),
+  appVersion: app.getVersion(),
+  os: osLine(),
+  fetch: (url, init) => fetch(url, init), // Node's fetch: no Electron session, so no cookies
+  getKey: () => updateKey.get(),
+  diagnostics: diagnosticsText,
+  capture: async () => (win && !win.isDestroyed() ? encodeScreenshot(await win.webContents.capturePage()) : null),
+  log
+})
 
 async function appInfo(): Promise<AppInfo> {
   const s = await loadSettings()
@@ -768,7 +895,7 @@ function startFirstEdit(slug: string, initArgs: { title: string; files: string[]
       emit({ type: 'status', message: 'Copying your video', pct: 0 })
       // an archive pick's parts name their files by position (archive-reels.ts), so its copy never re-sorts them by date
       const keepOrder = st.fromArchive ? ['--keep-order'] : []
-      await runEngine(
+      const made = (await runEngine(
         'init',
         owned(['--project', dir, '--title', title, '--slug', slug, ...(fasterExports ? ['--faster-exports'] : []), ...keepOrder], owner).concat(files),
         // A copy is instant. A clip whose frame timing varies is re-encoded first (engine init.py says
@@ -780,7 +907,9 @@ function startFirstEdit(slug: string, initArgs: { title: string; files: string[]
               : { type: 'status', message: 'Copying your video', pct: Math.round(p.pct * 0.01) }
           ),
         signal
-      )
+      )) as { sources?: ProjectJson['sources'] } | null
+      // init looked at each take for a mirrored picture (engine mirror_detect.py): a flip is never silent
+      for (const q of mirrorNotices(made?.sources)) await askMirror(slug, q)
     }
     // a reel made from another reel's proposal is copied in and seeded from it, on a resume too if the app closed
     // between the two, so it never becomes an edit of the whole video
@@ -834,6 +963,8 @@ function startFirstEdit(slug: string, initArgs: { title: string; files: string[]
     // Reel screen plays it (shared/live.ts) and says what it is. Once listening is done (the first
     // status of a later phase), the words heard go to the Reel screen ("I heard: ...").
     let heard = false
+    // a first edit run again can get its saved version back: that version's record stays (made-with.ts)
+    const before = (await readProject(slug)).version ?? 0
     const r = await ai.firstEdit(
       dir,
       (e) => {
@@ -852,13 +983,13 @@ function startFirstEdit(slug: string, initArgs: { title: string; files: string[]
     // Honest "What I did": only an AI that ran to the end picked the takes and wrote the caption.
     // A notice means it stopped and (usually) the simple edit stepped in, so claim nothing.
     const aiEdited = !!provider && provider.connected && provider.id !== 'none' && !r.notice
-    if (aiEdited) await recordMadeWith(dir, { ...r, version: r.version ?? 1 })
+    if (aiEdited) await recordMadeWith(dir, { ...r, version: r.version ?? 1 }, before).catch((e) => log(`[ai] made-with: ${String(e)}`))
     await updateAppState(slug, (s) => {
       s.aiEdited = aiEdited
     })
     if (r.notice?.userMessage) await addChat(slug, 'editor', r.notice.userMessage)
     await groupReel(slug).catch((e) => log(`[series] ${slug}: ${String(e).slice(0, 300)}`))
-    return replyAskingAboutStyle(r, r.summary)
+    return replyAskingAboutStyle(slug, r, r.summary)
   }, { pause, record: started })
 }
 
@@ -872,16 +1003,18 @@ async function plansFirst(st: AppState): Promise<boolean> {
   return !!p?.connected && p.id !== 'none'
 }
 
-/** Which model made a version, beside it (`versions/vN/made-with.json`, as title.json is): its line in the notes names
- * it. A version a basic edit made has no model, and no file. */
-async function recordMadeWith(dir: string, r: AgentResult): Promise<void> {
-  if (!r.model || r.version === undefined) return
-  await writeJson(join(dir, 'versions', `v${r.version}`, 'made-with.json'), { model: r.model }).catch((e) => log(`[ai] made-with: ${String(e)}`))
+/** A mirror question in the chat, with the takes it is about (its buttons act on those only). */
+function askMirror(slug: string, q: MirrorQuestion): Promise<void> {
+  return addChat(slug, 'editor', q.text, undefined, q.actions, undefined, undefined, undefined, undefined, q.sources).then(() => undefined)
 }
 
 /** The editor's reply into the chat, then one "Remember this for next time?" per My style rule (style-consent.ts). */
-function replyAskingAboutStyle(r: AgentResult, summary: string): Promise<{ summary: string; version?: number; chat: ChatLine[] }> {
-  return askAboutStyle({ styleRules: () => ai.styleRules(), removeStyleRule: (id, o) => ai.removeStyleRule(id, o) }, r, summary)
+async function replyAskingAboutStyle(slug: string, r: AgentResult, summary: string): Promise<{ summary: string; version?: number; chat: ChatLine[] }> {
+  const reply = await askAboutStyle({ styleRules: () => ai.styleRules(), removeStyleRule: (id, o) => ai.removeStyleRule(id, o) }, r, summary)
+  // the editor saw backwards writing in a take the user had said is the right way round: it may not flip it, so the
+  // user decides with one tap (shared/mirror.ts declinedQuestion)
+  const q = r.mirrorDeclined?.length ? declinedQuestion((await readProject(slug)).sources, r.mirrorDeclined) : null
+  return q ? { ...reply, chat: [...reply.chat, { from: 'editor', text: q.text, actions: q.actions, sources: q.sources }] } : reply
 }
 
 const EDITABLE: (keyof ProjectJson)[] = ['title', 'cut', 'captions', 'music', 'broll', 'zooms', 'cover', 'post']
@@ -1314,6 +1447,17 @@ function registerIpc(): void {
     else shell.showItemInFolder(p)
   })
   handle('app:copyText', (_e, t: string) => clipboard.writeText(String(t)))
+  handle('app:copyDiagnostics', () => copyDiagnostics())
+  handle('support:capture', () => support.capture())
+  handle('support:prepare', (_e, d) => support.prepare(d))
+  handle('support:send', (_e, id: unknown) => support.send(id))
+  handle('support:discard', () => support.discard())
+  handle('support:copy', async (_e, id: unknown) => {
+    const text = support.asText(id)
+    if (!text) throw { code: 'SUPPORT_STALE', userMessage: 'Nothing to copy yet.' }
+    await clipboard.writeText(text)
+  })
+  handle('support:email', (_e, id: unknown) => shell.openExternal(support.mailto(id)))
   handle('app:legal', (_e, doc: unknown) => fs.readFile(legalFile(doc), 'utf8'))
   handle('app:showLegal', (_e, doc: unknown) => {
     const file = legalFile(doc)
@@ -2179,6 +2323,40 @@ function registerIpc(): void {
     return (pack.sounds ?? []).map((x) => ({ id: x.id, kind: x.job, seconds: x.seconds, onsetMs: x.onsetMs, url: mediaUrl(join(dir, x.file)) }))
   })
 
+  // "Undo flip" under "I flipped your video", or "Flip it" / "Keep as filmed" under "Flip it?" (shared/mirror.ts).
+  // Either way the buttons go and the editor answers. A flip or an undo is a change made by hand (Edit it myself's
+  // queue): it waits for a running job and makes the next version, and applyHand keeps the answer in mirrorCheck.
+  // Keep as filmed changes no picture, so only its answer is written, as a manual edit is (refused while a job runs).
+  // One answer at a time per project: a second quick click finds the buttons gone and changes nothing.
+  handle('mirror:answer', (_e, slug: string, messageId: string, action: MirrorAnswer) =>
+    serialized(`mirror-answer:${slug}`, async () => {
+      if (!MIRROR_ANSWERS.includes(action)) return { change: '' }
+      const asked = (await readAppState(slug)).chat.find((x) => x.id === messageId)
+      if (!asked?.actions?.includes(action)) return { change: '' }
+      const ids = asked.sources ?? []
+      const p = await readProject(slug)
+      const r = answerMirror(p.sources, action, ids)
+      if (r.change) {
+        const was = new Map((p.sources ?? []).map((x) => [x.id, x.mirror === true]))
+        const mirror = r.sources.filter((x) => was.get(x.id) !== (x.mirror === true)).map((x) => ({ source: x.id, on: x.mirror === true }))
+        const edit = parseHandEdit({ set: [], items: [], words: { cut: [], keep: [] }, mirror, joins: [] })
+        await noteQueue.sendHand(slug, { edit, changes: mirror.length }, r.change, p.version ?? 0)
+      } else if (r.reply) {
+        await jobs.hold(slug, async () => {
+          const q = await readProject(slug)
+          q.sources = answerMirror(q.sources, action, ids).sources
+          await writeProject(slug, q)
+        })
+      }
+      await updateAppState(slug, (st) => {
+        const x = st.chat.find((y) => y.id === messageId)
+        if (x) delete x.actions
+      })
+      if (r.reply) await addChat(slug, 'editor', r.reply)
+      return { change: r.change }
+    })
+  )
+
   handle('update:state', () => updates.state())
   handle('update:check', () => updates.check('button'))
   handle('update:download', () => updates.download())
@@ -2336,12 +2514,23 @@ function createWindow(): BrowserWindow {
       showTimelineInMenu(!shown)
       log(`[settings] timeline not saved: ${String(e instanceof Error ? e.message : e).slice(0, 300)}`)
     })
-  installMenu(sendCommand, DEV_PROVIDERS || !app.isPackaged, toggleTimeline, () =>
-    // On Mac the menu outlives a closed window, so the window may be gone when this runs.
-    void menuCheckForUpdates(updates, {
-      focus: () => void showWindow(),
-      show: (o) => dialog.showMessageBox(showWindow(), o)
-    }).catch((e) => log(`[update] menu check failed: ${String(e instanceof Error ? e.message : e).slice(0, 300)}`))
+  installMenu(
+    sendCommand,
+    DEV_PROVIDERS || !app.isPackaged,
+    toggleTimeline,
+    () =>
+      // On Mac the menu outlives a closed window, so the window may be gone when this runs.
+      void menuCheckForUpdates(updates, {
+        focus: () => void showWindow(),
+        show: (o) => dialog.showMessageBox(showWindow(), o)
+      }).catch((e) => log(`[update] menu check failed: ${String(e instanceof Error ? e.message : e).slice(0, 300)}`)),
+    () =>
+      void copyDiagnostics()
+        .then(() => {
+          const opts = { type: 'info' as const, message: 'Diagnostics copied', detail: 'Paste them into your bug report.' }
+          return win && !win.isDestroyed() ? dialog.showMessageBox(win, opts) : dialog.showMessageBox(opts)
+        })
+        .catch((e) => log(`[diagnostics] copy failed: ${String((e as Error)?.message ?? e)}`))
   )
   void loadSettings().then((s) => showTimelineInMenu(s.timeline), () => undefined)
   created.once('ready-to-show', () => {

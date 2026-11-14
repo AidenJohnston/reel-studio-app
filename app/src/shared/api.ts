@@ -27,12 +27,43 @@ import type { ReferenceEntry, ReferenceView, Readout } from './references'
 import type { Niche, NicheTurn, NicheTurnResult, SavedNiche } from './niche'
 export type { VersionRow } from './version-diff'
 import type { Plan, PlanBeat, PlanView, RowFields, RowStatus } from './plan-doc'
+import type { MirrorAnswer } from './mirror'
 export type { ChatAction } from './notes'
 export type { CoverCandidate } from './cover'
 
 export type LegalDoc = 'license' | 'notices'
+/** "Report a problem" (main/support.ts): what the person typed and ticked. Nothing is ticked for them but the key. */
+export interface SupportDraft {
+  what: string
+  expected: string
+  email: string
+  diagnostics: boolean
+  screenshot: boolean
+  /** Send the download key, so support can see which purchase this is. */
+  key: boolean
+}
 
-export type AppCommand = { type: 'new-video' | 'settings' | 'export' | 'library' | 'resize-sidebar' } | { type: 'open-reel'; slug: string } | { type: 'timeline'; shown: boolean }
+/** Exactly what `send(id)` will send. */
+export interface SupportPreview {
+  id: string
+  /** Where it goes, e.g. dl.getreelstudio.com */
+  server: string
+  what: string
+  expected: string
+  email: string | null
+  appVersion: string
+  os: string
+  diagnostics: string | null
+  screenshot: { dataUrl: string; bytes: number; width: number; height: number } | null
+  key: boolean
+}
+
+export interface SupportSent {
+  /** The report's id, e.g. RS-7K3F9QXA, to quote when writing to support. */
+  id: string
+}
+
+export type AppCommand = { type: 'new-video' | 'settings' | 'export' | 'library' | 'resize-sidebar' | 'report-problem' } | { type: 'open-reel'; slug: string } | { type: 'timeline'; shown: boolean }
 
 /** planned: a reel with no video yet (New reel); its notes column is for planning and scripts. */
 export type ScreenStatus = 'planned' | 'new' | 'working' | 'ready' | 'interrupted' | 'failed'
@@ -165,6 +196,8 @@ export interface ChatMessage {
   planRaw?: unknown
   /** About more reels from this video: what the editor found, or the reels being made. It belongs to no note. */
   reels?: true
+  /** The takes a mirror question is about (shared/mirror.ts): its buttons act on these only. */
+  sources?: string[]
 }
 
 /** done: the note made a new version. failed: an error, or nothing changed. stopped: Stop, or the app quit. */
@@ -337,6 +370,17 @@ export interface PacePreview { paces: Record<string, { perMinute: number; openin
 /** One join of a cut, as the engine's match-joins answers for it. */
 export interface MatchVerdict { keep: number; matched: boolean; why?: string }
 
+/** `sources[].mirrorCheck` (engine/reelengine/mirror_detect.py). Only `mirrored` flips a take at import;
+ * `maybe-mirrored` makes the editor ask. */
+export interface MirrorCheck {
+  verdict: 'mirrored' | 'maybe-mirrored' | 'as-filmed' | 'unsure' | 'unknown'
+  /** plain words, e.g. "the writing behind you reads backwards" */
+  why?: string
+  camera?: 'front' | 'back'
+  letters?: { asFilmed: number; flipped: number }
+  answer?: 'flipped' | 'kept' | 'undone'
+}
+
 export interface ProjectJson {
   schemaVersion: number
   id: string
@@ -346,8 +390,9 @@ export interface ProjectJson {
   updatedAt: string
   version: number
   format?: { width: number; height: number; fps: number }
-  /** `mirror`: the take is mirrored, the engine flips the picture (absent = as filmed) */
-  sources?: { id: string; path: string; originalName?: string; duration?: number; rotation?: number; mirror?: boolean }[]
+  /** `mirror`: the take is mirrored, the engine flips the picture (absent = as filmed). `mirrorCheck`:
+   * what init saw when it looked for a mirrored take, and what the user then chose (shared/mirror.ts). */
+  sources?: { id: string; path: string; originalName?: string; duration?: number; rotation?: number; mirror?: boolean; mirrorCheck?: MirrorCheck }[]
   /** The group this reel belongs to on Reels ("Sourdough basics"). */
   series?: string
   transcript?: { file: string; language?: string }
@@ -1083,6 +1128,8 @@ export interface ReelApi {
     finishFirstRun(): Promise<void>
     openFolder(path: string): Promise<void>
     copyText(text: string): Promise<void>
+    /** "Copy diagnostics": app, computer, AI editor and the end of the log, redacted, onto the clipboard. */
+    copyDiagnostics(): Promise<void>
     /** A modal opened (true) or the last one closed: the OS-drawn strip behind the window buttons follows the scrim. */
     dimTitleBar(on: boolean): Promise<void>
     /** The full-screen stage opened (true) or closed: on Windows and Linux the window buttons turn white over its dark. */
@@ -1452,6 +1499,11 @@ export interface ReelApi {
     /** Version 1 waited for the plan (ProjectDetail.planHeld): make it now, with the rows approved so far. */
     makeVersion1(slug: string): Promise<{ jobId: string }>
   }
+  mirror: {
+    /** A button under the editor's "I flipped your video" / "Flip it?" line. `change` = what to call
+     * the new version to make (empty: the picture did not change). */
+    answer(slug: string, messageId: string, action: MirrorAnswer): Promise<{ change: string }>
+  }
   dev: {
     /** Test builds only. `template` defaults to the bundled self-test template. */
     renderTestAnimation(outPath: string, fullSize?: boolean, template?: string, params?: Record<string, unknown>): Promise<string>
@@ -1483,6 +1535,21 @@ export interface ReelApi {
     /** Settings > "Check for updates". Turning it on checks when the day is up. */
     setEnabled(on: boolean): Promise<void>
     onState(cb: (s: UpdateState) => void): () => void
+  }
+  /** "Report a problem" (main/support.ts). */
+  support: {
+    /** Takes the window's screenshot before the form is drawn; says whether there is one and whether a key is saved. */
+    capture(): Promise<{ available: boolean; hasKey: boolean }>
+    /** Builds the report the review step shows. Rejects with SUPPORT_FIELD (and `field`) for a field to fix. */
+    prepare(draft: SupportDraft): Promise<SupportPreview>
+    /** Sends the prepared report. Rejects with SUPPORT_OFFLINE, SUPPORT_BUSY, SUPPORT_TOO_BIG, SUPPORT_FIELD or SUPPORT_FAILED. */
+    send(id: string): Promise<SupportSent>
+    /** The form closed: forget the screenshot and the prepared report. */
+    discard(): Promise<void>
+    /** The prepared report as text, onto the clipboard (to paste into an email). */
+    copy(id: string): Promise<void>
+    /** Opens an email to support with the prepared report in it. */
+    email(id: string): Promise<void>
   }
   /** Automatic updates: the buyer's download key (main/update-key.ts). The page never sees the key itself. */
   updateKey: {

@@ -48,6 +48,21 @@
               "offset": { "type": "number" },
               "confidence": { "type": "number", "description": "how far the sound's best match stood out from the next (sync-angles)" }
             }
+          },
+          "mirrorCheck": {
+            "type": "object",
+            "description": "what `init` saw when it looked for a mirrored take (mirror_detect.py); never read by the render. `answer` = what the user then chose in the chat",
+            "required": ["verdict"],
+            "properties": {
+              "verdict": { "enum": ["mirrored", "maybe-mirrored", "as-filmed", "unsure", "unknown"] },
+              "why": { "type": "string" },
+              "camera": { "enum": ["front", "back"] },
+              "letters": {
+                "type": "object",
+                "properties": { "asFilmed": { "type": "integer", "minimum": 0 }, "flipped": { "type": "integer", "minimum": 0 } }
+              },
+              "answer": { "enum": ["flipped", "kept", "undone"] }
+            }
           }
         }
       }
@@ -167,7 +182,40 @@
           }
         },
         "fadeIn": { "type": "number", "minimum": 0, "maximum": 30, "description": "seconds the song takes to come in (absent = 0.6, or 0.05 with level loud-intro)" },
-        "fadeOut": { "type": "number", "minimum": 0, "maximum": 30 }
+        "fadeOut": { "type": "number", "minimum": 0, "maximum": 30 },
+        "beats": {
+          "type": "object",
+          "description": "the song's beat grid, stored once when the song is chosen: each beat a whole frame of song time at fps, measured on the file whose SHA-256 it names (another file's grid is ignored)",
+          "required": ["fps", "frames", "seconds", "sha256"],
+          "properties": {
+            "fps": { "type": "number", "exclusiveMinimum": 0 },
+            "frames": { "type": "array", "items": { "type": "integer", "minimum": 0 } },
+            "seconds": { "type": "number", "minimum": 0, "description": "the song's length" },
+            "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+          }
+        },
+        "onBeat": {
+          "type": "array",
+          "description": "what lands on the song's beats: jump cuts, zoom punch-ins, b-roll entrances",
+          "items": { "enum": ["cuts", "zooms", "broll"] },
+          "uniqueItems": true
+        },
+        "drops": {
+          "type": "array",
+          "description": "lines the music drops out for: gone just before `from`, back on the first beat after `to`",
+          "items": {
+            "type": "object",
+            "required": ["from", "to"],
+            "properties": { "from": { "$ref": "#/$defs/wordId" }, "to": { "$ref": "#/$defs/wordId" } }
+          }
+        }
+      }
+    },
+    "voice": {
+      "type": "object",
+      "description": "effects on the voice",
+      "properties": {
+        "reverbThrow": { "type": "boolean", "description": "an echo tail on the last word: the voice's final 0.7 s rings out" }
       }
     },
     "broll": {

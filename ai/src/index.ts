@@ -34,7 +34,7 @@ import { nicheTurn, NicheTurnInput, NicheTurnResult } from './niche';
 import { proposeTry, type TryProposal, type TryRequest } from './trial';
 import { proposeReels, type ProposeReelsRequest, type ReelProposal } from './propose';
 import { proposeFromArchive, type ArchiveProposal, type ArchiveRequest } from './propose-archive';
-import { refuseIfOpen } from './owner';
+import { assertOwner, claimProject } from './owner';
 import { FirstEdit, Plan, PlanChange, PlanView, emptyPlan, followHandEdit, readPlan, toMarkdown, updatePlan } from './plan';
 import { proposePlan } from './planAgent';
 
@@ -43,7 +43,7 @@ export { StockSearch } from './stock';
 export type { StockProvider, StockKind, StockResult } from './stock';
 export * from './project';
 export * from './version-merge';
-export { refuseIfOpen, OWNER_LOCK } from './owner';
+export { refuseIfOpen, assertOwner, OWNER_LOCK } from './owner';
 export { TOOLS, TOOL_NAMES, toolSchemas, executeTool, newToolState } from './tools';
 export { CUT_STYLES } from './cut-style';
 export type { CutPreset } from './cut-style';
@@ -285,17 +285,30 @@ export function createAI(opts: CreateAIOptions) {
   const prompts = new Prompts(opts.promptsDir ?? defaultPromptsDir());
   const style = new StyleStore(() => opts.host.reelStudioRoot());
   // One edit at a time per project (the app may double-click; the CLI may race). `owner`: the token of
-  // the app job that has the project (owner.ts); without one (the dev CLI) the edit also refuses while
-  // the app has the project open.
+  // the app job that has the project (owner.ts), which must still be the lock's; without one (the dev CLI)
+  // the edit claims the project for itself and runs with its own token. `fn` gets the token the edit runs with.
   const locks = new Map<string, Promise<unknown>>();
-  function exclusive<T>(dir: string, owner: string | undefined, fn: () => Promise<T>): Promise<T> {
+  function exclusive<T>(dir: string, owner: string | undefined, fn: (owner: string) => Promise<T>): Promise<T> {
     const key = path.resolve(dir).toLowerCase();
     const prev = locks.get(key) ?? Promise.resolve();
     // in-process queue, plus a lock FILE every edit holds for its whole run, so two edits in different
     // processes (the app and the dev CLI, or two dev CLIs) never run on one project at once
-    const run = prev.catch(() => undefined).then(() => {
-      if (!owner) refuseIfOpen(dir);
-      return withEditLock(dir, fn);
+    const run = prev.catch(() => undefined).then(async () => {
+      if (owner) {
+        assertOwner(dir, owner);
+        return withEditLock(dir, () => fn(owner));
+      }
+      const claim = await claimProject(dir);
+      // part of an engine that would not stop may still write: the project stays claimed
+      let stuck = false;
+      try {
+        return await withEditLock(dir, () => fn(claim.token));
+      } catch (e: any) {
+        stuck = e?.code === 'ENGINE_STUCK';
+        throw e;
+      } finally {
+        if (!stuck) await claim.release().catch(() => undefined);
+      }
     });
     // The lock's copy of the run must never reject on its own: the caller gets `run` and handles
     // its error; an unobserved rejected `finally` copy is an unhandled rejection in Node.
@@ -1137,7 +1150,7 @@ export function createAI(opts: CreateAIOptions) {
     },
     /** `opts.pauseOn`: an AI failure the app pauses on (editor.ts EditorDeps.pauseOn) instead of a basic version. */
     async firstEdit(projectDir: string, onEvent: (e: AgentEvent) => void, signal?: AbortSignal, opts: { owner?: string; basic?: boolean; pauseOn?: (e: AIError) => boolean } = {}): Promise<AgentResult & { notice?: any }> {
-      return exclusive(projectDir, opts.owner, () => edit(opts.owner, async (d) => {
+      return exclusive(projectDir, opts.owner, (owner) => edit(owner, async (d) => {
         if (opts.basic) return editor.firstEdit(d, null, projectDir, onEvent, signal);
         // each role asks for its own model (Settings › Editor › Models)
         const fell: string[] = [];
@@ -1150,7 +1163,7 @@ export function createAI(opts: CreateAIOptions) {
       }));
     },
     async applyNote(projectDir: string, note: string, onEvent: (e: AgentEvent) => void, signal?: AbortSignal, opts: editor.ApplyNoteOptions & { owner?: string } = {}): Promise<AgentResult> {
-      return exclusive(projectDir, opts.owner, () => edit(opts.owner, async (d) => {
+      return exclusive(projectDir, opts.owner, (owner) => edit(owner, async (d) => {
         const fell: string[] = [];
         const provider = await modelProvider('editor', fell);
         const harness = await noteHarness(provider);
@@ -1169,7 +1182,7 @@ export function createAI(opts: CreateAIOptions) {
       return !!planFastNote(note, await loadProject(projectDir));
     },
     async mergeVersions(projectDir: string, request: import('./version-merge').MergeRequest, onEvent: (e: AgentEvent) => void, signal?: AbortSignal, opts: { owner?: string; id?: string } = {}): Promise<editor.MergeEditResult> {
-      return exclusive(projectDir, opts.owner, () => edit(opts.owner, (d) => editor.saveMerge(d, projectDir, request, onEvent, signal, opts)));
+      return exclusive(projectDir, opts.owner, (owner) => edit(owner, (d) => editor.saveMerge(d, projectDir, request, onEvent, signal, opts)));
     },
     /** What two saved versions differ in, for choosing which version each part comes from when combining them. */
     async mergeLayers(projectDir: string, ours: number, theirs: number): Promise<MergeLayer[]> {
@@ -1211,7 +1224,7 @@ export function createAI(opts: CreateAIOptions) {
     },
     /** The AI proposes the plan (plan.ts) before the first edit; it changes only `plan`. */
     async proposePlan(projectDir: string, onEvent: (e: AgentEvent) => void, signal?: AbortSignal, opts: { owner?: string } = {}): Promise<{ summary: string; plan: Plan }> {
-      return exclusive(projectDir, opts.owner, () => edit(opts.owner, async (d) => proposePlan(d, await modelProvider(), projectDir, onEvent, signal)));
+      return exclusive(projectDir, opts.owner, (owner) => edit(owner, async (d) => proposePlan(d, await modelProvider(), projectDir, onEvent, signal)));
     },
     /** The creator's side of the plan: read it, change it, and carry it as markdown. The app runs `change`
      * and `importMarkdown` as held edits, so it is the project's only writer meanwhile. */
@@ -1276,7 +1289,7 @@ function editHost(host: EngineHost, owner: string | undefined) {
           throw e;
         }
       },
-      renderAnimation: (template, params, outPath) => host.renderAnimation(template, params, outPath),
+      renderAnimation: (template, params, outPath, fps) => host.renderAnimation(template, params, outPath, fps),
       reelStudioRoot: () => host.reelStudioRoot(),
       ...(host.captureWebsite ? { captureWebsite: host.captureWebsite.bind(host) } : {}),
       // a search_footage hit is copied into the Library by the app; without this a note could find footage but never place it

@@ -1,0 +1,23 @@
+{
+  "id": "receipt",
+  "label": "Receipt with its source",
+  "description": "A screenshot shown as proof (a post, a headline, a review), placed like card-above-head, with a small dark label on its top edge naming where it is from (params.text, e.g. \"The New York Times\" or \"@someone on X\").",
+  "hidesFace": false,
+  "assetKinds": [
+    "image"
+  ],
+  "params": {
+    "text": {
+      "default": null,
+      "help": "the source, a few words"
+    },
+    "tilt": {
+      "default": -2.0,
+      "help": "degrees"
+    },
+    "scale": {
+      "default": 1.0,
+      "help": "1.0 = as big as fits"
+    }
+  }
+}

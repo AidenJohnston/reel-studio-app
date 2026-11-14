@@ -7,7 +7,7 @@ import { join } from 'node:path'
 import { EventEmitter } from 'node:events'
 import { describe, expect, it } from 'vitest'
 import type { UpdateCheckResult, UpdateInfo } from 'electron-updater'
-import { SAME_FOR_EVERYONE, UPDATE_FEED_URL, electronUpdaterBackend, installerRefusal, macBundleCheck, windowsInstaller, windowsInstallerFacts, type InstallStep, type UpdaterLike, type WindowsInstallerFacts } from '../src/main/updater-electron'
+import { SAME_FOR_EVERYONE, STAGING_FEED_URL, UPDATE_FEED_URL, electronUpdaterBackend, installerRefusal, macBundleCheck, windowsInstaller, windowsInstallerFacts, type InstallStep, type UpdaterLike, type WindowsInstallerFacts } from '../src/main/updater-electron'
 import { LATEST_URL, UPDATE_PAGE, type FetchLike } from '../src/main/update-check'
 import { createUpdater } from '../src/main/updater'
 import { updateAction } from '../src/shared/update'
@@ -221,7 +221,8 @@ it.skipIf(process.platform !== 'darwin')('fails if installation accepts a mismat
   const root = mkdtempSync(join(tmpdir(), 'rs-update-bundle-'))
   try {
     const app = join(root, 'Reel Studio.app')
-    mkdirSync(join(app, 'Contents'), { recursive: true })
+    mkdirSync(join(app, 'Contents', 'Resources'), { recursive: true })
+    writeFileSync(join(app, 'Contents', 'Resources', 'app-update.yml'), appUpdateYml(UPDATE_FEED_URL))
     for (const version of ['0.1.4', '0.1.1', '0.1.3']) {
       writeFileSync(join(app, 'Contents', 'Info.plist'), `<?xml version="1.0"?><plist version="1.0"><dict><key>CFBundleShortVersionString</key><string>${version}</string></dict></plist>`)
       const zip = join(root, version + '.zip')
@@ -236,6 +237,39 @@ it.skipIf(process.platform !== 'darwin')('fails if installation accepts a mismat
         backend.install()
       } else await expect(backend.verify()).rejects.toThrow(/bundle version/)
       expect(installed).toBe(version === '0.1.3')
+    }
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
+/** What electron-builder writes into the bundle from packaging/electron-builder.yml `publish`. */
+const appUpdateYml = (url: string) => `provider: generic\nurl: ${url}\nupdaterCacheDirName: reel-studio-updater\n`
+
+it.skipIf(process.platform !== 'darwin')('fails if a signed update of the right version moves this copy between the production and staging servers', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'rs-update-feed-'))
+  try {
+    const bundle = (name: string, yml: string | null): string => {
+      const app = join(root, name, 'Reel Studio.app')
+      mkdirSync(join(app, 'Contents', 'Resources'), { recursive: true })
+      writeFileSync(join(app, 'Contents', 'Info.plist'), '<?xml version="1.0"?><plist version="1.0"><dict><key>CFBundleShortVersionString</key><string>0.1.3</string></dict></plist>')
+      if (yml !== null) writeFileSync(join(app, 'Contents', 'Resources', 'app-update.yml'), yml)
+      const zip = join(root, `${name}.zip`)
+      execFileSync('/usr/bin/ditto', ['-c', '-k', '--keepParent', app, zip])
+      return zip
+    }
+    const production = bundle('production', appUpdateYml(UPDATE_FEED_URL))
+    const staging = bundle('staging', appUpdateYml(STAGING_FEED_URL))
+    // a feed one path segment off staging's is neither server
+    const elsewhere = bundle('elsewhere', appUpdateYml(`${STAGING_FEED_URL}x/`))
+    const none = bundle('none', null)
+    await expect(macBundleCheck('0.1.2').verify(production, '0.1.3')).resolves.toBeUndefined()
+    await expect(macBundleCheck('0.1.2').verify(staging, '0.1.3')).rejects.toThrow(/staging build, and this copy updates from production/)
+    await expect(macBundleCheck('0.1.2', true).verify(staging, '0.1.3')).resolves.toBeUndefined()
+    await expect(macBundleCheck('0.1.2', true).verify(production, '0.1.3')).rejects.toThrow(/production build, and this copy updates from staging/)
+    for (const zip of [elsewhere, none]) {
+      await expect(macBundleCheck('0.1.2').verify(zip, '0.1.3')).rejects.toThrow(/no known update server/)
+      await expect(macBundleCheck('0.1.2', true).verify(zip, '0.1.3')).rejects.toThrow(/no known update server/)
     }
   } finally {
     rmSync(root, { recursive: true, force: true })

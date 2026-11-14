@@ -28,6 +28,8 @@ export interface AgentResult {
   styleProposal?: StyleProposal
   /** Rules the app would measure on every render, measured on this version, answered with answerStyleQuestion. */
   styleChecks?: { text: string; check: RuleCheck }[]
+  /** Takes the AI would have flipped, but the user had said they are the right way round (shared/mirror.ts). */
+  mirrorDeclined?: string[]
   /** Set when the AI stopped early and a simpler edit was made instead. */
   notice?: UserFacingError
   /** the model that made this version ("Claude Sonnet 5.5 · High"); absent for a basic version */

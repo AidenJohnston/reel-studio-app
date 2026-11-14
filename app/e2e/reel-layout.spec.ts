@@ -162,6 +162,10 @@ test("fails if a version line's few words and the model that made it print over 
           const out: string[] = []
           if (f.right > b.left + 0.5 && f.bottom > b.top && f.top < b.bottom) out.push(`the words end ${Math.round(f.right - b.left)} px into the model's name`)
           if (fact.scrollWidth > fact.clientWidth + 1) out.push('the words run past their box')
+          // the row's last control, What changed, stays inside the column (a 6em model name pushed it out at 1100x720)
+          const link = document.querySelector('[data-testid=what-changed-1]')
+          const row = link?.closest('.nt-res')
+          if (link && row && link.getBoundingClientRect().right > row.getBoundingClientRect().right + 0.5) out.push('What changed runs past the column')
           return out
         })
       await expect.poll(problems, { message: `${size[0]}x${size[1]}` }).toEqual([])
