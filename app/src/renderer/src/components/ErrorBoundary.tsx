@@ -29,6 +29,9 @@ export class ErrorBoundary extends Component<{ children: ReactNode; onReset: () 
             <Button kind="primary" onClick={() => { this.setState({ error: null }); this.props.onReset() }}>
               Back to Reels
             </Button>
+            <Button kind="tertiary" onClick={() => openReportProblem(`This screen hit a problem (${String(this.state.error?.message ?? '').slice(0, 200)})`)} data-testid="screen-error-report">
+              Report a problem
+            </Button>
           </div>
         </div>
       </div>
