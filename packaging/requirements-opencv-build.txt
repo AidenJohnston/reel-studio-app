@@ -1,0 +1,16 @@
+# Build tools for packaging/build_opencv_mac.py, which compiles OpenCV for the macOS bundle. Never shipped.
+# The list is what opencv-python's own pyproject.toml asks for under CPython 3.11, plus their dependencies:
+#   numpy 2.0.2 and setuptools 59.2.0 are opencv-python's own pins for 3.11.
+#   wheel 0.45.1 is the last release with its own bdist_wheel; 0.46+ hands it to setuptools >= 70.1, which the
+#     59.2.0 pin rules out.
+#   cmake 3.31 (not 4.x): OpenCV's bundled third-party CMake files predate 4.x, and 3.23+ is needed for
+#     CMAKE_IGNORE_PREFIX_PATH.
+# Edit, then run `python packaging/hash_requirements.py` and commit both files.
+cmake==3.31.10
+distro==1.9.0
+numpy==2.0.2
+packaging==26.3
+pip==26.3
+scikit-build==0.18.1
+setuptools==59.2.0
+wheel==0.45.1

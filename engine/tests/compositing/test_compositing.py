@@ -199,7 +199,12 @@ def test_missing_asset_is_skipped_with_user_message(tmp_path, media):
     fx.set_project(ctx, broll=[_item(ctx, 1, 3.0, 5.0, "card-above-head", tmp_path / "nope.png")])
     assert broll.build_layers(ctx) == []
     rec = json.loads((ctx.work / "layers" / "layers.json").read_text())["items"][0]
-    assert "missing" in rec["skipped"].lower()
+    # the missing-file message the user sees, not the developer detail; compared with the error itself so a copy
+    # rewording (d54aae4d dropped the word "missing") does not break this
+    with pytest.raises(EngineError) as missing:
+        broll._asset_path(ctx, str(tmp_path / "nope.png"))
+    assert missing.value.code == "ASSET_MISSING"
+    assert rec["skipped"] == missing.value.user_message
 
 
 def test_post_wall_builds_one_tile_per_word(tmp_path, media):

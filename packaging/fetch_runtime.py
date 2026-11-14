@@ -49,7 +49,7 @@ LICENSES = HERE / "licenses"
 REQUIRED_LICENSES = {
     "gpl-3.0.txt": "3972dc9744f6499f0f9b2dbf76696f2ae7ad8af9b23dde66d6af86c9dfb36986",   # FFmpeg/x264/x265 builds
     "lgpl-3.0.txt": "e3a994d82e644b03a792a930f574002658412f62407f5fee083f2555c5f23118",  # libheif, libde265 (pi-heif)
-    "lgpl-2.1.txt": "20e50fe7aae3e56378ebf0417d9de904f55a0e61e4df315333e632a4d3555d95",  # FFmpeg libs inside the opencv wheel
+    "lgpl-2.1.txt": "20e50fe7aae3e56378ebf0417d9de904f55a0e61e4df315333e632a4d3555d95",  # FFmpeg in the Windows opencv wheel
     "yunet-MIT.txt": "c83b8120c50ccbd4c4f96edf53141bdd566ebb8f8e9227e415326aa1b1aba958", # YuNet face model
     "t3code-MIT.txt": "935d8f2af0c703f9c39517ee57cc4930b19d02d533be930b63f0e82f93614b43", # first run's Mac checklist and helper
 }
@@ -279,6 +279,28 @@ def dir_size(p: Path) -> int:
     return total
 
 
+OPENCV_PIN = re.compile(r"^opencv-python-headless==\S+(?: \\\n[ \t]+--hash=sha256:[0-9a-f]{64})+\n", re.M)
+
+
+def mac_requirements() -> tuple:
+    """requirements-runtime.hashed.txt with PyPI's opencv-python-headless swapped for the FFmpeg-free wheel that
+    build_opencv_mac.py builds from source: every macOS arm64 wheel on PyPI bundles GPL x264/x265 (see that script).
+    The swapped entry is pinned to the built wheel's own SHA-256, which build_opencv_mac.py recorded after its
+    content check."""
+    import build_opencv_mac
+    wheel, record = build_opencv_mac.ensure_wheel()
+    text, n = OPENCV_PIN.subn(lambda _m: "opencv-python-headless @ %s --hash=sha256:%s\n" % (wheel.as_uri(), record["wheel"]["sha256"]),
+                              REQUIREMENTS_HASHED.read_text(encoding="utf-8"))
+    if n != 1:
+        raise SystemExit("expected one opencv-python-headless entry in %s, found %d" % (REQUIREMENTS_HASHED.name, n))
+    out = CACHE / "requirements-runtime.mac-arm64.txt"
+    CACHE.mkdir(parents=True, exist_ok=True)
+    with out.open("w", encoding="utf-8", newline="\n") as f:  # Path.write_text(newline=) needs Python 3.10
+        f.write(text)
+    return out, {"wheel": record["wheel"]["file"], "sha256": record["wheel"]["sha256"], "sdist_sha256": record["sdist"]["sha256"],
+                 "cmake_args": record["cmake_args"], "build_seconds": record["build_seconds"]}
+
+
 def install_python(plat: str, rt: Path, no_pip: bool) -> dict:
     spec = PLATFORMS[plat]["python"]
     arc = download(spec)
@@ -297,10 +319,13 @@ def install_python(plat: str, rt: Path, no_pip: bool) -> dict:
     env["PYTHONNOUSERSITE"] = "1"
     env["PIP_DISABLE_PIP_VERSION_CHECK"] = "1"
     env["PIP_NO_INPUT"] = "1"
+    requirements = REQUIREMENTS_HASHED
+    if plat == "mac-arm64":
+        requirements, info["opencv"] = mac_requirements()
     # --require-hashes: every wheel must match a SHA-256 in the file; --no-deps: the file is the complete closure.
     cmd = [str(py), "-I", "-m", "pip", "install", "--no-cache-dir", "--only-binary", ":all:", "--require-hashes", "--no-deps",
-           "--no-warn-script-location", "-r", str(REQUIREMENTS_HASHED)]
-    log("pip install --require-hashes -r %s" % REQUIREMENTS_HASHED.name)
+           "--no-warn-script-location", "-r", str(requirements)]
+    log("pip install --require-hashes -r %s" % requirements.name)
     subprocess.run(cmd, check=True, env=env)
     freeze = subprocess.run([str(py), "-I", "-m", "pip", "freeze"], check=True, env=env, stdout=subprocess.PIPE, universal_newlines=True).stdout
     info["pip_freeze"] = sorted(l.strip() for l in freeze.splitlines() if l.strip())
@@ -348,7 +373,8 @@ def install_ffmpeg(plat: str, rt: Path) -> dict:
 
 
 # GPL x264/x265 libraries must never be in the Python runtime: the only x264 we ship is our own ffmpeg, a separate GPL
-# program with its source offered. PyAV's wheels carry both, which is why engine/requirements.txt leaves PyAV out.
+# program with its source offered. PyAV's wheels carry both, which is why engine/requirements.txt leaves PyAV out;
+# so do PyPI's macOS wheels of opencv-python-headless, which is why build_opencv_mac.py builds that one without FFmpeg.
 GPL_CODEC_LIB = re.compile(r"^libx26[45]", re.IGNORECASE)
 
 
@@ -363,7 +389,7 @@ def smoke(plat: str, rt: Path) -> None:
     py = python_exe(rt, plat)
     model = REPO / "engine" / "reelengine" / "models" / "face_detection_yunet_2023mar.onnx"
     code = (
-        "import importlib.util, sys, os\n"
+        "import importlib.util, sys, os, re\n"
         "if importlib.util.find_spec('av') is not None:\n"
         "    sys.exit('PyAV is installed: its wheels bundle GPL x264/x265. Keep it out of engine/requirements.txt.')\n"
         # the engine (shipped as source next to the runtime) stands in for PyAV before faster-whisper imports it
@@ -385,8 +411,12 @@ def smoke(plat: str, rt: Path) -> None:
         "    face = 'FaceDetectorYN ok'\n"
         "else:\n"
         "    face = 'FaceDetectorYN skipped (model not found)'\n"
+        # the macOS OpenCV is built without FFmpeg (build_opencv_mac.py); a PyPI wheel slipping back in would say YES
+        "if sys.argv[3] == 'no-ffmpeg' and re.search(r'FFMPEG:\\s+YES', cv2.getBuildInformation()):\n"
+        "    sys.exit('this OpenCV was built with FFmpeg; the macOS runtime must use build_opencv_mac.py')\n"
         "print('smoke ok numpy', numpy.__version__, 'cv2', cv2.__version__, 'ct2', ctranslate2.__version__, 'pi_heif', pi_heif.__version__, face)\n")
-    subprocess.run([str(py), "-I", "-c", code, str(model), str(REPO / "engine")], check=True)
+    subprocess.run([str(py), "-I", "-c", code, str(model), str(REPO / "engine"),
+                    "no-ffmpeg" if plat == "mac-arm64" else "-"], check=True)
 
 
 def up_to_date(rt: Path, fingerprint: dict) -> bool:
@@ -430,6 +460,9 @@ def main() -> None:
     req_hash = sha256_of(REQUIREMENTS_HASHED)
     manifest_path = rt / "runtime-manifest.json"
     fingerprint = {"pbs": PBS_TAG + PBS_PY, "req": req_hash, "licenses": [sha256_of(LICENSES / n) for n in sorted(REQUIRED_LICENSES)], "ffmpeg": [PLATFORMS[plat][k]["sha256"] for k in PLATFORMS[plat] if k.endswith("_zip")]}
+    if plat == "mac-arm64":
+        import build_opencv_mac
+        fingerprint["opencv"] = build_opencv_mac.cache_key()
     if not args.force and not args.no_pip and up_to_date(rt, fingerprint):
         log("runtime for %s is up to date (use --force to rebuild)" % plat)
         return

@@ -1,0 +1,62 @@
+name: Release
+
+# On a version tag: build the installers and open a draft GitHub release whose notes come from the merged PRs'
+# "Changelog:" lines (CONTRIBUTING.md). The draft carries no binaries: signed installers are uploaded and published by
+# hand, and a draft stays invisible to installed apps.
+on:
+  push:
+    tags: ['v*', '!v*-*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing version tag, such as v0.1.5.
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    uses: ./.github/workflows/build-installers.yml
+    with:
+      label: ${{ inputs.tag || github.ref_name }}
+      ref: ${{ inputs.tag || github.ref_name }}
+      retention-days: 90
+
+  draft:
+    name: Draft release notes
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ inputs.tag || github.ref_name }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Collect Changelog lines and draft the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ inputs.tag || github.ref_name }}
+        run: |
+          prev=$(git describe --tags --abbrev=0 --exclude '*-*' "$TAG^" 2>/dev/null || true)
+          range=${prev:+$prev..}$TAG
+          {
+            echo "## What's new"
+            echo
+            for pr in $(git log --format=%s "$range" | grep -oE '\(#[0-9]+\)$' | tr -d '(#)'); do
+              line=$(gh pr view "$pr" --json body --jq .body | grep -m1 -E '^Changelog:' | sed 's/^Changelog:[[:space:]]*//')
+              case "$line" in ''|None*|none*) ;; *) echo "- $line (#$pr)" ;; esac
+            done
+            echo
+            echo "Installers from this commit (unsigned) are attached to the Release workflow run. Signed installers are added before publishing."
+          } > notes.md
+          cat notes.md
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release edit "$TAG" --notes-file notes.md
+          else
+            gh release create "$TAG" --draft --verify-tag --title "$TAG" --notes-file notes.md
+          fi
