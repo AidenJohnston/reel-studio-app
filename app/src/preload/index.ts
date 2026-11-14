@@ -84,6 +84,7 @@ const api: ReelApi = {
     finishFirstRun: () => call('app:finishFirstRun'),
     openFolder: (p) => call('app:openFolder', p),
     copyText: (t) => call('app:copyText', t),
+    copyDiagnostics: () => call('app:copyDiagnostics'),
     dimTitleBar: (on) => call('app:dimTitleBar', on),
     titleBarOnStage: (on) => call('app:titleBarOnStage', on),
     pathForFile: (f) => webUtils.getPathForFile(f),

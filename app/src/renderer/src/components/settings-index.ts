@@ -56,6 +56,7 @@ export const SETTINGS = {
   'whats-new': { section: 'about', label: 'What’s new', synonyms: ['whats new', 'changelog', 'release notes', 'changes', 'new features'] },
   'engine-cache': { section: 'advanced', label: 'Cache', synonyms: ['clear cache', 'engine', 'disk', 'space', 'storage', 'free up', 'temporary', 'song analysis', 'delete'] },
   logs: { section: 'advanced', label: 'Logs', synonyms: ['log', 'show logs', 'diagnostics', 'debug', 'troubleshoot', 'problem', 'bug', 'report', 'crash', 'support'] },
+  diagnostics: { section: 'advanced', label: 'Copy diagnostics', synonyms: ['diagnostics', 'bug report', 'report', 'problem', 'support', 'troubleshoot', 'debug', 'crash', 'help', 'version', 'system info'] },
   'first-run': { section: 'advanced', label: 'Reset first run', synonyms: ['first run', 'onboarding', 'welcome', 'sample', 'setup', 'start over', 'tutorial', 'intro', 'reset'] }
 } as const satisfies Record<string, { section: SectionId; label: string; synonyms: readonly string[]; needs?: string }>
 

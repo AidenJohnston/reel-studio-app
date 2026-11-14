@@ -169,6 +169,19 @@ export function Settings({ info, onInfo, section }: { info: AppInfo; onInfo: (i:
   const alertsOn = pending && pending !== 'folder' ? pending.notifications : alerts !== 'off'
   const isMac = info.platform === 'darwin'
 
+  const [diagnostics, setDiagnostics] = useState<'idle' | 'busy' | 'copied'>('idle')
+  const copyDiagnostics = async () => {
+    setDiagnostics('busy')
+    try {
+      await reel.app.copyDiagnostics()
+      setDiagnostics('copied')
+      notify('Copied. Paste it into your bug report.')
+    } catch (e) {
+      setDiagnostics('idle')
+      notify(userMessage(e), 'error')
+    }
+  }
+
   const change = async () => {
     const p = await reel.app.chooseFolder()
     if (!p) return
@@ -384,7 +397,7 @@ export function Settings({ info, onInfo, section }: { info: AppInfo; onInfo: (i:
               <StockKeys />
               <Subhead ids={['easy-ai']}>Being tested</Subhead>
               <EasyAiRow onError={(m) => notify(m, 'error')} />
-              <Subhead ids={['engine-cache', 'logs', 'first-run']}>Troubleshooting</Subhead>
+              <Subhead ids={['engine-cache', 'logs', 'diagnostics', 'first-run']}>Troubleshooting</Subhead>
               <CacheRow shared={sharedModel} onError={(m) => notify(m, 'error')} />
               <SettingRow
                 id="logs"
@@ -392,6 +405,15 @@ export function Settings({ info, onInfo, section }: { info: AppInfo; onInfo: (i:
                 control={
                   <button className="btn small" onClick={() => void reel.app.showLogs().catch((e) => notify(userMessage(e), 'error'))} data-testid="show-logs">
                     Show logs
+                  </button>
+                }
+              />
+              <SettingRow
+                id="diagnostics"
+                line="For a bug report: which version you have, what computer it runs on, how your AI editor answered and what the app did recently. Your user name, e-mail addresses and keys are taken out; your videos' file names can still show."
+                control={
+                  <button className="btn small" onClick={() => void copyDiagnostics()} disabled={diagnostics === 'busy'} data-testid="copy-diagnostics">
+                    {diagnostics === 'copied' ? 'Copied' : diagnostics === 'busy' ? 'Copying…' : 'Copy diagnostics'}
                   </button>
                 }
               />
