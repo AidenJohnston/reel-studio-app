@@ -75,6 +75,7 @@ const api: ReelApi = {
     cancelConnect: () => call('linkedin:cancelConnect'),
     disconnect: () => call('linkedin:disconnect'),
     publish: (input) => call('linkedin:publish', input)
+  },
   support: {
     capture: () => call('support:capture'),
     prepare: (d) => call('support:prepare', d),
