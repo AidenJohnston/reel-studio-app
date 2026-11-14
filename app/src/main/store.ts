@@ -26,6 +26,7 @@ import type {
   QueuedNote
 } from '../shared/api'
 import { mediaUrl } from './media-url'
+import { claimProject } from './owner'
 import { COPY_GONE, POSTER, canCopyAgain } from './first-video'
 import type { ReelSeed } from './propose-reels'
 import type { ArchiveSeed } from './archive-reels'
@@ -571,7 +572,20 @@ export async function recoverInterrupted(stillRunning: string[] = []): Promise<s
       continue
     }
     if (stillRunning.includes(slug)) continue // an engine of the last run may still write there
-    if ((await settleInterrupted(slug)) === 'settled') recovered.push(slug)
+    // Cleaning is writing: it claims the project first (docs/ownership.md). One a tool run by hand holds, or whose
+    // former writer's engines still run, is left for the next start or the next job on it, which settles it too.
+    const dir = projectDir(slug)
+    if (!existsSync(join(dir, 'app.json'))) continue
+    const owner = await claimProject(dir).catch((e) => {
+      if ((e as { code?: unknown })?.code === 'PROJECT_IN_USE') return null
+      throw e
+    })
+    if (!owner) continue
+    try {
+      if ((await settleInterrupted(slug)) === 'settled') recovered.push(slug)
+    } finally {
+      await owner.release()
+    }
   }
   return recovered
 }

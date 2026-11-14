@@ -287,6 +287,9 @@ export function setAsrThreads(n: number | null): void {
 }
 
 /** Environment for every engine process. */
+/** A project's one writer (docs/ownership.md, owner.ts). */
+export const OWNER_LOCK = join('work', '.owner.lock')
+
 export function engineEnv(): NodeJS.ProcessEnv {
   const base = { ...env() }
   // Electron-hosted shells set this; it must never leak into child processes.

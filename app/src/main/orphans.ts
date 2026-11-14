@@ -6,8 +6,7 @@
 import { execFile } from 'node:child_process'
 import { closeSync, existsSync, fsyncSync, openSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync, writeSync } from 'node:fs'
 import { join } from 'node:path'
-import { OWNER_LOCK } from './owner'
-import { projectsDir } from './paths'
+import { OWNER_LOCK, projectsDir } from './paths'
 import { groupAlive, isAlive, killTree } from './proctree'
 
 /** `stop` ends a pid's process tree and reports whether all of it is gone (proctree killTree). */
@@ -183,7 +182,7 @@ export function projectFolders(): string[] {
 /** The folders a running engine or ffmpeg names in its arguments (an engine gets `--project`, its
  * ffmpeg the files it reads and writes there), or null when the processes cannot be listed. This only
  * reads: such a process may be an engine someone ran by hand, which is not the app's to stop. */
-async function stillWorking(folders: string[]): Promise<string[] | null> {
+export async function stillWorking(folders: string[]): Promise<string[] | null> {
   const procs = await processList()
   if (!procs) return null
   const working = procs.filter((p) => p.pid !== process.pid && (isOurEngine(p.cmdline) || FFMPEG.test(p.cmdline)))
@@ -266,6 +265,17 @@ async function leftRunning(pid: number, startedAt?: number): Promise<'ours' | 'u
     // it exited while being read: what it started may still run in its group
   }
   return process.platform !== 'win32' && groupAlive(pid) ? 'unsure' : 'gone'
+}
+
+/** Whether `pid` may still be the process that started at `startedAt` (ms, within SAME_START_MS): false once it has
+ * exited, or its number now belongs to a process that started at another time. A start time the system won't give
+ * (or none recorded) counts as the same process. */
+export async function processAlive(pid: number, startedAt?: number): Promise<boolean> {
+  if (!isAlive(pid)) return false
+  if (startedAt === undefined) return true
+  const p = await processInfo(pid)
+  if (!p || p.startedAt === null) return isAlive(pid)
+  return Math.abs(p.startedAt - startedAt) <= SAME_START_MS
 }
 
 /** For an engine reap already found to be ours: alive with a command line that can't be read (a slow

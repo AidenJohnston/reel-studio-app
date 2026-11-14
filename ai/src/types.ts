@@ -75,6 +75,9 @@ export interface EngineHost {
   /** A Footage/<folder>/<file> path from search_footage, copied into the Library: returns its Library/... path.
    * Only the app has footage folders (app main/footage-sources.ts). */
   importFootage?(ref: string): Promise<string>;
+  /** Calls `listener` with each engine process it starts from now on, until the returned function is called. Only
+   * a host whose engines outlive it can say: the dev CLI records them in its claim (owner.ts). */
+  watchSpawns?(listener: (pid: number) => void): () => void;
 }
 export interface CaptureResult { path: string; url: string; site: string; title: string; width: number; height: number }
 

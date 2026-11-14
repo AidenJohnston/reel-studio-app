@@ -293,6 +293,7 @@ export function createAI(opts: CreateAIOptions) {
         return withEditLock(dir, () => fn(owner));
       }
       const claim = await claimProject(dir);
+      const unwatch = opts.host.watchSpawns?.((pid) => void claim.addEngine(pid));
       // part of an engine that would not stop may still write: the project stays claimed
       let stuck = false;
       try {
@@ -301,6 +302,7 @@ export function createAI(opts: CreateAIOptions) {
         stuck = e?.code === 'ENGINE_STUCK';
         throw e;
       } finally {
+        unwatch?.();
         if (!stuck) await claim.release().catch(() => undefined);
       }
     });

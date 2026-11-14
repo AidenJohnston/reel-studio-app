@@ -1,16 +1,15 @@
-// One writer per project. Electron's single-instance lock (index.ts) is held by the OS until this process
-// dies, so no second app can be running, and inside the app the job lane (jobs.ts) runs one job or manual
-// edit per project at a time. work/.owner.lock makes that one writer exclusive across processes too: a job
-// creates it exclusively and passes its token to every engine command and AI edit it runs, which go ahead
-// only while the lock holds that token. Tools run by hand (the engine CLI, the AI dev CLI) claim the same
-// lock for as long as they run, so neither side starts while the other has the project
-// (engine/reelengine/owner.py, ai/src/owner.ts).
+// One writer per project (docs/ownership.md). Electron's single-instance lock (index.ts) means no second app runs,
+// and inside the app the job lane (jobs.ts) runs one job or manual edit per project at a time. work/.owner.lock makes
+// that one writer exclusive across processes too: the app's claim passes its token to every engine command and AI
+// edit it runs, which go ahead only while the lock holds that token, and tools run by hand (the engine CLI, the AI
+// dev CLI) claim the same lock for as long as they run (engine/reelengine/owner.py, ai/src/owner.ts).
 import { promises as fs } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { randomUUID } from 'node:crypto'
-import { projectsDir } from './paths'
+import { processAlive, stillWorking } from './orphans'
+import { OWNER_LOCK, projectsDir } from './paths'
 
-export const OWNER_LOCK = join('work', '.owner.lock')
+export { OWNER_LOCK }
 /** What the app writes as `app`; anything else in a lock was written by a tool run by hand. */
 const APP = 'Reel Studio'
 
@@ -19,77 +18,125 @@ export const PROJECT_IN_USE = {
   userMessage: 'A Reel Studio tool run outside the app is working on this video. Try again when it finishes.'
 }
 
-/** `token` goes to every engine command and AI edit the job runs (`--owner`). */
+/** `token` goes to every engine command and AI edit the claim's writer runs (`--owner`). */
 export interface ProjectOwner {
   token: string
   release(): Promise<void>
 }
 
-function alive(pid: number): boolean {
-  try {
-    process.kill(pid, 0)
-    return true
-  } catch (e) {
-    return (e as NodeJS.ErrnoException).code === 'EPERM'
-  }
+interface Identity {
+  app?: unknown
+  pid?: unknown
+  started?: unknown
+  token?: unknown
+  engines?: unknown
 }
 
-/** The lock belongs to a tool run by hand that is still running. `unreadable`: what a lock that can't be read
- * counts as. A claim counts it as held, since a tool writes its lock just after creating it; startup clears it,
- * since a tool killed in between would otherwise keep the video closed for good. */
-async function heldByHand(lock: string, unreadable: boolean): Promise<boolean> {
+type Held = { kind: 'absent' } | { kind: 'unreadable' } | { kind: 'held'; who: Identity }
+
+async function readLock(lock: string): Promise<Held> {
   let text: string
   try {
     text = await fs.readFile(lock, 'utf8')
   } catch (e) {
-    return (e as NodeJS.ErrnoException).code !== 'ENOENT' && unreadable
+    return (e as NodeJS.ErrnoException).code === 'ENOENT' ? { kind: 'absent' } : { kind: 'unreadable' }
   }
-  let held: { app?: unknown; pid?: unknown }
   try {
-    held = JSON.parse(text)
+    const who = JSON.parse(text)
+    return who && typeof who === 'object' ? { kind: 'held', who } : { kind: 'unreadable' }
   } catch {
-    return unreadable
+    return { kind: 'unreadable' }
   }
-  return held?.app !== APP && (typeof held?.pid !== 'number' || alive(held.pid))
 }
 
-/** Throws PROJECT_IN_USE while a tool run by hand has the project. A lock this app left (a job whose engine was
- * stuck, or a previous run's, which startup clears) or one whose tool has exited is taken over. */
+const startedOf = (v: unknown): number | undefined => (typeof v === 'number' && Number.isFinite(v) ? v : undefined)
+
+/** A lock a tool run by hand holds, and may still write under: its process (pid and start time) runs, an engine it
+ * recorded runs, or something running names the project's folder (orphans.ts). Unsure counts as still writing. */
+async function handWriterAlive(dir: string, who: Identity): Promise<boolean> {
+  if (typeof who.pid !== 'number' || (await processAlive(who.pid, startedOf(who.started)))) return true
+  const engines = Array.isArray(who.engines) ? who.engines : []
+  for (const e of engines) {
+    const pid = (e as { pid?: unknown })?.pid
+    if (typeof pid !== 'number' || (await processAlive(pid, startedOf((e as { started?: unknown }).started)))) return true
+  }
+  const working = await stillWorking([dir])
+  return working === null || working.length > 0
+}
+
+/** Whether `dir`'s lock may be taken over: absent, this app's (a previous run's, or a job's whose engine was stuck,
+ * which the job lane already keeps closed), or a tool's run by hand that has exited along with everything it started.
+ * An unreadable lock is never proof of abandonment: it may be one being written on a disk without hard links. */
+async function abandoned(dir: string, held: Held): Promise<boolean> {
+  if (held.kind !== 'held') return held.kind === 'absent'
+  if (held.who.app === APP) return true
+  return !(await handWriterAlive(dir, held.who))
+}
+
+/** Creates the lock whole: the identity goes to a file of its own first, which then becomes the lock by a hard link
+ * that fails if a lock exists. A disk with no hard links (FAT, exFAT) gets an exclusive create instead, and readers
+ * never take a lock they can't read. False when a lock exists. */
+async function createLock(lock: string, identity: object): Promise<boolean> {
+  const text = JSON.stringify(identity)
+  const tmp = `${lock}.${randomUUID()}.tmp`
+  const fh = await fs.open(tmp, 'wx')
+  try {
+    await fh.writeFile(text)
+    await fh.sync()
+  } finally {
+    await fh.close()
+  }
+  try {
+    await fs.link(tmp, lock)
+    return true
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code === 'EEXIST') return false
+    // A disk with no hard links (FAT, exFAT; libuv names it EPERM, ENOTSUP or EISDIR): an exclusive create instead,
+    // whose identity follows a moment later. A real failure fails this create too.
+    try {
+      await fs.writeFile(lock, text, { flag: 'wx' })
+      return true
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === 'EEXIST') return false
+      throw err
+    }
+  } finally {
+    await fs.rm(tmp, { force: true })
+  }
+}
+
+/** Throws PROJECT_IN_USE while another writer may have the project (abandoned). */
 export async function claimProject(dir: string): Promise<ProjectOwner> {
   const token = randomUUID()
   const lock = join(dir, OWNER_LOCK)
   await fs.mkdir(dirname(lock), { recursive: true })
-  for (let attempt = 0; ; attempt++) {
-    try {
-      const fh = await fs.open(lock, 'wx')
-      try {
-        await fh.writeFile(JSON.stringify({ app: APP, pid: process.pid, token }))
-        await fh.sync()
-      } finally {
-        await fh.close()
-      }
-      break
-    } catch (e) {
-      if ((e as NodeJS.ErrnoException).code !== 'EEXIST') throw e
-      // a second EEXIST: something claimed it between the removal and this try
-      if (attempt > 0 || (await heldByHand(lock, true))) throw PROJECT_IN_USE
-      await fs.rm(lock, { force: true })
+  const identity = { app: APP, pid: process.pid, started: Math.round(Date.now() - process.uptime() * 1000), token }
+  for (let attempt = 0; !(await createLock(lock, identity)); attempt++) {
+    // a second refusal: something claimed it between the removal and this try
+    if (attempt > 0 || !(await abandoned(dir, await readLock(lock)))) throw PROJECT_IN_USE
+    await fs.rm(lock, { force: true })
+  }
+  return {
+    token,
+    release: async () => {
+      const held = await readLock(lock)
+      if (held.kind === 'held' && held.who.token === token) await fs.rm(lock, { force: true })
     }
   }
-  return { token, release: () => fs.rm(lock, { force: true }) }
 }
 
-/** At startup, after leftover engines are stopped (orphans.ts) and before any job: every lock this app wrote was
- * left by an app that has quit or crashed, since this one holds the single-instance lock. `stillRunning`: projects
- * where something of that app's is still running; their locks stay, as does one a tool run by hand still holds. */
+/** At startup, after leftover engines are stopped and scanned for (orphans.ts) and before any job: removes the
+ * locks that may be taken over (abandoned). `stillRunning`: projects something of the last run's still writes to;
+ * their locks stay. */
 export async function clearStaleLocks(stillRunning: string[]): Promise<void> {
   const keep = new Set(stillRunning.map((dir) => resolve(dir)))
   const slugs = await fs.readdir(projectsDir()).catch(() => [] as string[])
   await Promise.all(slugs.filter((slug) => !keep.has(resolve(projectsDir(), slug))).map((slug) => clearStaleLock(join(projectsDir(), slug))))
 }
 
-/** Removes the project's lock unless a tool run by hand still holds it. */
+/** Removes the project's lock when it may be taken over (abandoned). */
 export async function clearStaleLock(dir: string): Promise<void> {
   const lock = join(dir, OWNER_LOCK)
-  if (!(await heldByHand(lock, false))) await fs.rm(lock, { force: true })
+  const held = await readLock(lock)
+  if (held.kind !== 'absent' && (await abandoned(dir, held))) await fs.rm(lock, { force: true })
 }

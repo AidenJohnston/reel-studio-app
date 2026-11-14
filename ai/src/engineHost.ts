@@ -57,8 +57,14 @@ export async function endTree(pid: number | undefined, fallback: () => void): Pr
 }
 
 export class PythonEngineHost implements EngineHost {
+  private readonly spawned = new Set<(pid: number) => void>();
   constructor(private readonly o: PythonEngineHostOptions = {}) {}
   reelStudioRoot(): string { return this.o.root ?? defaultRoot(); }
+
+  watchSpawns(listener: (pid: number) => void): () => void {
+    this.spawned.add(listener);
+    return () => { this.spawned.delete(listener); };
+  }
 
   async renderAnimation(template: string, params: Record<string, unknown>, outPath: string, fps?: number): Promise<string> {
     if (this.o.renderAnimation) return this.o.renderAnimation(template, params, outPath, fps);
@@ -75,6 +81,7 @@ export class PythonEngineHost implements EngineHost {
         // no ANTHROPIC_* in the engine's environment
         env: childEnv(process.env, { PYTHONIOENCODING: 'utf-8', PYTHONUTF8: '1', REELENGINE_ROOT: this.reelStudioRoot(), ...(this.o.env ?? {}) }),
       });
+      if (child.pid) for (const listener of this.spawned) listener(child.pid);
       let buf = ''; let done: any; let error: any; let errTail = '';
       const onLine = (line: string) => {
         if (!line.trim()) return;

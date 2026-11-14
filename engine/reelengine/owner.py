@@ -1,11 +1,11 @@
-"""One writer per project, shared by Reel Studio (the app) and commands run by hand.
+"""One writer per project, shared by Reel Studio (the app) and commands run by hand (docs/ownership.md).
 
-<project>/work/.owner.lock names the one writer. The app writes it for a job (app/src/main/owner.ts) and
-passes the job's token to every engine command the job runs (`--owner`): such a command goes ahead only
-while the lock holds that token. A command run by hand claims the lock itself for as long as it runs,
-created exclusively, so it refuses a project the app or another command has, and the app refuses to
-claim one it has. The app's own commands outside a job (REELENGINE_APP, set by app/src/main/paths.ts
-engineEnv) are ordered by its job lane instead, as before."""
+<project>/work/.owner.lock names the one writer. The app claims it for a job, a manual edit or one of its own
+commands, and passes the claim's token to every engine command it runs (`--owner`): such a command goes ahead only
+while the lock holds that token. A command run by hand claims the lock itself for as long as it runs, so it refuses a
+project the app or another command has, and the app refuses to claim one it has (app/src/main/owner.ts). A claim
+appears whole or not at all: the identity is written to a file of its own, which then becomes the lock by a hard
+link that fails if a lock exists."""
 from __future__ import annotations
 
 import json
@@ -15,6 +15,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Iterator, Optional
 
+from . import STARTED_AT
 from .proto import EngineError
 
 LOCK = Path("work") / ".owner.lock"
@@ -35,11 +36,40 @@ def _open(lock: Path) -> EngineError:
                        f"Reel Studio may be using this project. Close it, or delete {lock} if it isn't running.")
 
 
+def create(lock: Path, identity: dict) -> bool:
+    """Makes `lock` hold `identity`, whole. False when a lock exists."""
+    text = json.dumps(identity)
+    tmp = lock.with_name(f"{lock.name}.{uuid.uuid4().hex}.tmp")
+    with open(tmp, "x", encoding="utf-8") as fh:
+        fh.write(text)
+        fh.flush()
+        os.fsync(fh.fileno())
+    try:
+        try:
+            os.link(tmp, lock)
+            return True
+        except FileExistsError:
+            return False
+        except OSError:
+            # A disk with no hard links (FAT, exFAT; each system names it differently): an exclusive create instead,
+            # whose identity follows a moment later. The app never takes a lock it can't read, and a real failure
+            # fails this create too.
+            pass
+        try:
+            with open(lock, "x", encoding="utf-8") as fh:
+                fh.write(text)
+            return True
+        except FileExistsError:
+            return False
+    finally:
+        tmp.unlink(missing_ok=True)
+
+
 @contextmanager
 def claim(project_dir: Path, owner: Optional[str]) -> Iterator[None]:
     lock = Path(project_dir) / LOCK
     if owner:
-        # a stale or made-up token never joins: the job that held it has let go, or never held it
+        # a stale or made-up token never joins: the claim that held it has let go, or never existed
         if _token(lock) != owner:
             raise EngineError("NOT_OWNER", f"--owner does not match the token in {lock}",
                               "Reel Studio no longer has this video open for this step, so it stopped. Try again.")
@@ -52,12 +82,8 @@ def claim(project_dir: Path, owner: Optional[str]) -> Iterator[None]:
     made = [d for d in (lock.parent, *lock.parent.parents) if not d.exists()]
     lock.parent.mkdir(parents=True, exist_ok=True)
     token = uuid.uuid4().hex
-    try:
-        fd = os.open(lock, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o644)
-    except FileExistsError:
-        raise _open(lock) from None
-    with os.fdopen(fd, "w", encoding="utf-8") as fh:
-        json.dump({"app": "reelengine", "pid": os.getpid(), "token": token}, fh)
+    if not create(lock, {"app": "reelengine", "pid": os.getpid(), "started": round(STARTED_AT * 1000), "token": token}):
+        raise _open(lock)
     failed = True
     try:
         yield

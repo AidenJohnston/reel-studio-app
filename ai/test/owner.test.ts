@@ -82,4 +82,31 @@ describe('one writer per project', () => {
     expect(engine.map((c) => c.args[c.args.indexOf('--owner') + 1])).toEqual(engine.map(() => held.token));
     expect(fs.existsSync(lock)).toBe(false);
   });
+  it('fails if the dev CLI\'s claim leaves out an engine it started, which the app must wait for after a crash', async () => {
+    const { dir, host, settingsDir } = await setup();
+    const lock = path.join(dir, OWNER_LOCK);
+    // a host whose engines outlive it, as the dev CLI's PythonEngineHost does
+    const listeners = new Set<(pid: number) => void>();
+    host.watchSpawns = (listener) => { listeners.add(listener); return () => { listeners.delete(listener); }; };
+    const run = host.runEngine.bind(host);
+    host.runEngine = async (command, args, onProgress) => {
+      for (const listener of listeners) listener(4242);
+      return run(command, args, onProgress);
+    };
+    let recorded: { pid?: number }[] = [];
+    const m = new ScriptedModel([
+      { toolCalls: [call('render_draft')] },
+      async () => {
+        for (let i = 0; i < 100 && !recorded.length; i++) {
+          recorded = JSON.parse(await fsp.readFile(lock, 'utf8')).engines ?? [];
+          if (!recorded.length) await new Promise((r) => setTimeout(r, 10));
+        }
+        return { toolCalls: [call('finish', { summary_for_user: 'Done.' })] };
+      },
+    ]);
+    await createAI({ host, settingsDir, providerOverride: m }).applyNote(dir, 'show me', () => undefined);
+    expect(recorded).toEqual(expect.arrayContaining([expect.objectContaining({ pid: 4242, started: expect.any(Number) })]));
+    expect(listeners.size).toBe(0);
+    expect(fs.existsSync(lock)).toBe(false);
+  });
 });
