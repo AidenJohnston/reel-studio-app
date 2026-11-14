@@ -38,9 +38,13 @@ Recommendation: close each with a comment pointing at the release PR once it mer
 | Render engine (landed) | `port/0.2.0/engine` | #124, #116, #146, #156, #151, #149, #154, #155, #172, #173, #178, #180 |
 | UI (landed) | `port/0.2.0/ui` | #3, #133 (for #4), #17, #126, #130, #131, #132, #118, #147, #134, #142, #152, #174, #185 |
 | CI, updater, packaging (landed) | `port/0.2.0/ship` | CI green on all three OSes, #120, #121, #179, #123, #125, #136, #168, #169, #177 |
-| Second wave, after notes core and engine land | to be named | #157, #150, #184, #170, #171, #182, #183 |
+| Second wave, after notes core and engine land | `port/0.2.0/notes-core` (#183, #182, Aiden's style-consent branch), `port/0.2.0/engine` (#157, #150, #184), `port/0.2.0/ui` (#171) | #157, #150, #184, #171, #182, #183 |
 
 The second wave waits because those PRs are built on the new note flow from #140 (#182 contains #140; #170 and #184 contain #157; #175 says #157 and #150 were written against the note flow #140 replaces).
+
+## Waits for 0.2.1
+
+- **#170** (notes and hand edits stop at their draft; Export makes the full-quality file once). It can't go in without breaking the rule that a saved version is never rewritten. The release's version contract (docs/versions.md rules 1 to 4, from #139) says only a final render makes `versions/vN/`. #170 saves a version from its draft, and Export later writes `export.mp4` and `render.json` into that saved folder. #175 left #143 out for the same kind of change. #170 is also built on main plus #157 without #140, and its own description lists a `begin()`/`saveNote()` rework still owed. It adds a third way of recording what a version was made from (`reads.py`, using Python's audit hooks) beside the release's render identity and asset fingerprint. Making #170 fit means redesigning when a version exists, which belongs in its own PR after 0.2.0.
 
 ## Needs Sam
 
