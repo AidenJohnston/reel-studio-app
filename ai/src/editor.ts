@@ -8,7 +8,7 @@ import type { LookupFn } from './safety';
 import { Prompts } from './prompts';
 import { StyleStore, StyleProposal, StyleRule, captionCaseProposal } from './style';
 import { nicheVars } from './niche';
-import { Measured, RuleFailure, RuleReport, StyleCheckProposal, checkFromMeasured, failureText, isDefaultRule, ruleText, withDefaults } from './rules';
+import { Measured, RuleFailure, RuleReport, StyleCheckProposal, checkFromMeasured, failureText, isDefaultRule, ruleText, withDefaults as withDefaultChecks } from './rules';
 import { NoteRules, RenderInfo, ToolContext, ToolState, captionWithCredits, captionsForProofread, doRender, unsureWords, executeTool, load, newToolState, resolveAsset, cleanSummary, renderEvent, operationStatus, noteBase, stageMerge, ToolInputError, TOOL_NAMES, unmetRules, writeEdit } from './tools';
 import { planFastNote } from './fastnote';
 import { LEDGER } from './assets';
@@ -322,7 +322,7 @@ async function finalize(deps: EditorDeps, ctx: ToolContext, onEvent: (e: AgentEv
  * from measured (its render.json). */
 async function noteRules(deps: EditorDeps, projectDir: string, version: number): Promise<{ rules: NoteRules; unreadable: StyleRule[]; measured: Measured | null }> {
   const style = await deps.style.checks();
-  const active = withDefaults(style.active);
+  const active = withDefaultChecks(style.active);
   const unreadable = style.unreadable;
   let start: RuleReport | null = null;
   if (version > 0) {
