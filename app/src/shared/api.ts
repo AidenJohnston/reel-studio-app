@@ -854,6 +854,11 @@ export interface MemorySuggestion {
 export type RuleCheck =
   | { kind: 'captions.maxWords' | 'captions.maxSize' | 'captions.minSize' | 'music.underVoiceDb'; value: number }
   | { kind: 'broll.keepOut'; zone: 'face' | 'eyes' }
+  // Reel Studio's default taste (DEFAULT_CHECKS in ai/src/rules.ts): a My style rule of the same kind replaces one
+  | { kind: 'opening.calm'; seconds: number }
+  | { kind: 'captions.oneLine' | 'captions.uniformSize' | 'broll.unique' | 'broll.faceClear' }
+  | { kind: 'broll.clipLength'; min: number; max: number }
+  | { kind: 'broll.cardHold' | 'face.maxBare' | 'zooms.maxPerMinute'; value: number }
 
 /** One rule "Learn from my past edits" read from an export, with what it was read from. Nothing is saved until the person keeps it. */
 export interface LearnedRule {
