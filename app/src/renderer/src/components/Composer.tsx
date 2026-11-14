@@ -54,6 +54,7 @@ export function Composer({
   under,
   held,
   heldWhy,
+  planHeld,
   alert,
   connect,
   onSend,
@@ -100,6 +101,8 @@ export function Composer({
   held: number
   /** held by a pause that ends by itself ("Continues at 3:40 PM"), not by the person */
   heldWhy?: string | null
+  /** Version 1 waits for the person to approve its plan (the Plan card's Make Version 1); notes wait with it */
+  planHeld?: boolean
   alert: string | null
   /** the editor picker, in place of the box, when no editor is connected */
   connect: ReactNode
@@ -118,7 +121,7 @@ export function Composer({
   const [focus, setFocus] = useState(false)
   const [menu, setMenu] = useState(false)
   const caret = useRef<HTMLButtonElement>(null)
-  const strip = job ? 'job' : held ? 'held' : null
+  const strip = job ? 'job' : planHeld ? 'plan' : held ? 'held' : null
   const { mounted: stripShown } = usePresence(!!strip, 200)
   const canSend = (!!draft.trim() || att.chips.length > 0) && !att.busy && !checking && !waitToSend
   // Steps opens per job: Version 1 starts open, a note starts closed
@@ -268,6 +271,11 @@ export function Composer({
                 <i style={{ transform: `scaleX(${pct})` }} />
               </span>
             </>
+          )}
+          {stripShown && strip === 'plan' && (
+            <div className="strip wait" role="status" data-testid="plan-held">
+              <b>Version 1 waits for your plan</b>
+            </div>
           )}
           {stripShown && strip === 'held' && (
             <div className="strip wait" role="status" data-testid="queue-held">

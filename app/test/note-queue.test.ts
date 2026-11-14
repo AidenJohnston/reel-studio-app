@@ -148,6 +148,24 @@ const entry = (id: string, text: string, started = false): QueuedNote => ({
 })
 
 describe('note queue', () => {
+  // fails if a note sent while Version 1 waits for its plan runs at once and makes a version from pictures nobody
+  // approved, or is still waiting after Version 1 is made
+  it('a note sent while Version 1 waits for its plan runs only after Version 1', async () => {
+    setupPaths()
+    const slug = await reel('plan-held')
+    await updateAppState(slug, (s) => void (s.planHeld = true))
+    const a = app()
+    expect(await a.send(slug, 'warmer')).toEqual({ jobId: null, queued: true })
+    expect(a.jobs.forSlug(slug)).toBeUndefined()
+    expect(await waitingTexts(slug)).toEqual(['warmer'])
+    // Make Version 1: the hold goes in the write that starts it (plan-ipc.ts), and its end runs the note
+    const v1 = a.jobs.start(slug, 'first-edit', async () => ({ summary: 'Version 1.' }), { record: (s) => void delete s.planHeld })
+    await a.jobs.get(v1)?.done
+    await a.runAll(slug)
+    expect(await replies(slug)).toContain('Done: "warmer". It is Version 2.')
+    expect(await waitingTexts(slug)).toEqual([])
+  }, 60000)
+
   it('notes sent while one runs each run after it, in order, and each makes its own version', async () => {
     setupPaths()
     const slug = await reel('in-order')

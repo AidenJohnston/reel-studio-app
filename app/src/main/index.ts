@@ -57,6 +57,7 @@ import {
   listVersions,
   PLANNED_TITLE,
   planReel,
+  planWaits,
   PREVIEW_DIR,
   projectDir,
   readAppState,
@@ -167,7 +168,7 @@ import { electronUpdaterBackend, macBundleCheck, windowsInstaller } from './upda
 import { disabledReason, updateMode } from './update-machine'
 import { feedFromFile } from './update-feed'
 import { createJobFeedback, createMainWindow, feedbackLog, installMenu, showTimelineInMenu, startDragOut, windowStateFile, type AppCommand, titleBarOverlay } from './window'
-import { registerPlanIpc, withPlanFollowing } from './plan-ipc'
+import { proposeFirstEdit, registerPlanIpc, withPlanFollowing } from './plan-ipc'
 import { takeNote } from './note-intake'
 import { PROTOCOL, createUpdateKeyService } from './update-key'
 import { setupPosting } from './posting-ipc'
@@ -756,6 +757,8 @@ function startFirstEdit(slug: string, initArgs: { title: string; files: string[]
   // with the job's start: what the copy is made from, until it is in, so a Stop during the copy can copy it again
   const started = (s: AppState): void => {
     if (initArgs) s.copyFrom = initArgs.files
+    // a basic version is made without the editor, so there is no plan to wait for
+    if (basic) delete s.planHeld
     record?.(s)
   }
   return jobs.start(slug, 'first-edit', async (emit, signal, { owner }) => {
@@ -821,6 +824,12 @@ function startFirstEdit(slug: string, initArgs: { title: string; files: string[]
     }
     const provider = basic ? null : await ai.active().catch(() => null)
     editor = editorName(provider)
+    // Version 1 waits for the creator (app.json planHeld, set when the video arrived): this first edit proposes the
+    // Plan document and ends without a version. Make Version 1 (plan:makeVersion1) starts the real one.
+    if (st.planHeld && !basic) {
+      if (!provider?.connected || provider.id === 'none') throw PLAN_NEEDS_EDITOR
+      return proposeFirstEdit(ai, dir, st.plan, emit, signal, owner)
+    }
     // A render event with firstLook = the quick no-AI draft is ready while the AI keeps editing; the
     // Reel screen plays it (shared/live.ts) and says what it is. Once listening is done (the first
     // status of a later phase), the words heard go to the Reel screen ("I heard: ...").
@@ -851,6 +860,16 @@ function startFirstEdit(slug: string, initArgs: { title: string; files: string[]
     await groupReel(slug).catch((e) => log(`[series] ${slug}: ${String(e).slice(0, 300)}`))
     return replyAskingAboutStyle(r, r.summary)
   }, { pause, record: started })
+}
+
+const PLAN_NEEDS_EDITOR = { code: 'NO_AI', userMessage: 'Connect your editor to plan this reel, or make a basic version.' }
+
+/** A planned reel's video arrived: its first edit proposes the Plan document and Version 1 waits for the creator
+ * (AppState.planHeld) when an editor is connected and the AI package can propose one. Otherwise it starts at once. */
+async function plansFirst(st: AppState): Promise<boolean> {
+  if (!st.plan || !ai.proposePlan || !ai.plan) return false
+  const p = await ai.active().catch(() => null)
+  return !!p?.connected && p.id !== 'none'
 }
 
 /** Which model made a version, beside it (`versions/vN/made-with.json`, as title.json is): its line in the notes names
@@ -1403,7 +1422,8 @@ function registerIpc(): void {
   })
   // the Plan document (main/plan-ipc.ts)
   registerPlanIpc({
-    handle, ai: () => ai, projectDir, hold: jobs.hold, start: jobs.start,
+    handle, ai: () => ai, projectDir, hold: jobs.hold, start: jobs.start, appState: readAppState,
+    startFirstEdit: (slug, record) => startFirstEdit(slug, null, false, record),
     firstEdit: async (slug) => {
       if (jobs.forSlug(slug)?.kind === 'first-edit') return 'running'
       if (((await readProject(slug).catch(() => null))?.version ?? 0) > 0) return 'done'
@@ -1697,10 +1717,14 @@ function registerIpc(): void {
       title = titleWithAnotherVideo(current, st.fileTitle, fromFile)
       await clearFailedCopy(projectDir(slug))
     } else title = st.title && st.title !== PLANNED_TITLE ? st.title : fromFile
-    // the title is written with the first edit's start, so a start refused in the meantime leaves the reel as it was
+    const holdForPlan = await plansFirst(st)
+    // the title and the hold are written with the first edit's start, so a start refused in the meantime leaves the
+    // reel as it was
     const named = (s: AppState): void => {
       s.title = title
       if (title === fromFile) s.fileTitle = title
+      if (holdForPlan) s.planHeld = true
+      else delete s.planHeld
     }
     return { jobId: startFirstEdit(slug, { title, files: videos }, false, named), skipped }
   })
@@ -1751,6 +1775,9 @@ function registerIpc(): void {
     // (startFirstEdit). The card never offers Resume otherwise (store.ts copyGone); this is for a file gone since.
     const st = await readAppState(slug)
     if (!existsSync(join(dir, 'project.json')) && !st.from && !(await canCopyAgain(st.copyFrom))) throw COPY_GONE
+    // Resume on a reel whose Version 1 waits for its plan (Reels lists it with the paused ones) would propose again
+    if (!basic && planWaits(st, (await listVersions(dir)).length))
+      throw { code: 'PLAN_WAITS', userMessage: 'Version 1 waits for your plan. Open the reel, then press Make Version 1.' }
     // the person's Resume: nothing waits to continue it on its own any more
     pauser.cancel(slug)
     return { jobId: startFirstEdit(slug, null, basic === true) }

@@ -117,7 +117,9 @@ export function createNoteQueue(deps: {
     return lane(slug, async () => {
       if (quitting || jobs.forSlug(slug)) return null
       const st = await readAppState(slug)
-      if (!st.queue?.length || st.queueHeld) return null
+      // Version 1 waits for its plan (AppState.planHeld): a note would make a version without it. Its notes run after
+      // Version 1, whose end pumps the queue again (onJobEvent).
+      if (!st.queue?.length || st.queueHeld || st.planHeld) return null
       // still marked started while nothing runs: a run that died before startup recovery cleared it
       if (st.queue[0].attempt) {
         await change(slug, backToWaiting)

@@ -58,8 +58,18 @@ knows of the first edit):
   was stopped). A failed first edit keeps every decision, and the retry builds the same rows.
 
 A change after approval that leaves something undecided (a new proposed row, an unlocked script) is `edited` again.
-In the redesign a reel's first edit starts when its video arrives, so a plan proposed afterwards is `done` at once; its
-approved rows go into the video with the next render.
+
+## Version 1 waits for the plan
+
+A reel planned before it was filmed (app.json `plan`) whose video arrives while an editor is connected, with an AI
+package that has `proposePlan`, holds Version 1 (app.json `planHeld`, set in the write that starts the first edit).
+That first edit copies the video in, seeds the script draft from the filming plan's hook and beats
+(`proposeFirstEdit` in `app/src/main/plan-ipc.ts`), proposes the rest, and ends without a version. The Plan card shows
+the script and the pictures to approve, and Make Version 1 (`plan:makeVersion1`) clears the hold in the write that
+starts the real first edit, which builds the rows approved by then. Notes sent meanwhile wait for Version 1. A
+resume, or a quit's continuation, proposes again; nothing makes Version 1 by itself. Without a filming plan, an
+editor or `proposePlan`, the first edit starts when the video arrives, so a plan proposed afterwards is `done` at
+once; its approved rows go into the video with the next render.
 
 ## Determinism
 
@@ -121,9 +131,11 @@ id get the next free ones. A locked script cannot be changed by an import.
 ## Surface
 
 - App IPC (`app/src/main/plan-ipc.ts`; `window.api.plan` in the page): `plan:get`, `plan:change` (script, lock, row
-  status, row, details, import; run as a held edit), `plan:markdown`, `plan:propose`. `projects:update` (every hand
+  status, row, details, import; run as a held edit), `plan:markdown`, `plan:propose`, `plan:makeVersion1`. `projects:update` (every hand
   edit of `broll` or `cut`) passes the edited project through `plan.followHandEdit` before saving it.
 - AI tools, offered only to the runs that name them: `propose_plan` (the proposal run) and `update_plan_row`
   (the planned first edit).
 
-Not built yet: the UI, and a plan before there is a video (the app makes a project only from a dropped video).
+- UI: the Plan card (`app/src/renderer/src/components/Plan.tsx`) once the video is in: the script with Lock and
+  Unlock, the pictures to tick or leave out, and Make Version 1 while Version 1 waits. Not built yet: the beats
+  table, music, cover, editing a row's words or visual, and markdown import and export.

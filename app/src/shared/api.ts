@@ -294,6 +294,8 @@ export interface ProjectDetail extends ProjectSummary {
   aiEdited: boolean
   /** The plan made before the video (app.json `plan`), or null. */
   plan: ReelPlan | null
+  /** The Plan document is proposed and Version 1 waits for the person's Make Version 1 (main/store.ts planWaits). */
+  planHeld: boolean
   /** The reels the editor last found in this reel's video (app.json `proposal`), or null. */
   proposal: StoredProposal | null
 }
@@ -1447,6 +1449,8 @@ export interface ReelApi {
     importMarkdown(slug: string, markdown: string): Promise<PlanView>
     /** The AI proposes the plan: a job like a note (its events carry this jobId). */
     propose(slug: string): Promise<{ jobId: string }>
+    /** Version 1 waited for the plan (ProjectDetail.planHeld): make it now, with the rows approved so far. */
+    makeVersion1(slug: string): Promise<{ jobId: string }>
   }
   dev: {
     /** Test builds only. `template` defaults to the bundled self-test template. */

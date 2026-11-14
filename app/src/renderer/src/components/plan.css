@@ -85,6 +85,39 @@
 .pl-n { flex: none; font-size: var(--fs-sm); line-height: var(--lh-sm); color: var(--ink-3); font-variant-numeric: tabular-nums; white-space: nowrap; padding-right: 4px; }
 @media (hover: hover) and (pointer: fine) { .pl-fold:hover { background: var(--wash); } }
 
+/* ---- the Plan document in the folded card: the script, the pictures, Make Version 1 (Plan.tsx) ---- */
+/* they arrive once the editor has proposed them, as the card itself does */
+.pl-new { transition: opacity 180ms cubic-bezier(.2, .8, .2, 1), transform 180ms cubic-bezier(.2, .8, .2, 1); }
+@starting-style { .pl-new { opacity: 0; transform: translateY(4px); } }
+.pl-sec-h { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; min-width: 0; }
+.pl-sec-h h4 { margin: 0; }
+.pl-sec-h .lk { margin-left: auto; font-size: var(--fs-sm); line-height: var(--lh-sm); }
+.plan .lk:disabled { color: var(--ink-3); text-decoration-color: transparent; cursor: default; }
+/* several lines, as tall as what is written: the 120 px floor of a form's .textarea is too tall for the notes column */
+.pl-script {
+  display: block; min-height: 72px; max-height: 360px; padding: 8px 12px; resize: none; field-sizing: content; overflow-y: auto;
+  font-size: var(--fs-base); line-height: var(--lh-base); overflow-wrap: anywhere;
+}
+.pl-script[readonly] { background: var(--sunk-2); border-color: var(--line); cursor: default; }
+.pl-script[readonly]:focus { border-color: var(--line); box-shadow: none; }
+.pl-script[readonly]:focus-visible { box-shadow: var(--focus); }
+.pl-note { margin-top: 4px; font-size: var(--fs-sm); line-height: var(--lh-sm); color: var(--ink-3); }
+
+/* a picture: the tick approves it; the visual, then what it goes over and where it comes from */
+.pl-pic { padding: 2px 0; }
+.pl-pic-t { min-width: 0; padding: 4px 0 0 6px; display: grid; gap: 2px; }
+.pl-pic-v { font-size: var(--fs-base); line-height: var(--lh-base); color: var(--ink); overflow-wrap: anywhere; transition: color 120ms ease; }
+.pl-pic-m { display: flex; align-items: baseline; flex-wrap: wrap; gap: 0 8px; font-size: var(--fs-sm); line-height: var(--lh-sm); color: var(--ink-3); min-width: 0; }
+.pl-pic-m > span { min-width: 0; overflow-wrap: anywhere; }
+.pl-pic-m .lk { margin-left: auto; min-height: 24px; font-size: var(--fs-sm); line-height: var(--lh-sm); color: var(--ink-3); }
+.pl-pic-why { font-size: var(--fs-sm); line-height: var(--lh-sm); color: var(--amber); }
+/* left out: quieter, never struck through, so it still reads and can come back */
+.pl-pic.out .pl-pic-v { color: var(--ink-3); }
+
+/* Make Version 1: the card's one green button while Version 1 waits */
+.pl-go { margin-top: 16px; display: grid; justify-items: start; gap: 6px; }
+.pl-go-n { font-size: var(--fs-sm); line-height: var(--lh-sm); color: var(--ink-3); }
+
 /* Send to my phone, opened in the card */
 .pl-phone {
   display: grid; grid-template-columns: 112px minmax(0, 1fr); gap: 4px 12px; align-items: start; margin-top: 6px; padding: 12px; border-radius: var(--r-md);
@@ -205,10 +238,10 @@
 .pl-empty .btn { margin-top: 12px; }
 
 /* What the keyboard opens or ticks just appears. */
-html.kb :is(.plan, .pl-phone, .pl-fold .icon, .nt-res.pl-said, .pd-drop, .pl-chip) { transition: none !important; }
+html.kb :is(.plan, .pl-new, .pl-pic-v, .pl-phone, .pl-fold .icon, .nt-res.pl-said, .pd-drop, .pl-chip) { transition: none !important; }
 @media (prefers-reduced-motion: reduce) {
-  .plan, .pl-phone, .nt-res.pl-said, .pd-drop { transform: none; transition-property: opacity; }
-  @starting-style { .plan, .pl-phone, .nt-res.pl-said { transform: none; } }
+  .plan, .pl-new, .pl-phone, .nt-res.pl-said, .pd-drop { transform: none; transition-property: opacity; }
+  @starting-style { .plan, .pl-new, .pl-phone, .nt-res.pl-said { transform: none; } }
   .planned.over .pd-drop { transform: none; }
   .pl-fold .icon, .pl-chip { transition: none; }
   .pl-chip:active { transform: none; }

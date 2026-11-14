@@ -65,6 +65,11 @@ export interface AppState {
   posted?: { version: number; platform: 'instagram'; at: string }[]
   /** The plan made before the video: in the planning chat or the plain form (shared/plan.ts checks it). */
   plan?: ReelPlan
+  /** Version 1 waits for the creator's go. Set with the first edit's start when a planned reel's video arrives and an
+   * editor can propose the Plan document; that first edit proposes it and ends without a version (main/index.ts
+   * startFirstEdit). It goes in the same write that starts Version 1 (plan:makeVersion1) or a basic version, so a
+   * resume or a quit's continuation proposes again instead of making Version 1 by itself. */
+  planHeld?: boolean
   /** The reels the editor last found in this reel's video (main/propose-reels.ts). */
   proposal?: StoredProposal
   /** This reel was made from another reel's proposal: what it is seeded from, kept so a resume can seed it again. */
@@ -727,6 +732,15 @@ async function copyGone(st: AppState): Promise<boolean> {
   return st.status === 'interrupted' && !st.job && !st.from && !(await canCopyAgain(st.copyFrom))
 }
 
+/**
+ * The Plan document is proposed and Version 1 waits for the person's go (AppState.planHeld): the first edit that
+ * proposed it finished (jobs.ts wrote 'ready') and made no version. A proposal that failed or was cut short is not
+ * waiting: it shows as a failed or paused Version 1, whose Try again or Resume proposes again.
+ */
+export function planWaits(st: AppState, versions: number): boolean {
+  return !!st.planHeld && !st.job && st.status === 'ready' && versions === 0
+}
+
 export async function summary(slug: string): Promise<ProjectSummary | null> {
   const dir = projectDir(slug)
   let p: ProjectJson
@@ -767,14 +781,17 @@ export async function summary(slug: string): Promise<ProjectSummary | null> {
   const last = versions[versions.length - 1]
   const src = p.sources?.[0]
   const srcPath = src && (isAbsolute(src.path) ? src.path : join(dir, ...src.path.split('/')))
-  // looking for more reels in it leaves a reel where it is on Home: no version is being made
+  // looking for more reels in it leaves a reel where it is on Home: no version is being made. A reel whose Version 1
+  // waits for its plan needs the person, as a paused one does; it never reads as failed or as ready.
   const status: ScreenStatus = st.job && st.job.kind !== 'propose'
     ? 'working'
     : versions.length
       ? 'ready'
-      : st.status === 'ready'
-        ? 'failed'
-        : st.status
+      : planWaits(st, versions.length)
+        ? 'interrupted'
+        : st.status === 'ready'
+          ? 'failed'
+          : st.status
   return {
     slug,
     dir,
@@ -919,6 +936,7 @@ export async function detail(slug: string): Promise<ProjectDetail> {
     job: st.job ? { id: st.job.id, kind: st.job.kind, message: 'Working on it', pct: 0, overall: 0, secondsLeft: null, overdue: false, thinking: false, waiting: false, waitingForRender: false } : null,
     aiEdited: !!st.aiEdited,
     plan: st.plan ?? null,
+    planHeld: planWaits(st, versions.length),
     proposal: st.proposal ?? null
   }
 }

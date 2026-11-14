@@ -4,8 +4,10 @@
 // (test/plan-ipc.test.ts).
 import type { IpcMainInvokeEvent } from 'electron'
 import type { AI } from './ai-types'
-import type { JobFn } from './jobs'
-import type { ProjectJson } from '../shared/api'
+import type { Emit, JobFn } from './jobs'
+import type { AppState } from './store'
+import type { ProjectJson, ReelPlan } from '../shared/api'
+import { planAsScript } from '../shared/plan'
 import { PLAN_CHANGE_KINDS, type FirstEdit, type PlanChange } from '../shared/plan-doc'
 
 type Handle = (channel: string, fn: (e: IpcMainInvokeEvent, ...args: any[]) => unknown) => void
@@ -18,9 +20,32 @@ export interface PlanIpcDeps {
   start: (slug: string, kind: 'plan', fn: JobFn) => string
   /** the reel's first edit: running now, made a version, or its last try made none (main/index.ts) */
   firstEdit: (slug: string) => Promise<FirstEdit>
+  /** the reel's app.json (main/store.ts readAppState) */
+  appState: (slug: string) => Promise<Pick<AppState, 'planHeld'>>
+  /** starts Version 1 (main/index.ts startFirstEdit): refused (BUSY) while a job runs on the reel; `record` goes
+   * into app.json in the write that starts it */
+  startFirstEdit: (slug: string, record: (s: AppState) => void) => string
 }
 
 const NOT_AVAILABLE = { code: 'PLAN_UNAVAILABLE', userMessage: 'This version of Reel Studio cannot plan videos yet.' }
+const NOT_HELD = { code: 'NOT_HELD', userMessage: 'Version 1 is not waiting for this plan any more.' }
+
+/**
+ * The first edit of a planned reel whose Version 1 waits for the creator (app.json planHeld; main/index.ts runs this
+ * in place of ai.firstEdit, after the copy and the listening model): the filming plan's hook and beats become the
+ * Plan document's script draft, unless the document already has a script (a proposal tried again keeps the
+ * creator's rewrite and lock), then the AI proposes the rest. Its summary is the reply; no version is made.
+ */
+export async function proposeFirstEdit(ai: AI, dir: string, filming: ReelPlan | undefined, emit: Emit, signal: AbortSignal, owner: string | null): Promise<{ summary: string }> {
+  if (!ai.plan || !ai.proposePlan) throw NOT_AVAILABLE
+  const script = (await ai.plan.get(dir)).plan?.script
+  if (filming && !script?.locked && script?.draft == null && script?.rewrite == null) {
+    const { hook, script: text } = planAsScript(filming)
+    await ai.plan.change(dir, { kind: 'script', draft: { hook, script: text, onScreenText: [] } })
+  }
+  const r = await ai.proposePlan(dir, (e) => emit(e), signal, owner ? { owner } : undefined)
+  return { summary: r.summary }
+}
 
 function checkedChange(c: unknown): PlanChange {
   const kind = (c as { kind?: unknown } | null)?.kind
@@ -58,5 +83,12 @@ export function registerPlanIpc(d: PlanIpcDeps): void {
       return { summary: r.summary }
     })
     return { jobId }
+  })
+  // Make Version 1 on a reel that waits for its plan: the hold goes in the write that starts the first edit, so a
+  // start refused because a job runs (a second press, the proposal itself) leaves the reel waiting. project.json
+  // exists, so it skips the copy; it builds only the rows approved by then (ai plan.ts prepareFirstEdit).
+  d.handle('plan:makeVersion1', async (_e, slug: string) => {
+    if (!(await d.appState(slug)).planHeld) throw NOT_HELD
+    return { jobId: d.startFirstEdit(slug, (s) => void delete s.planHeld) }
   })
 }

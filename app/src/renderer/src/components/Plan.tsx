@@ -2,11 +2,13 @@
 // (a hook to pick, the beats, the shots: a checklist to film from). The notes column is a chat with the editor that
 // makes the plan; with no editor it asks to connect one first. The card saves through projects.setPlan; shared/plan.ts
 // checks the shape in main, and the plan becomes the first edit's script when the video arrives (main store.ts
-// carryScript).
+// carryScript). Once the video is in, the card also shows the Plan document the editor proposed from it (docs/plan.md):
+// the script to lock and the pictures to approve, saved through reel.plan, and Make Version 1 while Version 1 waits.
 import { useEffect, useRef, useState, type DragEvent, type KeyboardEvent, type ReactNode, type RefObject } from 'react'
 import type { PhoneShare, PlanLine, ProviderInfo, ReelPlan } from '../../../shared/api'
+import type { PlanRow, PlanScript as PlanScriptDoc, PlanSource, PlanView, RowStatus } from '../../../shared/plan-doc'
 import { PLAN_MAX, pickedHook, planCounts, planText } from '../../../shared/plan'
-import { droppedPaths, reel, userMessage } from '../api'
+import { droppedPaths, errorCode, reel, userMessage } from '../api'
 import { NOTE_DROP_DONE } from '../App'
 import { BrandMark } from './brand'
 import { Icon } from './icons'
@@ -22,7 +24,9 @@ type Kind = 'beats' | 'shots'
 /**
  * The plan to film from. While the reel waits for its video every line edits in place (Enter keeps it, Escape puts it
  * back, emptying a line takes it out), the picked hook leads, and beats and shots tick off. Once the video is in, it
- * folds to one line above it and opens read-only. Copy and Send to my phone work in both.
+ * folds to one line above it and its filming plan reads only; the Plan document's script and pictures stay editable
+ * there, and the fold starts open while a picture or Version 1 waits for the person. Copy and Send to my phone work
+ * in both.
  */
 export function PlanCard({
   slug,
@@ -30,6 +34,10 @@ export function PlanCard({
   plan,
   folded,
   busy,
+  held,
+  working,
+  docKey,
+  onMakeVersion1,
   onSaved,
   onCopy,
   onError
@@ -41,16 +49,57 @@ export function PlanCard({
   folded: boolean
   /** the editor is answering: nothing changes under it */
   busy: boolean
+  /** Version 1 waits for this plan (ProjectDetail.planHeld): Make Version 1 is the card's one green button */
+  held: boolean
+  /** a job runs on the reel: the Plan document can't change until it ends (main runs a change as a held edit) */
+  working: boolean
+  /** changes when the Plan document may have: it is read again then */
+  docKey: string
+  onMakeVersion1: () => Promise<void>
   onSaved: () => void
   onCopy: (text: string) => void
   onError: (message: string) => void
 }) {
   const [cur, setCur] = useState(plan)
-  const [open, setOpen] = useState(false)
+  // null until the person opens or closes it: then it starts open while something waits for them
+  const [open, setOpen] = useState<boolean | null>(held || null)
   const [phone, setPhone] = useState(false)
   const phoneBtn = useRef<HTMLButtonElement>(null)
   useEffect(() => setCur(plan), [plan])
   const readOnly = folded || busy
+  const [doc, setDoc, readDoc] = usePlanDoc(slug, folded && !working, docKey, onError)
+  const waiting = held || !!doc?.plan?.broll.some((r) => r.status === 'proposed')
+  // opened once by itself, it stays open as the rows get decided: it never folds away under the person's pointer
+  useEffect(() => {
+    if (folded && waiting) setOpen((o) => o ?? true)
+  }, [folded, waiting])
+  const shownOpen = open ?? false
+
+  // the Plan document's changes, one at a time and in order (a script saved on blur, then Lock), each a held edit in main
+  const changes = useRef<Promise<unknown>>(Promise.resolve())
+  const change = (fn: () => Promise<PlanView>): void => {
+    const run = changes.current.then(fn).then(
+      (v) => {
+        setDoc(v)
+        onSaved()
+      },
+      (e) => {
+        onError(userMessage(e))
+        readDoc()
+      }
+    )
+    changes.current = run
+  }
+  const setStatus = (id: string, status: RowStatus): void => {
+    // the tick answers at once, as a native box does; a refusal puts the saved plan back
+    setDoc((d) => (d?.plan ? { ...d, plan: { ...d.plan, broll: d.plan.broll.map((r) => (r.id === id ? { ...r, status } : r)) } } : d))
+    change(() => reel.plan.setRowStatus(slug, id, status))
+  }
+  const [going, setGoing] = useState(false)
+  const makeVersion1 = (): void => {
+    setGoing(true)
+    void changes.current.then(onMakeVersion1).finally(() => setGoing(false))
+  }
 
   const save = (next: ReelPlan): void => {
     setCur(next)
@@ -121,8 +170,25 @@ export function PlanCard({
           ))}
         </div>
       </section>
+      {folded && doc?.plan && (
+        <PlanScript
+          script={doc.plan.script}
+          readOnly={working}
+          onSave={(rewrite) => change(() => reel.plan.updateScript(slug, { rewrite }))}
+          onLock={(locked) => change(() => reel.plan.lock(slug, locked))}
+        />
+      )}
       <Lines kind="beats" title="Beats" lines={cur.beats} readOnly={readOnly} numbered onTick={tick} onCommit={setLine} />
       {cur.shots.length > 0 && <Lines kind="shots" title="Shots" lines={cur.shots} readOnly={readOnly} onTick={tick} onCommit={setLine} />}
+      {folded && doc?.plan && doc.plan.broll.length > 0 && <PlanPictures rows={doc.plan.broll} unbuilt={doc.unbuilt} readOnly={working} onStatus={setStatus} />}
+      {folded && held && (
+        <div className="pl-go pl-new">
+          <Button kind="primary" onClick={makeVersion1} disabled={going || working} data-testid="plan-make-v1">
+            Make Version 1
+          </Button>
+          {doc?.plan?.broll.some((r) => r.status === 'proposed') && <p className="pl-go-n">Pictures you haven’t ticked stay out.</p>}
+        </div>
+      )}
     </>
   )
 
@@ -130,14 +196,14 @@ export function PlanCard({
     return (
       <div className="plan folded" data-testid="plan-card" data-folded>
         <div className="pl-head">
-          <button className="pl-fold" aria-expanded={open} onClick={() => setOpen((o) => !o)} data-testid="plan-unfold">
-            <Icon name="chevron-down" size={14} className={open ? 'open' : undefined} />
+          <button className="pl-fold" aria-expanded={shownOpen} onClick={() => setOpen(!shownOpen)} data-testid="plan-unfold">
+            <Icon name="chevron-down" size={14} className={shownOpen ? 'open' : undefined} />
             <b>Plan</b>
             <span className="pl-fold-hook">{pickedHook(cur)}</span>
           </button>
-          {!open && <span className="pl-n">{planCounts(cur)}</span>}
+          {!shownOpen && <span className="pl-n">{held ? 'Waiting for you' : planCounts(cur)}</span>}
         </div>
-        <div className={`acc${open ? ' open' : ''}`} inert={!open || undefined}>
+        <div className={`acc${shownOpen ? ' open' : ''}`} inert={!shownOpen || undefined}>
           <div>
             <div className="pl-body">
               {actions}
@@ -203,6 +269,166 @@ function Lines({
             <PlanField value={l.text} label={`${one} ${i + 1}`} readOnly={readOnly} onCommit={(t) => onCommit(kind, i, t)} />
           </li>
         ))}
+      </ol>
+    </section>
+  )
+}
+
+/**
+ * The Plan document as main has it (reel.plan.get), read while nothing runs on the reel and again when `key` changes;
+ * null without one. A job keeps the last one on screen, read only. An AI package without the Plan document has none
+ * to show; any other failure says so.
+ */
+function usePlanDoc(slug: string, on: boolean, key: string, onError: (message: string) => void) {
+  const [view, setView] = useState<PlanView | null>(null)
+  const [reads, setReads] = useState(0)
+  const failed = useRef(onError)
+  failed.current = onError
+  useEffect(() => {
+    if (!on) return
+    let live = true
+    reel.plan.get(slug).then(
+      (v) => live && setView(v),
+      (e) => {
+        if (!live) return
+        setView(null)
+        if (errorCode(e) !== 'PLAN_UNAVAILABLE') failed.current(userMessage(e))
+      }
+    )
+    return () => {
+      live = false
+    }
+  }, [slug, on, key, reads])
+  return [view, setView, () => setReads((n) => n + 1)] as const
+}
+
+/**
+ * The script the subtitles can follow (docs/plan.md): the person's rewrite over the editor's draft, several lines,
+ * saved when the field is left (Escape puts it back; emptying it goes back to the draft). Locked, it reads only, and
+ * Unlock is the way out.
+ */
+function PlanScript({ script, readOnly, onSave, onLock }: { script: PlanScriptDoc; readOnly: boolean; onSave: (rewrite: string | null) => void; onLock: (locked: boolean) => void }) {
+  const text = script.rewrite ?? script.draft ?? ''
+  const [v, setV] = useState(text)
+  const editing = useRef(false)
+  const cancelled = useRef(false)
+  // the saved script comes back after each change; what the person is typing stays until they leave the field
+  useEffect(() => {
+    if (!editing.current) setV(text)
+  }, [text])
+  const locked = script.locked
+  return (
+    <section className="pl-sec pl-new" aria-label="Script">
+      <div className="pl-sec-h">
+        <h4>Script</h4>
+        <button className="lk" disabled={readOnly || (!locked && !v.trim())} onClick={() => onLock(!locked)} data-testid="plan-lock">
+          {locked ? 'Unlock' : 'Lock script'}
+        </button>
+      </div>
+      <textarea
+        className="textarea pl-script selectable"
+        value={v}
+        readOnly={locked || readOnly}
+        aria-label="Script"
+        aria-describedby={locked ? 'pl-locked' : undefined}
+        placeholder="What you say, one line per beat"
+        spellCheck
+        onFocus={() => {
+          editing.current = true
+        }}
+        onChange={(e) => setV(e.target.value)}
+        onKeyDown={(e: KeyboardEvent<HTMLTextAreaElement>) => {
+          if (e.key !== 'Escape') return
+          e.preventDefault()
+          e.stopPropagation()
+          cancelled.current = true
+          e.currentTarget.blur()
+        }}
+        onBlur={() => {
+          editing.current = false
+          const t = v.replace(/\r\n?/g, '\n').trim()
+          if (cancelled.current || t === text.trim()) {
+            cancelled.current = false
+            return setV(text)
+          }
+          onSave(t || null)
+        }}
+        data-testid="plan-script"
+      />
+      {locked && (
+        <p className="pl-note" id="pl-locked">
+          Locked. Subtitles follow this script.
+        </p>
+      )}
+    </section>
+  )
+}
+
+const SOURCE: Record<PlanSource, string> = {
+  'own-file': 'Your own file',
+  library: 'From your Library',
+  fetched: 'From the web',
+  card: 'A text card',
+  animation: 'An animation',
+  'screen-recording': 'A screen recording'
+}
+const UNBUILT: Record<PlanView['unbuilt'][number]['why'], string> = {
+  'needs-file': 'Needs a file to go in.',
+  'words-not-found': 'Its words aren’t in your video.',
+  'words-cut': 'Its words are cut, so it’s out for now.'
+}
+
+/**
+ * The pictures the editor proposed, each as the card's row: the tick approves it, the visual leads, and under it the
+ * words it goes over and where it comes from. Leave out rejects it (a rejected row stays, quieter, with Put back); an
+ * approved one that can't go in says why.
+ */
+function PlanPictures({ rows, unbuilt, readOnly, onStatus }: { rows: PlanRow[]; unbuilt: PlanView['unbuilt']; readOnly: boolean; onStatus: (id: string, status: RowStatus) => void }) {
+  const approved = rows.filter((r) => r.status === 'approved').length
+  const why = new Map(unbuilt.map((u) => [u.id, u.why]))
+  return (
+    <section className="pl-sec pl-new" aria-label="Pictures">
+      <h4>
+        Pictures
+        {approved > 0 ? (
+          <span className="pl-done-n" data-testid="plan-pics-n">
+            {approved} of {rows.length} approved
+          </span>
+        ) : (
+          !readOnly && <span className="pl-done-n">Tick the ones you want</span>
+        )}
+      </h4>
+      <ol className="pl-lines">
+        {rows.map((r) => {
+          const on = r.status === 'approved'
+          const out = r.status === 'rejected'
+          const w = on ? why.get(r.id) : undefined
+          return (
+            <li key={r.id} className={`pl-row pl-pic${out ? ' out' : ''}`} data-testid={`plan-pic-${r.id}`} data-status={r.status}>
+              <label className="pl-tick">
+                <input type="checkbox" checked={on} disabled={readOnly} onChange={() => onStatus(r.id, on ? 'proposed' : 'approved')} aria-label={`Approve: ${r.visual}`} data-testid={`plan-pic-tick-${r.id}`} />
+                <span aria-hidden>{on && <Icon name="check" size={10} stroke={2.6} />}</span>
+              </label>
+              <div className="pl-pic-t">
+                <p className="pl-pic-v selectable">
+                  {/* the tick is off for a picture left out and for one not decided yet: say which */}
+                  {out && <span className="sr-only">Left out: </span>}
+                  {r.visual}
+                </p>
+                <p className="pl-pic-m">
+                  <span className="selectable">
+                    {r.words ? `For "${r.words}" · ` : ''}
+                    {SOURCE[r.source]}
+                  </span>
+                  <button className="lk" disabled={readOnly} onClick={() => onStatus(r.id, out ? 'proposed' : 'rejected')} aria-label={`${out ? 'Put back' : 'Leave out'}: ${r.visual}`} data-testid={`plan-pic-out-${r.id}`}>
+                    {out ? 'Put back' : 'Leave out'}
+                  </button>
+                </p>
+                {w && <p className="pl-pic-why">{UNBUILT[w]}</p>}
+              </div>
+            </li>
+          )
+        })}
       </ol>
     </section>
   )

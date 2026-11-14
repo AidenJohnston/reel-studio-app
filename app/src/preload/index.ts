@@ -303,7 +303,8 @@ const api: ReelApi = {
     update: (slug, details) => call('plan:change', slug, { kind: 'details', ...details }),
     exportMarkdown: (slug) => call('plan:markdown', slug),
     importMarkdown: (slug, markdown) => call('plan:change', slug, { kind: 'import', markdown }),
-    propose: (slug) => call('plan:propose', slug)
+    propose: (slug) => call('plan:propose', slug),
+    makeVersion1: (slug) => call('plan:makeVersion1', slug)
   },
   dev: {
     renderTestAnimation: (out, full, template, params) => call('dev:renderTestAnimation', out, full, template, params)

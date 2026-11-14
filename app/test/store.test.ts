@@ -648,4 +648,31 @@ describe('a reel planned before it has a video', () => {
     const st = await readAppState('looked')
     expect([st.job, st.chat]).toEqual([null, []])
   })
+
+  // fails if a reel whose Version 1 waits for its plan (its first edit proposed the plan and made no version) reads
+  // as failed or as ready, if startup recovery changes it, or if a proposal a quit cut short is taken for one waiting
+  it('a reel waiting for its plan is neither failed nor ready, and recovery leaves it waiting', async () => {
+    setupPaths()
+    await ensureRoot()
+    fakeProject('held')
+    await updateAppState('held', (s) => {
+      s.status = 'ready'
+      s.planHeld = true
+    })
+    expect(await recoverInterrupted()).toEqual([])
+    const st = await readAppState('held')
+    expect([st.status, st.planHeld, st.job]).toEqual(['ready', true, null])
+    expect((await summary('held'))?.status).toBe('interrupted')
+    expect((await detail('held')).planHeld).toBe(true)
+
+    // the proposal itself cut short by a quit: a paused Version 1 whose Resume proposes again, not one waiting
+    await updateAppState('held', (s) => {
+      s.status = 'working'
+      s.job = { id: 'j1', kind: 'first-edit', startedAt: '' }
+    })
+    expect(await recoverInterrupted()).toEqual(['held'])
+    expect((await readAppState('held')).planHeld).toBe(true)
+    expect((await detail('held')).planHeld).toBe(false)
+    expect((await summary('held'))?.status).toBe('interrupted')
+  })
 })

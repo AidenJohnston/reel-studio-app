@@ -544,8 +544,11 @@ export function Reel({ slug, at, go, draft: startDraft }: { slug: string; at?: n
     go({ name: 'connect', back: { name: 'reel', slug } })
   }
   const making = job && d.job && d.job.kind !== 'export' && d.job.kind !== 'script' && d.job.kind !== 'propose' ? (latestN ?? 0) + 1 : null
+  // Version 1 waits for the plan (main store.ts planWaits): nothing is being made, nothing failed or paused. The Plan
+  // card's Make Version 1 is the way on, and the note box says why it waits.
+  const planHeld = d.planHeld && !d.job
   const first: FirstState | null =
-    hasVersions || planned
+    hasVersions || planned || planHeld
       ? null
       : d.job?.kind === 'first-edit' || d.status === 'new'
         ? { kind: 'making', heard: firstSteps?.some((s) => s.id === 'listen' && s.state === 'done') ? heard : [], editor: !aiOff }
@@ -668,6 +671,17 @@ export function Reel({ slug, at, go, draft: startDraft }: { slug: string; at?: n
       await load()
     } catch (e) {
       notify(userMessage(e), 'error')
+    }
+  }
+
+  const makeVersion1 = async () => {
+    try {
+      const r = await reel.plan.makeVersion1(slug)
+      setJob({ ...EMPTY_LIVE, jobId: r.jobId })
+      await load()
+    } catch (e) {
+      notify(userMessage(e), 'error')
+      void load()
     }
   }
 
@@ -843,7 +857,7 @@ export function Reel({ slug, at, go, draft: startDraft }: { slug: string; at?: n
     ...(addable && base === null ? { addKeys: `${MOD}Enter` } : {}),
     ...(base !== null && base !== latestN ? { base } : {})
   })
-  const showComposer = (planned && !aiOff) || hasVersions || first?.kind === 'making'
+  const showComposer = (planned && !aiOff) || hasVersions || first?.kind === 'making' || planHeld
   const planCard = d.plan && (
     <PlanCard
       slug={slug}
@@ -851,6 +865,11 @@ export function Reel({ slug, at, go, draft: startDraft }: { slug: string; at?: n
       plan={d.plan}
       folded={!planned}
       busy={d.job?.kind === 'script'}
+      held={planHeld}
+      working={!!d.job}
+      // the Plan document changes with the project (a proposal, a note's pictures, Version 1) and with the job's end
+      docKey={`${d.project.updatedAt ?? ''}:${d.job?.id ?? ''}:${d.versions.length}`}
+      onMakeVersion1={makeVersion1}
       onSaved={() => void load()}
       onCopy={(t) => void reel.app.copyText(t).then(() => notify('Copied.'))}
       onError={(m) => notify(m, 'error')}
@@ -1386,6 +1405,7 @@ export function Reel({ slug, at, go, draft: startDraft }: { slug: string; at?: n
                     }
                     held={held}
                     heldWhy={heldWhy}
+                    planHeld={planHeld}
                     alert={alert}
                     connect={
                       aiOff && setup ? (
