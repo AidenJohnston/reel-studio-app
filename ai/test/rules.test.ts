@@ -3,7 +3,7 @@ import * as fs from 'node:fs';
 import * as fsp from 'node:fs/promises';
 import * as path from 'node:path';
 import { createAI, loadProject } from '../src';
-import { checkFromMeasured, parseCheck, ruleText } from '../src/rules';
+import { DEFAULT_CHECKS, RuleCheck, checkFromMeasured, failureText, isDefaultRule, parseCheck, ruleText, withDefaults } from '../src/rules';
 import { FakeHost, ScriptedModel, call, makeProject, tmpDir } from './helpers';
 
 const finish = (s = 'Done.') => ({ toolCalls: [call('finish', { summary_for_user: s })] });
@@ -79,7 +79,7 @@ describe('a note and the checked rules', () => {
     const model = new ScriptedModel([{ toolCalls: [words(4)] }, finish('Four words at a time now.'), { toolCalls: [words(2)] }, finish('Back to two.')]);
     const r = await ai(model).applyNote(dir, 'put four words in each subtitle', () => undefined);
     expect(finals()).toHaveLength(2);
-    expect(host.rulesFiles.filter((f) => !f.draft).map((f) => f.stopOn.length)).toEqual([1, 0]);
+    expect(host.rulesFiles.filter((f) => !f.draft).map((f) => f.stopOn.filter((id: string) => !isDefaultRule(id)).length)).toEqual([1, 0]);
     expect(task(model, 2)).toContain('"Show at most 2 words in a subtitle.": 1 subtitle shows too many words');
     expect((await loadProject(dir)).captions.style.maxWords).toBe(2);
     expect(r.version).toBe(1);
@@ -122,7 +122,7 @@ describe('a note and the checked rules', () => {
     await savedAs(dir, 4, { ok: true, checked: 1, checkedIds: [sizeRule.id], failures: [], measured: {} });
     await ai().addStyleRule(ruleText(TWO_WORDS), undefined, TWO_WORDS);
     host.ruleFails = (r, p) => r.check.kind === 'captions.maxWords' ? (p.captions.style.maxWords > r.check.value ? { text: 'one two three', words: 3 } : null)
-      : p.captions.style.size > r.check.value ? { text: 'hello', px: p.captions.style.size } : null;
+      : r.check.kind === 'captions.maxSize' && p.captions.style.size > r.check.value ? { text: 'hello', px: p.captions.style.size } : null;
     const model = new ScriptedModel([
       { toolCalls: [call('set_caption_style', { color: '#3366FF', size: 130 })] }, finish('Blue and bigger.'),
       { toolCalls: [call('set_caption_style', { size: 110 })] }, finish('Blue, at your size.'),
@@ -151,7 +151,7 @@ describe('a note and the checked rules', () => {
     const model = new ScriptedModel([{ toolCalls: [words(4)] }, { toolCalls: [call('render_draft', {})] }, finish(), { toolCalls: [words(2)] }, finish()]);
     await ai(model).applyNote(dir, 'four words per subtitle', () => undefined);
     expect(sent(model)[2]).toContain('myStyleRules');
-    expect(sent(model)[3]).toContain("Not finished: the newest render breaks the user's My style rule");
+    expect(sent(model)[3]).toContain('Not finished: the newest render breaks this rule');
     expect(model.requests).toHaveLength(5);
     expect((await loadProject(dir)).captions.style.maxWords).toBe(2);
   });
@@ -160,7 +160,7 @@ describe('a note and the checked rules', () => {
     const { dir, ai, host } = await setup();
     const max = { kind: 'captions.maxSize', value: 105 } as const;
     await ai().addStyleRule(ruleText(max), undefined, max);
-    host.ruleFails = (r, p) => (p.captions.style.size > r.check.value ? { text: 'hello', px: p.captions.style.size } : null);
+    host.ruleFails = (r, p) => (r.check.kind === 'captions.maxSize' && p.captions.style.size > r.check.value ? { text: 'hello', px: p.captions.style.size } : null);
     const model = new ScriptedModel([finish('I kept the subtitles at your size.')]);
     const r = await ai(model).applyNote(dir, 'bigger subtitles', () => undefined);
     expect(r.fast).toBeUndefined();
@@ -176,7 +176,7 @@ describe('a note and the checked rules', () => {
     const r = await ai(new ScriptedModel([{ toolCalls: [words(2)] }, finish('Done.')])).applyNote(dir, 'two words per subtitle', () => undefined);
     expect(r.summary).toBe('Done. I couldn\'t check your My style rule "Keep subtitles in the top third": it needs a newer version of Reel Studio.');
     expect(host.rulesFiles.length).toBeGreaterThan(0);
-    expect(host.rulesFiles.every((f) => f.rules.length === 0)).toBe(true);
+    expect(host.rulesFiles.every((f) => f.rules.every((r: { id: string }) => isDefaultRule(r.id)))).toBe(true);
     // a note that changes nothing says so too
     const idle = await ai(new ScriptedModel([finish('Nothing to change.')])).applyNote(dir, 'looks good, thanks', () => undefined);
     expect(idle.summary).toMatch(/^Nothing to change\. \(Your video didn't change, so there's no new version\.\) I couldn't check your My style rule/);
@@ -216,5 +216,97 @@ describe('proposing a checked rule', () => {
     ])).applyNote(dir, 'no subtitles, and keep them short next time', () => undefined);
     expect(r.styleChecks).toBeUndefined();
     expect(r.styleSuggestions).toEqual(['Keep subtitles short.']);
+  });
+});
+
+describe("Reel Studio's default taste", () => {
+  const SAME_SIZE = 'Reel Studio default: Show every subtitle at the same size.';
+  /** The stand-in for rule_checks.py's uniformSize checker: captions over 120 px get shrunk to fit. */
+  const shrinksBigCaptions = (r: { check: any }, p: any) =>
+    r.check.kind === 'captions.uniformSize' && p.captions.style.size > 120 ? { text: 'extraordinarily', px: 98 } : null;
+
+  it('adds every default the person has not set themselves, in words that say it is a default', () => {
+    const all = withDefaults([]);
+    expect(all.map((r) => r.check)).toEqual(DEFAULT_CHECKS);
+    expect(all.every((r) => isDefaultRule(r.id) && r.text.startsWith('Reel Studio default: '))).toBe(true);
+    const mine = { id: 'mine', text: ruleText(TWO_WORDS), check: TWO_WORDS };
+    const withMine = withDefaults([mine]);
+    expect(withMine[0]).toBe(mine);
+    expect(withMine.filter((r) => r.check.kind === 'captions.maxWords')).toEqual([mine]);
+    expect(withMine).toHaveLength(DEFAULT_CHECKS.length);
+  });
+
+  it('describes every default and where it fails, with the engine\'s places', () => {
+    const place = { t0: 61, t1: 63.5, text: 'one two three', px: 88, lines: 2, item: 'b2', seconds: 1.2, asset: 'Library/images/a.png', zooms: 7, allowed: 4 };
+    for (const c of DEFAULT_CHECKS) {
+      expect(parseCheck(c)).toEqual(c);
+      expect(ruleText(c)).toMatch(/^[A-Z].*\.$/);
+      const why = failureText({ id: 'x', kind: c.kind, count: 1, places: [place] }, c);
+      expect(why, c.kind).not.toMatch(/undefined|NaN/);
+    }
+    const why = (c: RuleCheck) => failureText({ id: 'x', kind: c.kind, count: 1, places: [place] }, c);
+    expect(why({ kind: 'broll.cardHold', value: 2 })).toBe('1 card leaves too soon to read (b2, 1.2 s at 1:01)');
+    expect(why({ kind: 'face.maxBare', value: 4 })).toBe('1 stretch shows only the face too long (1.2 s from 1:01)');
+    expect(why({ kind: 'zooms.maxPerMinute', value: 6 })).toBe('the reel has 7 zooms; its length allows 4');
+    expect(ruleText({ kind: 'broll.clipLength', min: 0.5, max: 1.5 })).toBe('Keep each video clip on screen 0.5 to 1.5 seconds.');
+  });
+
+  it('every AI edit sends the defaults with its renders, and a My style rule of the same kind replaces one', async () => {
+    const { dir, ai, host } = await setup();
+    const mine = await ai().addStyleRule(ruleText(TWO_WORDS), undefined, TWO_WORDS);
+    await ai(new ScriptedModel([{ toolCalls: [words(2)] }, finish()])).applyNote(dir, 'two words per subtitle', () => undefined);
+    const ids = host.rulesFiles[0].rules.map((r: { id: string }) => r.id);
+    expect(ids).toEqual([mine.id, ...DEFAULT_CHECKS.filter((c) => c.kind !== 'captions.maxWords').map((c) => `default:${c.kind}`)]);
+    // a new video meets them all: the final render stops on every one
+    expect(host.rulesFiles[0].stopOn).toEqual(ids);
+  });
+
+  // cut-style.ts: clean holds the face 6 to 10 s, hyper fills the opening and zooms more
+  it.each(['clean', 'hyper'])('an edit in the %s cut style is not measured against the pace defaults, only the others', async (preset) => {
+    const { dir, ai, host } = await setup();
+    const p = JSON.parse(await fsp.readFile(path.join(dir, 'project.json'), 'utf8'));
+    await fsp.writeFile(path.join(dir, 'project.json'), JSON.stringify({ ...p, cutStyle: { preset, seed: 1 } }));
+    await ai(new ScriptedModel([{ toolCalls: [words(2)] }, finish()])).applyNote(dir, 'two words per subtitle', () => undefined);
+    const kinds = host.rulesFiles[0].rules.map((r: { check: RuleCheck }) => r.check.kind);
+    expect(kinds).toEqual(DEFAULT_CHECKS.map((c) => c.kind).filter((k) => !['opening.calm', 'face.maxBare', 'zooms.maxPerMinute'].includes(k)));
+  });
+
+  it('a preview that breaks a default is fixed before finish', async () => {
+    const { dir, ai, host } = await setup({ finalRender: false });
+    host.ruleFails = shrinksBigCaptions;
+    const model = new ScriptedModel([
+      { toolCalls: [call('set_caption_style', { size: 140 })] }, { toolCalls: [call('render_draft')] }, finish(),
+      { toolCalls: [call('set_caption_style', { size: 105 })] }, finish('Bigger, and every caption the same size.'),
+    ]);
+    const r = await ai(model).applyNote(dir, 'captions a bit bigger', () => undefined);
+    expect(sent(model)[2]).toContain(SAME_SIZE);
+    expect(sent(model)[3]).toContain('Not finished: the newest render breaks this rule');
+    expect((await loadProject(dir)).captions.style.size).toBe(105);
+    expect(r.summary).toBe('Bigger, and every caption the same size.');
+  });
+
+  it('a default the note asks against gives way, and the reply never calls it the person\'s rule', async () => {
+    const { dir, ai, host } = await setup();
+    host.ruleFails = shrinksBigCaptions;
+    const model = new ScriptedModel([{ toolCalls: [call('set_caption_style', { size: 140 })] }, finish('Huge captions.'),
+      finish('Kept.'), finish('You asked for huge captions, so I kept them.')]);
+    const r = await ai(model).applyNote(dir, 'make the captions huge', () => undefined);
+    expect(task(model, 2)).toContain(`"${SAME_SIZE}": 1 subtitle was shrunk to fit`);
+    expect(task(model, 2)).toContain('A "Reel Studio default" also gives way to the user\'s My style rules');
+    // the fix's summary replaces the first one, so it is handed what that one said
+    expect(task(model, 2)).toContain('Your earlier summary was: "Huge captions."');
+    expect((await loadProject(dir)).captions.style.size).toBe(140);
+    expect(r.summary).toBe('You asked for huge captions, so I kept them.');
+  });
+
+  it('a version rendered before the defaults existed is not chased over them', async () => {
+    const { dir, ai, host } = await setup();
+    await savedAs(dir, 4, { ok: true, checked: 0, checkedIds: [], failures: [], measured: {} }, (p) => { p.captions.style.size = 140; });
+    host.ruleFails = shrinksBigCaptions;
+    const model = new ScriptedModel([{ toolCalls: [call('set_caption_style', { color: '#3366FF' })] }, finish('The captions are blue.')]);
+    const r = await ai(model).applyNote(dir, 'make the captions blue', () => undefined);
+    expect(model.requests).toHaveLength(2);
+    expect(host.rulesFiles.at(-1).stopOn).toEqual([]);
+    expect(r.summary).toBe('The captions are blue.');
   });
 });

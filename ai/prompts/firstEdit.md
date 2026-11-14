@@ -8,7 +8,7 @@ Call get_project, then get_transcript. Read the whole transcript before you cut 
 
 ## 2. Cut the red thread
 
-Pick the best take of each beat using the cut rules in your doctrine: the last complete clean take usually wins, drop false starts, doubles, filler and meta-talk, keep everything said only once, keep the hook. Call set_cut once with the full keep list in output order. Then set_gap_cap: tight (about 0.12 s) for normal talk, looser (0.25 to 0.4 s) for slow, heartfelt delivery.
+Pick the best take of each beat using the cut rules in your doctrine: the last complete clean take usually wins, drop false starts, doubles and meta-talk, keep everything said only once (small ums and slips included), keep the hook. Call set_cut once with the full keep list in output order. Leave the pauses at the 0.25 s default; call set_gap_cap only for slow, heartfelt delivery (0.3 to 0.4 s).
 
 ## 3. Captions
 
@@ -20,7 +20,7 @@ Call set_caption_style only if the default does not suit the video (keep 2 to 3 
 
 ## 4. Music
 
-Call list_library with kind music (in the same reply as kind images and kind broll). Its songs[] tell you what each track SOUNDS like (energy, mood, bpm), measured by listening. Name the video's tone in one or two words, then pick only among the moods that tone allows: heartfelt, reflective or sad: gentle, melancholic, dreamy, light. Funny or a comedy story: upbeat, light, hype. Explainer, how-to or day story: upbeat, steady groove. Rant, opinion, hot take, announcement or hype: driving, hype, upbeat, dramatic. Within those, prefer a song whose instrument or genre matches the topic (the file name can say that; it cannot say the mood). Call choose_music with the chosen Library path, level under-voice (quiet for intimate talk) and startAt null (the engine finds a calm entry). The music ends with the last word (a short cut, never a long fade); do not add automation for the ending. If the video has a clear payoff moment, lift the music gently on those words with set_music_automation. If the library is empty, skip music.
+Call list_library with kind music (in the same reply as kind images and kind broll). Its songs[] tell you what each track SOUNDS like (energy, mood, bpm), measured by listening. Name the video's tone in one or two words, then pick only among the moods that tone allows: heartfelt, reflective or sad: gentle, melancholic, dreamy, light. Funny or a comedy story: upbeat, light, hype. Explainer, how-to or day story: upbeat, steady groove. Rant, opinion, hot take, announcement or hype: driving, hype, upbeat, dramatic. Within those, prefer a song whose instrument or genre matches the topic (the file name can say that; it cannot say the mood). Call choose_music with the chosen Library path, level under-voice (quiet for intimate talk) and startAt null (the engine starts the song on its attack). The music ends with the last word (a short cut, never a long fade); do not add automation for the ending. If the video has a clear payoff moment, lift the music gently on those words with set_music_automation. If the library is empty, skip music.
 
 ## 5. Hook title
 
@@ -28,7 +28,7 @@ add_broll a text-pop over the hook sentence (first kept word to the end of the h
 
 ## 6. Plan the b-roll
 
-Walk the kept transcript in 4-second windows and write the plan in your head: for EVERY window, what will the screen show (a picture, an animation, a text-pop, or a zoom)? Then list the moments where a visual would SHOW the point being made (the named thing, a place, a proof, a number, a list item, a quote). Expect 12 to 20 b-roll moments in a 60 to 90 second video, spread across the whole video including the ending; windows with nothing to show get a zoom in step 7.
+Walk the kept transcript in 4-second windows and write the plan in your head: for EVERY window, what will the screen show (a picture, an animation, a text-pop, or a zoom)? Then list the moments where a visual would be evidence for the point (the named thing, a place, a proof, a number, a list item, a quote), across the whole video after the first 3 seconds. Windows with nothing honest to show get a zoom in step 7 or stay on the face.
 
 For each moment, find the asset in this order:
 1. list_library with kind images and kind broll (call each once, then match from the results). Place a Library picture or clip with add_broll and its path; it needs no resolve_asset.
@@ -37,11 +37,11 @@ For each moment, find the asset in this order:
 
 Named things are the easiest honest pictures: give every brand, app, tool, product, company, game or show named in the kept words its own search_images "<name> logo" (NAMES HEARD lists the capitalised ones; also catch names said in lower case), and every named place or event a "<name> photo", all in your first search reply. A named thing left with nothing on screen is the most common gap between a first edit and a hand edit.
 
-Place each with add_broll, anchored to the words it illustrates, with the treatment that fits. Send many add_broll calls in one turn. A picture needs about 2 seconds on screen to be read: anchor it on its whole phrase, and do not start the next visual less than about 1.5 seconds after it. When several names come in one quick breath ("in SF or New York"), show one card for the phrase (or an icon-wall for a row of brands), not a flash per word. Then count: b-roll moments should reach about one per 6 seconds of video (12 or more in 70 seconds). If you are short, go back over the longest face-only stretches and add a picture or an animation; a zoom alone is the fill only where nothing honest exists. Use each asset once. Any number, price or claim on screen must match the spoken words exactly. Never invent a fact.
+Place each with add_broll, anchored to the words it illustrates, with the treatment that fits. Send many add_broll calls in one turn. A picture needs 2 seconds to be read: anchor it on its whole phrase and start the next visual after that. A clip stays 0.5 to 1.5 seconds. When several names come in one quick breath ("in SF or New York"), show one card for the phrase (or an icon-wall for a row of brands), not a flash per word. Then count: b-roll moments should reach about one per 6 seconds of video (12 or more in 70 seconds). If you are short, go back over the longest face-only stretches and add a picture or an animation; a zoom alone is the fill only where nothing honest exists. Use each asset once. Any number, price or claim on screen must match the spoken words exactly. Never invent a fact.
 
 ## 7. Zooms
 
-List the face-only stretches left after step 6 (from the end of one visual to the start of the next, using the word times). Call set_zoom once with every zoom: one on each punchline or key line, plus one in the MIDDLE of every face-only stretch longer than about 4 seconds, so neither side of it stays bare for more than about 4 seconds; a stretch longer than about 8 seconds needs a picture, an animation or two zooms. Each zoom spans a whole line from its first word, scale about 1.08 to 1.15, never under a b-roll that hides the face. Expect about 4 to 8 per minute.
+List the face-only stretches left after step 6 (from the end of one visual to the start of the next, using the word times). Call set_zoom once with every zoom: one on each punch line, and one in the MIDDLE of a face-only stretch over about 4 seconds with nothing honest to show; a stretch over about 8 seconds needs a picture. Each spans a whole line, scale about 1.08 to 1.15, never under a face-hiding b-roll or in the first 3 seconds. At most about 6 per minute.
 
 ## 8. Cover
 
@@ -56,7 +56,7 @@ Call write_post with:
 
 ## 10. Render and look
 
-Call render_draft (with cover_candidates in the same reply). Then call look_at_frames once (with set_cover in the same reply) with 4 to 6 times: the opening (about 1 s) plus the web pictures and cards you are least sure of. Check: the hook title reads, every picture really shows what is said (a wrong web picture gets removed or replaced), text is big enough, eyes and mouth clear, numbers match the words, and text in the room (posters, signs, shirts) does not read backwards: if it does, the take is mirrored, so call set_mirror with on true (see "Mirrored take" in your doctrine) and say so in your summary in one plain line. Fix only real problems (wrong word, face covered, unreadable text, black frame, a number that does not match). The render result also lists tooShort (visuals that flash by in under 1.2 s), faceOnly (bare stretches), noPicture (pictures clumped, zooms only) and namedNotShown (names with nothing on screen): fix those in the same reply. If you changed anything, call render_draft again. Do not render more than twice unless something is broken.
+Call render_draft (with cover_candidates in the same reply). Then call look_at_frames once (with set_cover in the same reply) with 4 to 6 times: the opening (about 1 s) plus the web pictures and cards you are least sure of. Check: the hook title reads, every picture really shows what is said (a wrong web picture gets removed or replaced), text is big enough, eyes and mouth clear, numbers match the words, and text in the room (posters, signs, shirts) does not read backwards: if it does, the take is mirrored, so call set_mirror with on true (see "Mirrored take" in your doctrine) and say so in your summary in one plain line. Fix only real problems (wrong word, face covered, unreadable text, black frame, a number that does not match). The render result also lists myStyleRules (rules it breaks), tooShort (visuals that flash by in under 1.2 s), faceOnly (bare stretches), noPicture (pictures clumped, zooms only) and namedNotShown (names with nothing on screen): fix those in the same reply. If you changed anything, call render_draft again. Do not render more than twice unless something is broken.
 
 ## 11. Finish
 

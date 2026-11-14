@@ -283,7 +283,12 @@ Agent tasks:
    sees a failing rule in `render_draft`, and `finish` refuses once while the newest render fails one and
    nothing changed. A final render that fails a rule stops before its encode and the editor gets one short fix
    run; then the reel is made and the reply names any rule still failing. Rules already failing in the version
-   the note started from are named, not chased.
+   the note started from are named, not chased. Reel Studio's default taste rides the same checks for every
+   user (`DEFAULT_CHECKS` in `ai/src/rules.ts`): a calm opening, one-line subtitles at one size, each picture
+   used once, short clips, cards held 2 s, nothing on the face, no long bare face, few zooms. A My style rule
+   of the same kind replaces a default, and the three about pace (the opening, the bare face, the zooms) give
+   way to a cut style other than standard, which sets its own pace (`forCutStyle`). The editor is told a
+   default gives way to the note and My style, and the reply never names a default as the person's rule.
 3. **Idea to script**: a hook, a spoken script and on-screen text in the user's voice.
 
 Prompts are plain markdown in `ai/prompts/`.

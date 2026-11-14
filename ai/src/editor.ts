@@ -8,7 +8,7 @@ import type { LookupFn } from './safety';
 import { Prompts } from './prompts';
 import { StyleStore, StyleProposal, StyleRule, captionCaseProposal } from './style';
 import { nicheVars } from './niche';
-import { Measured, RuleFailure, RuleReport, StyleCheckProposal, checkFromMeasured, failureText, ruleText } from './rules';
+import { Measured, RuleFailure, RuleReport, StyleCheckProposal, checkFromMeasured, failureText, isDefaultRule, ruleText, withDefaults } from './rules';
 import { NoteRules, RenderInfo, ToolContext, ToolState, captionWithCredits, captionsForProofread, doRender, unsureWords, executeTool, load, newToolState, resolveAsset, cleanSummary, renderEvent, operationStatus, noteBase, stageMerge, ToolInputError, TOOL_NAMES, unmetRules, writeEdit } from './tools';
 import { planFastNote } from './fastnote';
 import { LEDGER } from './assets';
@@ -319,9 +319,12 @@ async function finalize(deps: EditorDeps, ctx: ToolContext, onEvent: (e: AgentEv
   return (await render(false))!;
 }
 
-/** The checked My style rules an AI edit measures, and what the version it starts from measured (its render.json). */
+/** The checked rules an AI edit measures (My style's, then Reel Studio's defaults), and what the version it starts
+ * from measured (its render.json). */
 async function noteRules(deps: EditorDeps, projectDir: string, version: number): Promise<{ rules: NoteRules; unreadable: StyleRule[]; measured: Measured | null }> {
-  const { active, unreadable } = await deps.style.checks();
+  const style = await deps.style.checks();
+  const active = withDefaults(style.active);
+  const unreadable = style.unreadable;
   let start: RuleReport | null = null;
   if (version > 0) {
     try { start = JSON.parse(await fsp.readFile(path.join(versionDir(projectDir, version), 'render.json'), 'utf8'))?.ruleChecks ?? null; } catch { /* rendered before rules were checked */ }
@@ -353,12 +356,14 @@ function rulesFixer(deps: EditorDeps, provider: ModelProvider, ctx: ToolContext,
     ctx.maxDraftRenders = 0;
     onEvent({ type: 'status', message: 'Fixing it to match your My style', phase: 'edit' });
     const task = [
-      "The edit is done, but the finished reel breaks the user's My style rules, which the app measures on every render:",
+      "The edit is done, but the finished reel breaks these rules, which the app measures on every render:",
       ...unmet.map((f) => `- "${byId.get(f.id)?.text ?? f.id}": ${failureText(f, byId.get(f.id)?.check)}`),
       ...(note ? [`The user's note was: ${JSON.stringify(note)}. Keep what it asked for.`] : []),
       'Change the project so each rule holds, then call finish. There are no more previews: the final reel is measured again.',
       'If the note asked for exactly the opposite of a rule, change nothing and call finish.',
-      'Your summary_for_user replaces your earlier one: say what the reel now does, and where it differs from the note because of a rule.',
+      "A \"Reel Studio default\" also gives way to the user's My style rules: if one of those asks otherwise, leave it.",
+      "Your summary_for_user replaces your earlier one, so it covers the whole edit as it now stands, not only this fix: say what the reel now does, and where it differs from the note because of a rule.",
+      ...(finished ? [`Your earlier summary was: ${JSON.stringify(finished)}`] : []),
     ].join('\n');
     try {
       await runAgent({ provider, system: await systemPrompt(deps, ctx), task, ctx, onEvent, signal, maxSteps: 8, maxMisses: 3, tokenBudget: deps.tokenBudget, preload: ['get_project'] });
@@ -372,10 +377,11 @@ function rulesFixer(deps: EditorDeps, provider: ModelProvider, ctx: ToolContext,
   };
 }
 
-/** What the reply says about checked rules, in the app's words: each one the reel still breaks, and each one this
- * version could not check. Nothing when every rule holds. */
+/** What the reply says about checked rules, in the app's words: each My style rule the reel still breaks, and each
+ * one this version could not check. Nothing when every rule holds. Reel Studio's defaults are not the person's
+ * rules: one the AI left broken (often because the note asked for it) goes unmentioned. */
 function rulesReply(ctx: Pick<ToolContext, 'rules' | 'state'>, unreadable: StyleRule[]): string {
-  const byId = new Map((ctx.rules?.active ?? []).map((r) => [r.id, r]));
+  const byId = new Map((ctx.rules?.active ?? []).filter((r) => !isDefaultRule(r.id)).map((r) => [r.id, r]));
   const quote = (t: string) => `"${t.replace(/\.$/, '')}"`;
   // with no render in this note, the reel is the version it started from, and that version's report holds
   const failed = (ctx.state.ruleChecks?.failures ?? ctx.rules?.startFailures ?? []).filter((f) => byId.has(f.id))
