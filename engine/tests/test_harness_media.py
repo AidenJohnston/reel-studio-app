@@ -31,17 +31,18 @@ def test_preview_with_missing_or_empty_candidate_audio_is_a_failed_check(monkeyp
     assert result["frames"] == 1
 
 
-@pytest.mark.parametrize("millisecond_seek", [True, False])
-def test_still_comparison_uses_the_engines_seek_precision(monkeypatch, millisecond_seek):
+@pytest.mark.parametrize("t,frame", [(3.437, 103), (103 / 29.97, 103), (2 / 29.97, 2), (0.0, 0)])
+def test_still_comparison_uses_the_frame_nearest_the_time(monkeypatch, t, frame):
+    """`frames` and `moments` both show the frame nearest t (render.frame_at). At 29.97 fps frame 103 starts
+    at 3.4368 s and is asked for as 3.437 s: the frame after that time would be 104."""
     fps = 29.97
-    frames = [np.full((2, 2, 3), n, dtype=np.uint8) for n in (0, 100, 200)]
-    monkeypatch.setattr(media, "read_image", lambda path: frames[2 if millisecond_seek else 1])
-    monkeypatch.setattr(media, "video_pts", lambda *args: [0.0, 2 / fps, 3 / fps])
+    frames = [np.full((2, 2, 3), n, dtype=np.uint8) for n in range(110)]
+    monkeypatch.setattr(media, "read_image", lambda path: frames[frame])
+    monkeypatch.setattr(media, "video_pts", lambda *args: [n / fps for n in range(110)])
     monkeypatch.setattr(media, "iter_frames", lambda *args: iter(frames))
     monkeypatch.setattr(media, "video_size", lambda *args: (2, 2))
-    # 2/fps is 0.066733...; frames.py seeks to 0.067, after that frame's start.
-    result = checks.check_still("ffmpeg", "ffprobe", Path("ref.mp4"), Path("still.png"), 2 / fps,
-                                [], {"otherPsnrMinDb": 30.0}, (2, 2), millisecond_seek=millisecond_seek)
+    result = checks.check_still("ffmpeg", "ffprobe", Path("ref.mp4"), Path("still.png"), t,
+                                [], {"otherPsnrMinDb": 30.0}, (2, 2))
     assert result["status"] == "unset"
     assert result["metrics"]["otherPsnr"]["value"] == "inf"
 
