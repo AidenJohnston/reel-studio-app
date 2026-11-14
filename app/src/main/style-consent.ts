@@ -2,9 +2,10 @@
 // The AI either PROPOSES rules (`styleSuggestions`, stream quality2) or, in older packages, already SAVED them
 // (`styleRulesAdded`) and announced it in its reply. Either way the app turns them into a question,
 // "Remember this for next time?", undoes any rule saved without asking, and drops the announcement.
-// A typed rule (`proposal`, lowercase captions) is asked about the same way and saved with its own consent.
+// A typed rule (`proposal`, lowercase subtitles) is asked about the same way.
+// My style records each answer, with what it did, in one write; the chat question is a view of that record.
 // No Electron, no files: main passes in the app state and the AI.
-import type { ChatMessage, RuleCheck, StyleProposal, StyleRule } from '../shared/api'
+import type { ChatMessage, RuleCheck, StyleAnswerStatus, StyleProposal, StyleQuestion, StyleRule } from '../shared/api'
 
 /** A chat message before it gets its id and time (store.ts). */
 export type ChatLine = Omit<ChatMessage, 'id' | 'at'>
@@ -80,11 +81,10 @@ export async function askAboutStyle(
 
 export interface AnswerDeps {
   chat(slug: string): Promise<ChatMessage[]>
-  addStyleRule?(text: string, from?: Pick<StyleRule, 'source'>, check?: RuleCheck): Promise<unknown>
   /** The reel's title, for where a rule was learned. */
   title(slug: string): Promise<string>
-  approveStyleProposal?(p: StyleProposal): Promise<{ status: 'saved' | 'exists' | 'forgotten' }>
-  declineStyleProposal?(p: StyleProposal): Promise<void>
+  answer?(q: StyleQuestion, yes: boolean): Promise<{ status: StyleAnswerStatus }>
+  answerOf?(id: string): Promise<{ yes: boolean; status: StyleAnswerStatus } | null>
   /** Take the buttons off the question and add the editor's reply. */
   settle(slug: string, messageId: string, reply: string): Promise<void>
   serialized<T>(key: string, fn: () => Promise<T>): Promise<T>
@@ -92,12 +92,6 @@ export interface AnswerDeps {
 
 const NOT_READY = { code: 'NOT_READY', userMessage: 'That could not be saved to My style. Try again later.' }
 const NOT_SAVED = { code: 'NOT_SAVED', userMessage: 'That could not be saved to My style. Try again.' }
-const CHECKED_REPLY = "Saved. I'll check this on every new reel. You can pause or forget it in My style."
-const TYPED_REPLY = {
-  saved: 'Saved. Your next reels will start with lowercase subtitles. You can pause or forget it in My style.',
-  exists: 'That is already in My style.',
-  forgotten: 'That was forgotten in My style, so it stays with this reel only.'
-}
 
 /** The note a question answers (the last one you sent before it) and the version it made, for My style's "Learned from". */
 async function learnedFrom(d: AnswerDeps, slug: string, messageId: string): Promise<NonNullable<StyleRule['source']>> {
@@ -108,34 +102,59 @@ async function learnedFrom(d: AnswerDeps, slug: string, messageId: string): Prom
   return { project: slug, title: await d.title(slug), version, ...(note ? { note } : {}) }
 }
 
-/** "Remember this for next time?" Yes saves the rule; either answer replaces the buttons with a plain reply.
- * One answer at a time per video, so a double click saves and replies once. The reply comes only after the
- * rule is safely saved; if saving fails the question stays, with its buttons, to try again. */
+/** The question a chat message asks, as My style answers it, or null when it asks none. */
+async function questionOf(d: AnswerDeps, slug: string, m: ChatMessage | undefined): Promise<StyleQuestion | null> {
+  if (!m?.actions?.includes('remember-yes')) return null
+  if (m.proposal) return { id: m.proposal.id, text: m.proposal.text, payload: m.proposal.payload, source: m.proposal.source }
+  return m.suggestion ? { id: m.id, text: m.suggestion, source: await learnedFrom(d, slug, m.id), ...(m.check ? { check: m.check } : {}) } : null
+}
+
+/** What the editor says about an answer. */
+function replyFor(q: StyleQuestion, status: StyleAnswerStatus): string {
+  switch (status) {
+    case 'saved':
+      return q.payload
+        ? 'Saved. Your next reels will start with lowercase subtitles. You can pause or forget it in My style.'
+        : q.check
+          ? "Saved. I'll check this on every new reel. You can pause or forget it in My style."
+          : 'Saved. Your next reels get this too. You can pause or forget it in My style.'
+    case 'exists':
+      return 'That is already in My style.'
+    case 'paused':
+      return 'That is in My style, but paused. Turn it back on in My style to use it in your next reels.'
+    case 'forgotten':
+      return 'That was forgotten in My style, so it stays with this reel only.'
+    case 'declined':
+      return 'OK, only for this reel.'
+  }
+}
+
+/** "Remember this for next time?" One write to My style records the answer and what it did; then the buttons are
+ * replaced with the reply. A crash between the two leaves the answer recorded, and the next look at the chat shows the
+ * question answered (showAnswered). One answer at a time per reel, so a double click answers and replies once. If
+ * My style can't be written, the question stays, with its buttons, to try again. */
 export function answerStyleQuestion(d: AnswerDeps, slug: string, messageId: string, yes: boolean): Promise<void> {
   return d.serialized(`style-answer:${slug}`, async () => {
-    const m = (await d.chat(slug)).find((x) => x.id === messageId)
-    if (!(m?.suggestion || m?.proposal) || !m.actions?.includes('remember-yes')) return
-    let reply = yes ? 'Saved. Your next reels get this too. You can pause or forget it in My style.' : 'OK, only for this reel.'
-    if (yes && m.proposal) {
-      if (!d.approveStyleProposal) throw NOT_READY
-      const r = await d.approveStyleProposal(m.proposal).catch(() => {
-        throw NOT_SAVED
-      })
-      reply = TYPED_REPLY[r.status]
-    } else if (yes) {
-      if (!d.addStyleRule) throw NOT_READY
-      if (m.check) {
-        await d.addStyleRule(m.suggestion!, { source: await learnedFrom(d, slug, messageId) }, m.check).catch(() => {
-          throw NOT_SAVED
-        })
-        reply = CHECKED_REPLY
-      } else await d.addStyleRule(m.suggestion!, { source: await learnedFrom(d, slug, messageId) })
-    } else if (m.proposal && d.declineStyleProposal) {
-      // a Yes saved just before a crash, then No: the No wins
-      await d.declineStyleProposal(m.proposal).catch(() => {
-        throw NOT_SAVED
-      })
+    const q = await questionOf(d, slug, (await d.chat(slug)).find((x) => x.id === messageId))
+    if (!q) return
+    if (!d.answer) throw NOT_READY
+    const r = await d.answer(q, yes).catch(() => {
+      throw NOT_SAVED
+    })
+    await d.settle(slug, messageId, replyFor(q, r.status))
+  })
+}
+
+/** The chat as a view of My style's record: every question still showing its buttons whose answer My style has
+ * recorded (its reply was cut off) is shown answered, with the reply for what that answer did. */
+export function showAnswered(d: AnswerDeps, slug: string): Promise<void> {
+  return d.serialized(`style-answer:${slug}`, async () => {
+    if (!d.answerOf) return
+    for (const m of await d.chat(slug)) {
+      if (!m.actions?.includes('remember-yes')) continue
+      const a = await d.answerOf(m.proposal?.id ?? m.id)
+      const q = a && (await questionOf(d, slug, m))
+      if (q && a) await d.settle(slug, m.id, replyFor(q, a.status))
     }
-    await d.settle(slug, messageId, reply)
   })
 }

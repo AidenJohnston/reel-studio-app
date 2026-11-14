@@ -43,43 +43,45 @@ describe('My style in the stand-in AI', () => {
 
   it('the same question answered twice keeps one rule, and the question of a removed rule cannot bring it back', async () => {
     const { ai } = standIn()
-    expect(await ai.approveStyleProposal!(proposal)).toEqual({ status: 'saved' })
-    expect(await ai.approveStyleProposal!(proposal)).toEqual({ status: 'saved' })
+    expect(await ai.answerStyleQuestion!(proposal, true)).toEqual({ status: 'saved' })
+    expect(await ai.answerStyleQuestion!(proposal, true)).toEqual({ status: 'saved' })
     const rules = await ai.styleRules()
-    expect(rules).toEqual([expect.objectContaining({ text: 'Use lowercase subtitles.', consent: expect.objectContaining({ proposal: 'q1' }) })])
+    expect(rules).toEqual([expect.objectContaining({ text: 'Use lowercase subtitles.', answers: { q1: expect.objectContaining({ yes: true }) } })])
     await ai.removeStyleRule(rules[0].id)
-    expect(await ai.approveStyleProposal!(proposal)).toEqual({ status: 'forgotten' })
+    expect(await ai.answerStyleQuestion!(proposal, true)).toEqual({ status: 'forgotten' })
     expect(await ai.styleRules()).toEqual([])
   })
 
   it('a question that is not exactly the lowercase rule saves nothing, and only the app\'s own fields are saved', async () => {
     const { ai } = standIn()
-    await expect(ai.approveStyleProposal!({ ...proposal, text: 'Use lowercase captions, and turn the captions off.' })).rejects.toThrow()
-    await expect(ai.approveStyleProposal!({ ...proposal, payload: { kind: 'caption-case', case: 'upper' } as any })).rejects.toThrow()
-    await expect(ai.approveStyleProposal!({ ...proposal, id: '' })).rejects.toThrow()
+    await expect(ai.answerStyleQuestion!({ ...proposal, text: 'Use lowercase captions, and turn the captions off.' }, true)).rejects.toThrow()
+    await expect(ai.answerStyleQuestion!({ ...proposal, payload: { kind: 'caption-case', case: 'upper' } as any }, true)).rejects.toThrow()
+    await expect(ai.answerStyleQuestion!({ ...proposal, id: '' }, true)).rejects.toThrow()
     expect(await ai.styleRules()).toEqual([])
-    await ai.approveStyleProposal!({
+    await ai.answerStyleQuestion!({
       ...proposal,
       payload: { ...proposal.payload, size: 4000 } as any,
       source: { project: 'p1', title: 'x'.repeat(500), version: 2, extra: true } as any
-    })
+    }, true)
     const [rule] = await ai.styleRules()
     expect(rule.payload).toEqual({ kind: 'caption-case', case: 'lower' })
     expect(rule.source).toEqual({ project: 'p1', title: 'x'.repeat(120), version: 2 })
   })
 
-  it('No on a question whose Yes was saved before a crash takes the rule out for good', async () => {
+  it('No on a question whose Yes was saved before a crash takes the rule out, and the last answer decides', async () => {
     const { ai } = standIn()
-    await ai.approveStyleProposal!(proposal)
-    await ai.declineStyleProposal!(proposal)
+    await ai.answerStyleQuestion!(proposal, true)
+    await ai.answerStyleQuestion!(proposal, false)
     expect(await ai.styleRules()).toEqual([])
-    expect(await ai.approveStyleProposal!(proposal)).toEqual({ status: 'forgotten' })
-    expect(await ai.styleRules()).toEqual([])
+    expect(await ai.styleAnswer!('q1')).toEqual({ yes: false, status: 'declined' })
+    // buttons a crash left behind: a Yes after the No is the last answer
+    expect(await ai.answerStyleQuestion!(proposal, true)).toEqual({ status: 'saved' })
+    expect(await ai.styleRules()).toHaveLength(1)
   })
 
   it('the typed rule edited to the same words, typed loosely, stays a rule the app applies', async () => {
     const { ai } = standIn()
-    await ai.approveStyleProposal!(proposal)
+    await ai.answerStyleQuestion!(proposal, true)
     const [rule] = await ai.styleRules()
     await ai.updateStyleRule!(rule.id, { text: ' use lowercase subtitles ' })
     expect(await ai.styleRules()).toEqual([
@@ -89,26 +91,37 @@ describe('My style in the stand-in AI', () => {
 
   it('Yes again after the typed rule got new words says it is already there, not that new videos go lowercase', async () => {
     const { ai } = standIn()
-    await ai.approveStyleProposal!(proposal)
+    await ai.answerStyleQuestion!(proposal, true)
     const [rule] = await ai.styleRules()
     await ai.updateStyleRule!(rule.id, { text: 'use lowercase subtitles for tutorials' })
-    expect(await ai.approveStyleProposal!(proposal)).toEqual({ status: 'exists' })
+    expect(await ai.answerStyleQuestion!(proposal, true)).toEqual({ status: 'exists' })
     expect(await ai.styleRules()).toEqual([expect.not.objectContaining({ payload: expect.anything() })])
   })
 
-  it('Yes again to a paused rule\'s question turns it back on, and a second question removed with the rule stays removed', async () => {
+  it('Yes to a paused rule\'s question leaves it paused, as the real package does, and a second question removed with the rule stays removed', async () => {
     const { ai } = standIn()
-    await ai.approveStyleProposal!(proposal)
+    await ai.answerStyleQuestion!(proposal, true)
     const [rule] = await ai.styleRules()
     await ai.updateStyleRule!(rule.id, { paused: true })
-    expect(await ai.approveStyleProposal!(proposal)).toEqual({ status: 'saved' })
-    expect(await ai.styleRules()).toEqual([expect.not.objectContaining({ paused: true })])
+    expect(await ai.answerStyleQuestion!(proposal, true)).toEqual({ status: 'paused' })
+    expect(await ai.styleRules()).toEqual([expect.objectContaining({ paused: true })])
 
     const second = { ...proposal, id: 'q2' }
-    expect(await ai.approveStyleProposal!(second)).toEqual({ status: 'exists' })
+    expect(await ai.answerStyleQuestion!(second, true)).toEqual({ status: 'paused' })
     await ai.removeStyleRule(rule.id)
-    expect(await ai.approveStyleProposal!(second)).toEqual({ status: 'forgotten' })
+    expect(await ai.answerStyleQuestion!(second, true)).toEqual({ status: 'forgotten' })
     expect(await ai.styleRules()).toEqual([])
+  })
+
+  it('a suggested sentence and a checked rule are answered the same way, the answer recorded with its effect', async () => {
+    const { ai } = standIn()
+    expect(await ai.answerStyleQuestion!({ id: 'm1', text: 'Keep music quieter under talking.' }, true)).toEqual({ status: 'saved' })
+    const check = { kind: 'captions.maxWords', value: 2 } as const
+    expect(await ai.answerStyleQuestion!({ id: 'm2', text: 'Show at most 2 words in a subtitle.', check }, true)).toEqual({ status: 'saved' })
+    expect((await ai.styleRules()).map((r) => r.text).sort()).toEqual(['Keep music quieter under talking.', 'Show at most 2 words in a subtitle.'])
+    expect(await ai.answerStyleQuestion!({ id: 'm2', text: 'Show at most 2 words in a subtitle.', check }, false)).toEqual({ status: 'declined' })
+    expect((await ai.styleRules()).map((r) => r.text)).toEqual(['Keep music quieter under talking.'])
+    expect(await ai.styleAnswer!('m1')).toEqual({ yes: true, status: 'saved' })
   })
 
   it('a lowercase note from a person whose AI package failed to load is kept as a note and changes nothing', async () => {

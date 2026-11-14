@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import * as fsp from 'node:fs/promises';
 import * as path from 'node:path';
 import { AIError, StyleStore, createAI, executeTool, newToolState } from '../src';
+import { ruleText } from '../src/rules';
 import { FakeHost, ScriptedModel, call, makeProject, tmpDir } from './helpers';
 
 describe('a damaged My style.json', () => {
@@ -95,8 +96,8 @@ describe('asking again for a rule paused in My style turns it back on', () => {
     expect((await executeTool(ctx, 'add_style_rule', { rule: 'Put a yellow box behind the captions.' })).isError).toBe(false);
     expect((await style.list())[0].paused).toBeUndefined();
     expect(await style.asPromptText()).toBe('- Put a yellow box behind the captions.');
-    // the rule was there before this note, so undoing the note must not delete it
-    expect(ctx.state.styleRuleIds).toEqual([]);
+    // the rule was there before this edit, so undoing the edit pauses it again and never deletes it
+    expect(ctx.state.styleChanges).toEqual([expect.objectContaining({ id: rule.id, was: 'paused' })]);
   });
 
   // a note saves My style only with the note itself (editor.ts saveNote), so a failed one changed nothing there
@@ -114,5 +115,71 @@ describe('asking again for a rule paused in My style turns it back on', () => {
     await expect(ai.applyNote(dir, 'always put a yellow box behind the captions', () => undefined)).rejects.toMatchObject({ code: 'chatgpt_usage_limit' });
     expect(await style.list()).toEqual([expect.objectContaining({ id: rule.id, paused: true })]);
     expect(await style.asPromptText()).toBe('(none yet)');
+  });
+});
+
+describe('answering a "Remember this for next time?" question about a sentence or a checked rule', () => {
+  const store = () => { const root = tmpDir('style answers '); return new StyleStore(() => root); };
+
+  it('Yes saves the sentence and records the answer in the same write; No takes back only that Yes', async () => {
+    const style = store();
+    const q = { id: 'm-1', text: 'Keep music quieter under talking.' };
+    expect(await style.answer(q, true)).toEqual({ status: 'saved' });
+    expect(await style.answerOf('m-1')).toMatchObject({ yes: true, status: 'saved' });
+    expect((await style.list()).map((r) => r.text)).toEqual(['Keep music quieter under talking.']);
+    expect(await style.answer(q, false)).toEqual({ status: 'declined' });
+    expect(await style.list()).toEqual([]);
+    expect(await style.answerOf('m-1')).toMatchObject({ yes: false, status: 'declined' });
+  });
+
+  it('a sentence already in My style stays as it is: kept when on, paused when paused, and a No changes neither', async () => {
+    const style = store();
+    const rule = (await style.add('Keep music quieter under talking.')).rule;
+    expect(await style.answer({ id: 'm-1', text: 'keep music quieter under talking' }, true)).toEqual({ status: 'exists' });
+    await style.update(rule.id, { paused: true });
+    expect(await style.answer({ id: 'm-2', text: 'Keep music quieter under talking.' }, true)).toEqual({ status: 'paused' });
+    await style.answer({ id: 'm-1', text: 'Keep music quieter under talking.' }, false);
+    expect(await style.list()).toEqual([expect.objectContaining({ id: rule.id, paused: true })]);
+  });
+
+  it('Yes to a checked rule replaces the one checking the same kind, and No brings it back', async () => {
+    const style = store();
+    const two = (await style.add(ruleText({ kind: 'captions.maxWords', value: 2 }), undefined, { kind: 'captions.maxWords', value: 2 })).rule;
+    const three = { id: 'm-3', text: ruleText({ kind: 'captions.maxWords', value: 3 }), check: { kind: 'captions.maxWords', value: 3 } as const };
+    expect(await style.answer(three, true)).toEqual({ status: 'saved' });
+    expect((await style.list()).map((r) => r.check)).toEqual([{ kind: 'captions.maxWords', value: 3 }]);
+    await style.answer(three, false);
+    expect(await style.list()).toEqual([expect.objectContaining({ id: two.id, check: { kind: 'captions.maxWords', value: 2 } })]);
+    // the words must be the check's: a question that says something else saves nothing
+    await expect(style.answer({ ...three, text: 'Short subtitles please.' }, true)).rejects.toThrow(/does not match/);
+  });
+
+  // only an edit without a note copy (a first edit) writes My style while it runs (tools.ts add_style_rule)
+  it('a failed edit takes back only its own change: never one the person made since, nor a rule a Yes holds since', async () => {
+    const style = store();
+    const rule = (await style.add('Keep music quieter under talking.')).rule;
+    await style.update(rule.id, { paused: true });
+    await style.undo((await style.add('Keep music quieter under talking.')).change!);
+    expect((await style.list())[0].paused).toBe(true);
+    // turned back on by the edit, then by the person in My style: their choice stands
+    const resumed = (await style.add('Keep music quieter under talking.')).change!;
+    await style.update(rule.id, { paused: false });
+    await style.undo(resumed);
+    expect((await style.list())[0].paused).toBeUndefined();
+    // saved by the edit, then answered Yes from another reel: the Yes keeps it
+    const saved = (await style.add('Cut every pause.')).change!;
+    await style.answer({ id: 'm-9', text: 'Cut every pause.' }, true);
+    await style.undo(saved);
+    expect((await style.list()).map((r) => r.text)).toContain('Cut every pause.');
+    // and without a Yes, the rule an edit saved goes
+    await style.undo((await style.add('No emojis.')).change!);
+    expect((await style.list()).map((r) => r.text)).not.toContain('No emojis.');
+  });
+
+  it('a Yes keeps the note it was learned from with the rule it saves', async () => {
+    const style = store();
+    const source = { project: 'bread', title: 'Baking bread', version: 2, note: 'keep the music quiet' };
+    await style.answer({ id: 'm-1', text: 'Keep music quieter under talking.', source }, true);
+    expect((await style.list())[0].source).toEqual(source);
   });
 });

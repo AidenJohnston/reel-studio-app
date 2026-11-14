@@ -100,7 +100,7 @@ import { WINDOW_SHOWN } from '../shared/perf-marks'
 import { USAGE_ENDPOINT } from '../shared/config'
 import { createUsage, editScore, postViews, usageCode } from './usage'
 import { createLiveMoments, createLiveVideos } from './live-video'
-import { askAboutStyle, type ChatLine, answerStyleQuestion, rememberQuestion } from './style-consent'
+import { askAboutStyle, type AnswerDeps, type ChatLine, answerStyleQuestion, rememberQuestion, showAnswered } from './style-consent'
 import type { AgentResult } from './ai-types'
 import { loadAI } from './ai'
 import type { AI, EngineHost } from './ai-types'
@@ -1057,6 +1057,26 @@ function createOutside(): OutsideAccess {
   })
 }
 
+/** "Remember this for next time?" answers: My style records each one (main/style-consent.ts). */
+function answerDeps(): AnswerDeps {
+  return {
+    chat: async (s) => (await readAppState(s)).chat,
+    title: async (s) => (await readProject(s).catch(() => null))?.title || s,
+    answer: ai.answerStyleQuestion?.bind(ai),
+    answerOf: ai.styleAnswer?.bind(ai),
+    // one write: the question loses its buttons and gains the reply together
+    settle: async (s, id, reply) => {
+      await updateAppState(s, (st) => {
+        const x = st.chat.find((y) => y.id === id)
+        if (!x?.actions) return
+        delete x.actions
+        st.chat.push({ id: randomUUID(), from: 'editor', text: reply, at: new Date().toISOString() })
+      })
+    },
+    serialized
+  }
+}
+
 function registerIpc(): void {
   // My style › Reference reels and Your niche
   const references = createReferenceLibrary({ root: reelStudioRoot, runEngine, log, mediaUrl, onChange: () => win?.webContents.send('refs:changed') })
@@ -1595,7 +1615,11 @@ function registerIpc(): void {
     return wrappedReport(reels, Date.now(), made)
   })
   handle('projects:search', (_e, query: string) => searchProjects(query))
-  handle('projects:get', (_e, slug: string) => projectWithJob(slug))
+  handle('projects:get', async (_e, slug: string) => {
+    // a question whose answer My style recorded, but whose reply a crash cut off, shows as answered
+    await showAnswered(answerDeps(), slug).catch(() => undefined)
+    return projectWithJob(slug)
+  })
   async function projectWithJob(slug: string): Promise<ProjectDetail> {
     const d = await detail(slug)
     const running = jobs.forSlug(slug)
@@ -2090,39 +2114,24 @@ function registerIpc(): void {
     if (text !== undefined && !text.trim()) throw { code: 'EMPTY', userMessage: 'Type the rule first, or press Forget.' }
     return ai.updateStyleRule(id, { text, paused: typeof patch?.paused === 'boolean' ? patch.paused : undefined })
   })
-  handle('style:answer', (_e, slug: string, messageId: string, yes: boolean) =>
-    answerStyleQuestion(
-      {
-        chat: async (s) => (await readAppState(s)).chat,
-        title: async (s) => (await readProject(s).catch(() => null))?.title || s,
-        addStyleRule: ai.addStyleRule?.bind(ai),
-        approveStyleProposal: ai.approveStyleProposal?.bind(ai),
-        declineStyleProposal: ai.declineStyleProposal?.bind(ai),
-        // one write: a crash can never leave the question without its buttons and without the reply
-        settle: async (s, id, reply) => {
-          await updateAppState(s, (st) => {
-            const x = st.chat.find((y) => y.id === id)
-            if (x) delete x.actions
-            st.chat.push({ id: randomUUID(), from: 'editor', text: reply, at: new Date().toISOString() })
-          })
-        },
-        serialized
-      },
-      slug,
-      messageId,
-      !!yes
-    )
-  )
+  handle('style:answer', (_e, slug: string, messageId: string, yes: boolean) => answerStyleQuestion(answerDeps(), slug, messageId, !!yes))
 
+  // the Cut tab's switch: a direct choice, so a paused lowercase rule is turned back on, as My style does (a Yes to
+  // a question never does that: StyleStore.answer)
   handle('style:rememberLowercase', async (_e, slug: string) => {
-    if (!ai.approveStyleProposal) throw { code: 'NOT_READY', userMessage: 'That could not be saved to My style. Try again later.' }
+    if (!ai.answerStyleQuestion || !ai.updateStyleRule) throw { code: 'NOT_READY', userMessage: 'That could not be saved to My style. Try again later.' }
+    const typed = (await ai.styleRules()).find((r) => r.payload?.kind === 'caption-case')
+    if (typed) {
+      if (typed.paused) await ai.updateStyleRule(typed.id, { paused: false })
+      return
+    }
     const p = await readProject(slug)
-    await ai.approveStyleProposal({
+    await ai.answerStyleQuestion({
       id: randomUUID(),
       text: 'Use lowercase subtitles.',
       payload: { kind: 'caption-case', case: 'lower' },
       source: { project: p.id, title: p.title, version: p.version ?? 0 }
-    })
+    }, true)
   })
   handle('sfx:pack', async (): Promise<SoundEffect[]> => {
     const dir = sfxPackDir()

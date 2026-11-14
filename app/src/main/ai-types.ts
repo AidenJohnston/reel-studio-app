@@ -1,6 +1,6 @@
 // Mirror of the @reelstudio/ai interface (docs/architecture.md section 8). The real package is loaded at
 // runtime when it exists; until then ai-mock.ts implements the same shape.
-import type { EditorAccounts, EditorModel, JobUpdate, LimitWindow, MemorySuggestion, ModelRole, NoteRunnerInfo, RuleCheck, StyleProposal, StyleRule, MergeLayer, MergeRequest, ProjectJson, ReelCandidateView, Word } from '../shared/api'
+import type { EditorAccounts, EditorModel, JobUpdate, LimitWindow, MemorySuggestion, ModelRole, NoteRunnerInfo, RuleCheck, StyleAnswerStatus, StyleProposal, StyleQuestion, StyleRule, MergeLayer, MergeRequest, ProjectJson, ReelCandidateView, Word } from '../shared/api'
 import type { PlanTurn } from '../shared/plan'
 import type { Niche, NicheTurn, NicheTurnResult } from '../shared/niche'
 import type { TryVariable } from '../shared/platforms'
@@ -23,9 +23,9 @@ export interface AgentResult {
   changed: string[]
   /** Rules the AI PROPOSES for My style, not saved (stream quality2). The app asks before saving. */
   styleSuggestions?: string[]
-  /** A typed rule to ask about; Yes = approveStyleProposal(it). */
+  /** A typed rule to ask about, answered with answerStyleQuestion. */
   styleProposal?: StyleProposal
-  /** Rules the app would measure on every render, measured on this version; Yes = addStyleRule(text, from, check). */
+  /** Rules the app would measure on every render, measured on this version, answered with answerStyleQuestion. */
   styleChecks?: { text: string; check: RuleCheck }[]
   /** Set when the AI stopped early and a simpler edit was made instead. */
   notice?: UserFacingError
@@ -214,9 +214,11 @@ export interface AI {
   restoreStyleRule?(rule: StyleRule, index: number): Promise<void>
   /** My style started over because its file was damaged; the damaged copy is kept next to it. Optional: older packages lack it. */
   styleWasDamaged?(): Promise<boolean>
-  /** Saves a typed rule the user said Yes to. `exists`: already in My style; `forgotten`: they removed it since. */
-  approveStyleProposal?(p: StyleProposal): Promise<{ status: 'saved' | 'exists' | 'forgotten' }>
-  declineStyleProposal?(p: StyleProposal): Promise<void>
+  /** The user answered a "Remember this for next time?" question. One write to My style records the answer and its
+   * effect. Optional: older packages lack it. */
+  answerStyleQuestion?(q: StyleQuestion, yes: boolean): Promise<{ status: StyleAnswerStatus }>
+  /** The recorded answer to a question, or null: the chat shows a question with one as answered. */
+  styleAnswer?(id: string): Promise<{ yes: boolean; status: StyleAnswerStatus } | null>
   /** Memories drafted from post results (read-only); each goes to proposeMemory. Optional: older packages lack these. */
   learnFromResults?(): Promise<unknown[]>
   /** Keeps a drafted memory waiting in My style: 'added', or why not ('duplicate', 'forgotten', 'full'). */

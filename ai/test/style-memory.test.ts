@@ -31,10 +31,10 @@ describe('My style as short points', () => {
 
   it('fails if a paused rule still reaches the editor or new reels', async () => {
     const s = store();
-    const typed = await s.approve(captionCaseProposal({ project: 'bread', title: 'Bread', version: 1 }));
-    if (typed.status !== 'saved') throw new Error('not saved');
+    expect(await s.answer(captionCaseProposal({ project: 'bread', title: 'Bread', version: 1 }), true)).toEqual({ status: 'saved' });
+    const typed = (await s.list()).find((r) => r.payload)!;
     const { rule } = await s.add('Keep music quiet');
-    await s.update(typed.rule.id, { paused: true });
+    await s.update(typed.id, { paused: true });
     await s.update(rule.id, { paused: true });
     expect(await s.asPromptText()).toBe('(none yet)');
     expect(await s.captionCase()).toBeNull();
@@ -65,10 +65,10 @@ describe('asking again for a paused rule', () => {
     const r = await executeTool(ctx, 'add_style_rule', { rule: 'Keep music quieter under talking.' });
     expect(r.content).not.toMatch(/alreadySaved/);
     // asked as a suggestion, never listed as saved: the app takes a saved rule out of My style until the person says
-    // Yes (app test style-consent-handoff). Yes saves through add(), which turns the same rule back on
+    // Yes (app test style-consent-handoff). A Yes then leaves it paused: only My style turns it back on (StyleStore.answer)
     expect(ctx.state.styleSuggestions).toEqual(['Keep music quieter under talking.']);
     expect(ctx.state.styleRulesAdded).toEqual([]);
-    expect(ctx.state.styleRuleIds).toEqual([]);
+    expect(ctx.state.styleChanges).toEqual([]);
   });
 
   it('fails if a note that does not ask to remember brings a paused rule back', async () => {

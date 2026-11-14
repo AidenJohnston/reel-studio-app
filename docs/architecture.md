@@ -67,8 +67,17 @@ Projects live in `<Documents>/Reel Studio/Projects/<slug>/`. The shared **Librar
 `<Documents>/Reel Studio/My style.json`. Its rules are sentences the AI reads; a rule with `paused: true` stays
 listed in My style but the AI doesn't read it, and the app doesn't apply it. A rule may also carry a typed `payload`
 the app applies itself when a new video is made (only `{"kind":"caption-case","case":"lower"}` so far), plus `source`
-(project, title, version) and `consent` (the question the person said Yes to, and in `also` any later question about
-the same rule they said Yes to). A rule may instead carry a `check`
+(project, title, version) and `answers` (each "Remember this?" answer about the rule, Yes or No, numbered from the
+file's `seq`). Every "Remember this for next time?" answer (a typed rule, a sentence or a checked rule) is written in
+one write together with its effect and the question's record (`questions`, keyed by the question's id); the chat
+question is a view of that record, so a crash between My style and the chat leaves the question shown answered when
+the reel is next opened (`showAnswered` in `app/src/main/style-consent.ts`). A paused rule comes back only through My
+style (or the Cut tab's lowercase switch): a Yes to a question about it is recorded and it stays paused. Answers decide
+the state only of a rule that is on because of them (`held`, and `settle` in `ai/src/style.ts`): it stays on while some
+question's latest answer is a Yes newer than its last direct change (`seq`, made in My style or by an edit), and
+otherwise falls back to `held`. So answers can arrive in any order, a No takes back only its own Yes, and a failed
+first edit undoes its own change only if nothing changed the rule directly since. A file saved before answers were
+numbered (questions in `consent`) is read into this form. A rule may instead carry a `check`
 the engine measures on every render, such as `{"kind":"captions.maxWords","value":2}` (`ai/src/rules.ts`,
 `engine/reelengine/rule_checks.py`); its words are the app's, and a note can't finish while one fails. `proposals`
 holds at most three memories My style suggests from post results or hand edits (`app/src/main/memory-loop.ts`),

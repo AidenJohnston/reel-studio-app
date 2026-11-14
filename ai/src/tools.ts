@@ -22,7 +22,7 @@ import { CUT_STYLES, CutPreset } from './cut-style';
 import type { Moments } from './moments';
 import { NoteSteer, finishRefused, withAdded } from './steer';
 import { Helper, MAX_LOOKUPS, lookUp } from './helpers';
-import { StyleStore, cleanRuleText, noteAsksToRemember } from './style';
+import { StyleChange, StyleStore, cleanRuleText, noteAsksToRemember } from './style';
 import { CHECK_PARAM, CheckChoice, CheckedRule, RuleFailure, RuleReport, failureText, forCutStyle, rulesFile, rulesFilePath } from './rules';
 import { BlockedUrlError, LookupFn, UnsafePathError, guardedFetch, pathProblem, safeResolve, slugName, sniffImage } from './safety';
 
@@ -46,10 +46,9 @@ export interface ToolState {
   styleRulesAdded: string[];
   /** rules the AI PROPOSED (not saved): the app asks "Remember this for next time?" */
   styleSuggestions: string[];
-  /** ids of the rules above, so a failed note can take them back out of My style */
-  styleRuleIds: string[];
-  /** paused rules this note turned back on, so a failed note can pause them again */
-  styleRulesResumed: { id: string; text: string }[];
+  /** what this edit changed in My style while it ran (rules it saved, paused rules it turned back on), so a failed
+   * edit can undo exactly that (StyleStore.undo). Only an edit without a note copy writes My style while it runs. */
+  styleChanges: StyleChange[];
   /** every user-facing tool summary, in order (an honest "what I changed" when the agent stops early) */
   summaries: string[];
   renders: RenderInfo[];
@@ -131,7 +130,7 @@ export interface ToolDef extends ToolSchema {
 }
 
 export function newToolState(): ToolState {
-  return { changed: new Set(), styleRulesAdded: [], styleSuggestions: [], styleRuleIds: [], styleRulesResumed: [], summaries: [], renders: [], finished: null, toolCalls: 0, aiCalls: [], edits: 0, pictureEdit: 0 };
+  return { changed: new Set(), styleRulesAdded: [], styleSuggestions: [], styleChanges: [], summaries: [], renders: [], finished: null, toolCalls: 0, aiCalls: [], edits: 0, pictureEdit: 0 };
 }
 
 /** A snapshot's version counter can lag its folder. Keep allocation and history from the live
@@ -2349,15 +2348,15 @@ const tools: ToolDef[] = [
       }
       if (noteAsksToRemember(ctx.userNote)) {
         // No note copy to save it with (a first edit), so My style is written now. One store call decides and
-        // writes, so only what this edit did is undone if it fails: a rule it saved is removed, and a paused rule it
-        // turned back on (not one that was already on) is paused again (editor.ts undoStyleRules).
+        // writes, so only what this edit did is undone if it fails: a rule it saved goes, and a paused rule it turned
+        // back on (not one that was already on) is paused again, unless the person changed it since (StyleStore.undo).
         const r = await ctx.style.add(text);
+        if (r.change) ctx.state.styleChanges.push(r.change);
         if (r.added) {
-          ctx.state.styleRulesAdded.push(r.rule.text); ctx.state.styleRuleIds.push(r.rule.id);
+          ctx.state.styleRulesAdded.push(r.rule.text);
           return { content: { ok: true, saved: r.rule.text }, summary: `Saved to My style: "${r.rule.text}"` };
         }
         if (r.resumed) {
-          ctx.state.styleRulesResumed.push({ id: r.rule.id, text: r.rule.text });
           return { content: { ok: true, alreadySaved: r.rule.text, turnedBackOn: true }, summary: `Turned back on in My style: "${r.rule.text}"` };
         }
         return { content: { ok: true, alreadySaved: r.rule.text } };

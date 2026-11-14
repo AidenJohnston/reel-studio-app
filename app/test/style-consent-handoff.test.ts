@@ -24,10 +24,10 @@ async function askedAgain() {
   const chat: ChatMessage[] = asked.chat.map((m, i) => ({ ...m, id: `m${i}`, at: new Date().toISOString() }))
   const answer = (yes: boolean) =>
     answerStyleQuestion({
-      chat: async () => chat, title: async () => 'Bread', addStyleRule: ai.addStyleRule.bind(ai), serialized,
+      chat: async () => chat, title: async () => 'Bread', answer: ai.answerStyleQuestion.bind(ai), serialized,
       settle: async (_s, id, reply) => { const q = chat.find((m) => m.id === id)!; delete q.actions; chat.push({ id: 'reply', from: 'editor', text: reply, at: q.at }) }
     }, 'bread', chat.find((m) => m.suggestion)!.id, yes)
-  return { style, rule, asked, answer }
+  return { style, rule, asked, answer, chat }
 }
 
 describe('asking again in a note for a rule paused in My style', () => {
@@ -39,12 +39,13 @@ describe('asking again in a note for a rule paused in My style', () => {
     expect(await style.list()).toEqual([expect.objectContaining({ id: rule.id, text: RULE, paused: true })])
   })
 
-  it('fails if Yes adds a copy instead of turning the same rule back on', async () => {
-    const { style, rule, answer } = await askedAgain()
+  // a Yes never turns a paused rule back on, only My style does (StyleStore.answer): no order of answers can change it
+  it('fails if Yes adds a copy, or turns the paused rule back on behind My style', async () => {
+    const { style, rule, answer, chat } = await askedAgain()
     await answer(true)
     const rules = await style.list()
     expect(rules).toHaveLength(1)
-    expect(rules[0]).toMatchObject({ id: rule.id, text: RULE })
-    expect(rules[0].paused).toBeUndefined()
+    expect(rules[0]).toMatchObject({ id: rule.id, text: RULE, paused: true })
+    expect(chat.at(-1)?.text).toBe('That is in My style, but paused. Turn it back on in My style to use it in your next reels.')
   })
 })

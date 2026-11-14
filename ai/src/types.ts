@@ -27,13 +27,13 @@ export interface AgentResult {
   version?: number;
   /** rules saved to My style because the user's note asked for it ("always...", "from now on...") */
   styleRulesAdded: string[];
-  /** rules the AI only PROPOSES: show "Remember this for next time?" Yes / No; Yes = addStyleRule(text) */
+  /** rules the AI only PROPOSES: show "Remember this for next time?" Yes / No, answered with answerStyleQuestion */
   styleSuggestions: string[];
   changed: string[];
-  /** a typed rule to ask about ("Use lowercase captions."): Yes = approveStyleProposal(it) */
+  /** a typed rule to ask about ("Use lowercase subtitles."), answered with answerStyleQuestion(it, yes) */
   styleProposal?: StyleProposal;
-  /** rules the app would check on every render, measured on this version: "Remember this?" says so; Yes =
-   * addStyleRule(text, from, check) */
+  /** rules the app would check on every render, measured on this version: "Remember this?" says so; answered
+   * with answerStyleQuestion({ id, text, check }, yes) */
   styleChecks?: StyleCheckProposal[];
   /** the model that made this version, as the notes name it ("Claude Sonnet 5.5 · High"); absent for a basic version */
   model?: string;

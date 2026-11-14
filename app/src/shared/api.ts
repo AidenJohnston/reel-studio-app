@@ -818,8 +818,13 @@ export interface StyleRule {
   /** Learned from another editor's export (My style, Learn from my past edits): its file name, and the editor
    * when one file was read (a rule kept before editors were remembered has none; shared/memory.ts guesses). */
   imported?: { file: string; editor?: EditorName }
-  /** `also`: other questions about this rule the person said Yes to after it was saved */
-  consent?: { proposal: string; at: string; also?: string[] }
+  /** How answers decide the rule's state (settle in ai/src/style.ts): each "Remember this?" answer, the number of
+   * the last direct change, and, while the rule is on because of answers, what it falls back to. */
+  answers?: Record<string, { yes: boolean; seq: number; at: string }>
+  seq?: number
+  held?: 'paused' | 'gone'
+  /** Rules of the same check kind a Yes replaced when it saved this one; they come back if that Yes is taken back. */
+  replaced?: StyleRule[]
   /** When its words last changed. Pausing does not count, so a paused rule keeps its place in the list. */
   updatedAt?: string
   /** Typed in by the person with Add a rule, not learned from a note or an export. */
@@ -894,6 +899,18 @@ export interface StyleProposal {
   payload: { kind: 'caption-case'; case: 'lower' }
   source: { project: string; title: string; version: number }
 }
+/** A "Remember this for next time?" question as My style answers it (StyleQuestion in ai/src/style.ts): the typed
+ * proposal's id, or the chat message's for a suggested sentence or a checked rule. `source`: the note it was learned
+ * from, kept with the rule a Yes saves. */
+export interface StyleQuestion {
+  id: string
+  text: string
+  payload?: StyleProposal['payload']
+  source?: { project: string; title: string; version: number; note?: string }
+  check?: RuleCheck
+}
+/** What an answer did, which the chat says. `paused`: the rule is in My style but paused; `declined`: No. */
+export type StyleAnswerStatus = 'saved' | 'exists' | 'paused' | 'forgotten' | 'declined'
 
 export interface ExportResult {
   /** The version the files are of: a preview is made into the next version first (finishedExportVersion). */

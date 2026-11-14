@@ -8,7 +8,7 @@ import {
   AgentEvent, AgentResult, AIError, EngineHost, ModelProvider, Part, PlanTurnInput, PlanTurnResult, ProviderId, ProviderStatus, ScriptResult, SecretStore, UserFacingError,
 } from './types';
 import { Prompts, defaultPromptsDir } from './prompts';
-import { StyleStore, StyleProposal, StyleRule, type ProposalDraft } from './style';
+import { StyleStore, StyleQuestion, StyleRule, type ProposalDraft } from './style';
 import { learn } from './learning';
 import type { RuleCheck } from './rules';
 import { loadProject, versionDir, writeFileAtomic } from './project';
@@ -56,7 +56,7 @@ export { SessionHarness } from './mcp/session';
 export { Prompts } from './prompts';
 export { StyleStore } from './style';
 export type { RuleCheck, StyleCheckProposal } from './rules';
-export type { MemoryKind, MemoryProposal, ProposalDraft, ProposalStatus, TrialLink } from './style';
+export type { AnswerStatus, MemoryKind, MemoryProposal, ProposalDraft, ProposalStatus, QuestionAnswer, StyleQuestion, TrialLink } from './style';
 export { learn, MIN_LEARNING_REACH } from './learning';
 export { AnthropicProvider, DEFAULT_CLAUDE_MODEL } from './providers/anthropic';
 export { ClaudeCliProvider, CodexCliProvider } from './providers/cli';
@@ -1213,10 +1213,11 @@ export function createAI(opts: CreateAIOptions) {
     async restoreStyleRule(rule: StyleRule, index: number) { return style.restore(rule, index); },
     /** My style started over because its file was damaged; the damaged copy is kept next to it. */
     async styleWasDamaged() { return style.wasDamaged(); },
-    /** The user said Yes to AgentResult.styleProposal. */
-    async approveStyleProposal(p: StyleProposal) { return style.approve(p); },
-    /** The user said No to AgentResult.styleProposal. */
-    async declineStyleProposal(p: StyleProposal) { return style.decline(p); },
+    /** The user answered a "Remember this for next time?" question (AgentResult.styleProposal, a styleSuggestions
+     * sentence or a styleChecks entry, with the question's id). One write records the answer and its effect. */
+    async answerStyleQuestion(q: StyleQuestion, yes: boolean) { return style.answer(q, yes); },
+    /** The recorded answer to a question, or null: the chat shows a question with one as answered. */
+    async styleAnswer(id: string) { return style.answerOf(id); },
     /** Memories drafted from post results (learning.ts learn(), which also takes back waiting ones the results no
      * longer support); the app passes each to proposeMemory. */
     async learnFromResults(): Promise<ProposalDraft[]> { return learn(path.join(opts.host.reelStudioRoot(), 'Projects'), style); },

@@ -182,13 +182,12 @@ function honestSummary(r: Pick<RunAgentResult, 'finished' | 'stoppedBy'>, state:
   return `I ran out of time before I finished your first edit, so it may be only partly done. So far I: ${did.map((d) => d[0].toLowerCase() + d.slice(1)).join('; ')}. Tell me what still needs changing.`;
 }
 
-/** Undo what a failed edit did to My style: rules it saved are removed (not forgotten), paused rules it turned back
- * on are paused again. A rule removed in My style since then stays removed. Only an edit without a note copy (a first
+/** Undo what a failed edit did to My style: rules it saved go (not forgotten), paused rules it turned back on are
+ * paused again, unless the person changed the rule since (StyleStore.undo). Only an edit without a note copy (a first
  * edit) writes My style while it runs; a note saves its rules with the note itself (saveNote). */
 async function undoStyleRules(deps: EditorDeps, state: ToolState): Promise<void> {
-  for (const id of state.styleRuleIds) await deps.style.remove(id, { forget: false }).catch(() => undefined);
-  for (const r of state.styleRulesResumed) await deps.style.update(r.id, { paused: true }).catch(() => undefined);
-  state.styleRuleIds = []; state.styleRulesAdded = []; state.styleRulesResumed = [];
+  for (const c of state.styleChanges) await deps.style.undo(c).catch(() => undefined);
+  state.styleChanges = []; state.styleRulesAdded = [];
 }
 
 /** Part of the engine would not stop and may still be writing: a failed note then touches nothing in the project. */
@@ -615,14 +614,14 @@ async function checkAndRepair(deps: EditorDeps, provider: ModelProvider, ctx: To
     const before = await fsp.readFile(editFile);
     const p0 = await loadProject(ctx.projectDir, ctx.note?.file);
     const changed = new Set(ctx.state.changed);
-    const [rules, saved, proposed, resumed] = [ctx.state.styleRuleIds.length, ctx.state.styleRulesAdded.length, ctx.state.styleSuggestions.length, ctx.state.styleRulesResumed.length];
+    const [changes, saved, proposed] = [ctx.state.styleChanges.length, ctx.state.styleRulesAdded.length, ctx.state.styleSuggestions.length];
     const said = summary;
     const renders = ctx.state.renders.length;
     undoRepair = async () => {
       // a download the repair made stays in work/assets and, like any unsaved note's, is not offered again
       await writeFileAtomic(editFile, before);
-      await undoStyleRules(deps, { ...ctx.state, styleRuleIds: ctx.state.styleRuleIds.slice(rules), styleRulesResumed: ctx.state.styleRulesResumed.slice(resumed) });
-      ctx.state.styleRuleIds.splice(rules); ctx.state.styleRulesAdded.splice(saved); ctx.state.styleSuggestions.splice(proposed); ctx.state.styleRulesResumed.splice(resumed);
+      await undoStyleRules(deps, { ...ctx.state, styleChanges: ctx.state.styleChanges.slice(changes) });
+      ctx.state.styleChanges.splice(changes); ctx.state.styleRulesAdded.splice(saved); ctx.state.styleSuggestions.splice(proposed);
       ctx.state.changed = changed;
       // a failed final render falls back to the last preview: never one of the undone repair, and never
       // an earlier one once the repair's preview has replaced it on disk

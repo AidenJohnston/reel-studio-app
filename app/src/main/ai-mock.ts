@@ -7,7 +7,7 @@ import { randomUUID } from 'node:crypto'
 import { serialized, writeJson } from './store'
 import type { AgentEvent, AgentResult, AI, ClaudeCodeStatus, CreateAI, NoteSteer, PlanTurnResult, ProviderStatus } from './ai-types'
 import type { NicheTurnResult } from '../shared/niche'
-import type { MemorySuggestion, NoteRunnerInfo, Phase, RuleCheck, StyleProposal, StyleRule } from '../shared/api'
+import type { MemorySuggestion, NoteRunnerInfo, Phase, RuleCheck, StyleAnswerStatus, StyleProposal, StyleRule } from '../shared/api'
 import { MERGE_LAYERS } from '../shared/api'
 
 const MUSIC_EXT = new Set(['.mp3', '.m4a', '.wav', '.aac', '.flac', '.ogg'])
@@ -92,7 +92,15 @@ const sameRule = (s: string): string =>
     .trim()
 
 /** My style.json: the rules, plus whatever else the real package stores there (kept on every write). */
-type StyleData = { rules: StyleRule[]; damaged?: string; forgotten?: string[]; proposals?: MemorySuggestion[]; [field: string]: unknown }
+type StyleData = {
+  rules: StyleRule[]
+  damaged?: string
+  forgotten?: string[]
+  proposals?: MemorySuggestion[]
+  seq?: number
+  questions?: Record<string, { yes: boolean; status: StyleAnswerStatus; at: string }>
+  [field: string]: unknown
+}
 
 const LOWERCASE_CAPTIONS = 'Use lowercase subtitles.'
 /** The one typed rule there is (isCaptionCase in ai/src/style.ts). Anything else in `payload`, such as a hand edit,
@@ -101,10 +109,54 @@ const isCaptionCase = (x: unknown): boolean => {
   const c = x as { kind?: unknown; case?: unknown } | null
   return c?.kind === 'caption-case' && c.case === 'lower'
 }
-/** Every question the person said Yes to for this rule (answeredYes in ai/src/style.ts). */
-const answeredYes = (r: StyleRule): string[] => {
-  const also: unknown = r.consent?.also
-  return r.consent ? [r.consent.proposal, ...(Array.isArray(also) ? also.filter((x): x is string => typeof x === 'string') : [])] : []
+const OLD_LOWERCASE_TEXT = 'Use lowercase captions.'
+type Answer = { yes: boolean; seq: number; at: string }
+/** The rule's answers, and the questions they answer (answersOf and answered in ai/src/style.ts). */
+const answersOf = (r: StyleRule): [string, Answer][] =>
+  Object.entries(r.answers && typeof r.answers === 'object' ? r.answers : {}).filter(
+    (e): e is [string, Answer] => typeof e[1]?.yes === 'boolean' && typeof e[1]?.seq === 'number'
+  )
+const answered = (r: StyleRule): string[] => answersOf(r).map(([q]) => q)
+const nextSeq = (s: StyleData): number => (s.seq = (typeof s.seq === 'number' ? s.seq : 0) + 1)
+/** As settle in ai/src/style.ts: answers matter only to a rule that is on because of them (`held`). It stays on while
+ * some question's latest answer is a Yes newer than the last direct change, and otherwise falls back to `held`. */
+function settle(rules: StyleRule[], r: StyleRule): StyleRule[] {
+  if (!r.held) return rules
+  const since = typeof r.seq === 'number' ? r.seq : 0
+  if (answersOf(r).some(([, a]) => a.yes && a.seq > since)) {
+    delete r.paused
+    return rules
+  }
+  if (r.held === 'gone') {
+    const rest = rules.filter((x) => x !== r)
+    // a rule replaced comes back unless another rule has taken its place since
+    const back = (r.replaced ?? []).filter((old) => !rest.some((x) => x.id === old.id || (old.check && x.check?.kind === old.check.kind)))
+    return [...rest, ...back]
+  }
+  r.paused = true
+  delete r.held
+  return rules
+}
+/** As fromConsent in ai/src/style.ts: a file saved before answers were numbered keeps a rule's questions in
+ * `consent`; each becomes a numbered Yes answer. A paused rule is simply paused; one still on is held by them. */
+function fromConsent(s: StyleData): void {
+  const ids = (x: unknown): string[] => (Array.isArray(x) ? x.filter((y): y is string => typeof y === 'string') : [])
+  for (const r of s.rules as (StyleRule & { consent?: any })[]) {
+    const c = r.consent
+    delete r.consent
+    if (!c || typeof c.proposal !== 'string' || r.answers) continue
+    const at = typeof c.at === 'string' ? c.at : r.createdAt
+    const answers: Record<string, Answer> = {}
+    for (const q of [c.proposal, ...ids(c.also)]) answers[q] = { yes: true, seq: nextSeq(s), at }
+    r.answers = answers
+    if (!r.paused) r.held = 'gone'
+  }
+}
+/** A direct change (My style, or an edit): the rule simply is as it was left, and older answers stop counting. */
+function changedDirectly(s: StyleData, r: StyleRule): void {
+  r.seq = nextSeq(s)
+  delete r.held
+  delete r.replaced
 }
 
 /** The practice editor's three reels in one video, in its own voice. */
@@ -133,7 +185,10 @@ export const createMockAI: CreateAI = ({ host, managedCodex }) => {
     } catch {
       /* damaged: kept below */
     }
-    if (Array.isArray(j?.rules)) return j
+    if (Array.isArray(j?.rules)) {
+      fromConsent(j)
+      return j
+    }
     const fresh: StyleData = { version: 1, rules: [], damaged: basename(await keepDamagedCopy(styleFile())) }
     await writeJson(styleFile(), fresh)
     return fresh
@@ -151,17 +206,20 @@ export const createMockAI: CreateAI = ({ host, managedCodex }) => {
       if (dup && check) {
         // as the real store: a checked rule replaces any rule checking the same kind
         const rule: StyleRule = { id: randomUUID(), text: cleanRule(text), createdAt: new Date().toISOString(), ...from, check }
+        changedDirectly(s, rule)
         await saveRules(s, [...s.rules.filter((r) => r.check?.kind !== check.kind && r !== dup), rule])
         return { added: true, rule }
       }
       if (dup) {
         if (dup.paused) {
           delete dup.paused
+          changedDirectly(s, dup)
           await saveRules(s, s.rules)
         }
         return { added: false, rule: dup }
       }
       const rule: StyleRule = { id: randomUUID(), text: cleanRule(text), createdAt: new Date().toISOString(), ...from, ...(check ? { check } : {}) }
+      changedDirectly(s, rule)
       await saveRules(s, [...s.rules.filter((r) => !check || r.check?.kind !== check.kind), rule])
       return { added: true, rule }
     })
@@ -744,51 +802,79 @@ export const createMockAI: CreateAI = ({ host, managedCodex }) => {
       await withStyle(async (s) => {
         if (s.rules.some((r) => r.id === rule.id)) return
         // its question no longer counts as forgotten, as the real store's restore
-        s.forgotten = (s.forgotten ?? []).filter((x) => x !== rule.consent?.proposal)
+        const asked = new Set(answered(rule))
+        s.forgotten = (s.forgotten ?? []).filter((x) => !asked.has(x))
         await saveRules(s, [...s.rules.slice(0, index), rule, ...s.rules.slice(index)])
       })
     },
-    // The same answers as the real store (ai/src/style.ts): a removed rule's question cannot bring it back, and the
-    // same question answered again returns the rule it saved.
-    async approveStyleProposal(proposal) {
-      // As the real store: a question that is not exactly this rule saves nothing, and the rule is stored in the app's
-      // own form, never the fields the question came with.
-      // (a question still on screen from before the app said "subtitles" carries the old words)
-      if (!proposal?.id || (proposal.text !== LOWERCASE_CAPTIONS && proposal.text !== 'Use lowercase captions.') || !isCaptionCase(proposal.payload)) {
+    // The same answers as the real store (StyleStore.answer in ai/src/style.ts): the answer, its effect and the
+    // question's record in one write; a paused rule stays paused; No takes back only this question's own Yes.
+    async answerStyleQuestion(q, yes) {
+      const typed = q?.payload !== undefined
+      // as the real store: a question that is not exactly this rule saves nothing, and the rule is stored in the app's
+      // own form, never the fields the question came with (a question still on screen from before the app said
+      // "subtitles" carries the old words)
+      if (!q?.id || (typed && ((q.text !== LOWERCASE_CAPTIONS && q.text !== OLD_LOWERCASE_TEXT) || !isCaptionCase(q.payload)))) {
         throw new Error('the question does not match the rule it would save')
       }
+      const text = typed ? LOWERCASE_CAPTIONS : cleanRule(q.text)
       return withStyle(async (s) => {
-        if (s.forgotten?.includes(proposal.id)) return { status: 'forgotten' as const }
         const at = new Date().toISOString()
-        const same = s.rules.find((r) => answeredYes(r).includes(proposal.id))
-        if (same && !isCaptionCase(same.payload)) return { status: 'exists' as const }
+        const done = async (status: StyleAnswerStatus, rules = s.rules): Promise<{ status: StyleAnswerStatus }> => {
+          s.questions = { ...s.questions, [q.id]: { yes, status, at } }
+          await saveRules(s, rules)
+          return { status }
+        }
+        const asked = s.rules.find((r) => answered(r).includes(q.id))
+        if (!yes) {
+          if (!asked) return done('declined')
+          asked.answers = { ...asked.answers, [q.id]: { yes: false, seq: nextSeq(s), at } }
+          return done('declined', settle(s.rules, asked))
+        }
+        if (s.forgotten?.includes(q.id)) return done('forgotten')
+        const say = (r: StyleRule): void => {
+          r.answers = { ...r.answers, [q.id]: { yes: true, seq: nextSeq(s), at } }
+        }
+        const same =
+          asked ??
+          s.rules.find((r) =>
+            typed
+              ? isCaptionCase(r.payload)
+              : q.check
+                ? r.check?.kind === q.check.kind && r.text === text
+                : !r.check && !r.payload && sameRule(r.text) === sameRule(text)
+          )
         if (same) {
-          if (same.paused) {
-            delete same.paused
-            await saveRules(s, s.rules)
-          }
-          return { status: 'saved' as const }
+          say(same)
+          const edited = typed ? !isCaptionCase(same.payload) : !!q.check && same.text !== text
+          if (same.paused) delete same.held
+          return done(edited ? 'exists' : same.paused ? 'paused' : asked ? 'saved' : 'exists')
         }
-        const typed = s.rules.find((r) => isCaptionCase(r.payload))
-        if (typed) {
-          typed.consent = typed.consent ? { ...typed.consent, also: [...answeredYes(typed).slice(1), proposal.id] } : { proposal: proposal.id, at }
-          const wasPaused = !!typed.paused
-          delete typed.paused
-          await saveRules(s, s.rules)
-          return { status: wasPaused ? ('saved' as const) : ('exists' as const) }
+        const source = q.source
+          ? { project: String(q.source.project ?? ''), title: String(q.source.title ?? '').slice(0, 120), version: Number(q.source.version) || 0 }
+          : undefined
+        const rule: StyleRule = {
+          id: randomUUID(),
+          text,
+          createdAt: at,
+          held: 'gone',
+          ...(typed ? { payload: { kind: 'caption-case' as const, case: 'lower' as const } } : {}),
+          ...(source ? { source } : {}),
+          ...(q.check ? { check: q.check } : {})
         }
-        const source = { project: String(proposal.source?.project ?? ''), title: String(proposal.source?.title ?? '').slice(0, 120), version: Number(proposal.source?.version) || 0 }
-        const rule: StyleRule = { id: randomUUID(), text: LOWERCASE_CAPTIONS, createdAt: at, payload: { kind: 'caption-case', case: 'lower' }, source, consent: { proposal: proposal.id, at } }
-        await saveRules(s, [...s.rules, rule])
-        return { status: 'saved' as const }
+        say(rule)
+        const gives = (r: StyleRule): boolean =>
+          sameRule(r.text) === sameRule(text) || (typed && sameRule(r.text) === sameRule(OLD_LOWERCASE_TEXT)) || (!!q.check && r.check?.kind === q.check.kind)
+        const replaced = s.rules.filter(gives)
+        if (q.check && replaced.length) rule.replaced = replaced
+        return done('saved', [...s.rules.filter((r) => !gives(r)), rule])
       })
     },
-    async declineStyleProposal(proposal) {
+    async styleAnswer(id) {
       return withStyle(async (s) => {
-        if (!s.rules.some((r) => r.consent?.proposal === proposal.id)) return
-        s.forgotten = [...(s.forgotten ?? []), proposal.id]
-        await saveRules(s, s.rules.filter((r) => r.consent?.proposal !== proposal.id))
-      })
+        const a = s.questions?.[id]
+        return a && typeof a.yes === 'boolean' && typeof a.status === 'string' ? { yes: a.yes, status: a.status } : null
+      }).catch(() => null)
     },
     async updateStyleRule(id, patch) {
       return withStyle(async (s) => {
@@ -801,6 +887,7 @@ export const createMockAI: CreateAI = ({ host, managedCodex }) => {
         }
         if (patch.paused === true) rule.paused = true
         if (patch.paused === false) delete rule.paused
+        changedDirectly(s, rule)
         await saveRules(s, s.rules)
         return rule
       })
@@ -810,7 +897,7 @@ export const createMockAI: CreateAI = ({ host, managedCodex }) => {
         const index = s.rules.findIndex((r) => r.id === id)
         if (index < 0) return null
         const rule = s.rules[index]
-        const asked = answeredYes(rule)
+        const asked = answered(rule)
         if (asked.length) s.forgotten = [...(s.forgotten ?? []), ...asked]
         await saveRules(s, s.rules.filter((r) => r.id !== id))
         return { rule, index }
