@@ -67,6 +67,17 @@ test('editing timeline: trim a cut, move, resize, frame and delete a picture, mo
   await shot(page, 'track-04-zoomed')
   await page.getByTestId('track-fit').click()
   await expect.poll(async () => (await track.locator('.trk-content').boundingBox())!.width).toBeLessThan(wide + 2)
+  // fails if the Zoom slider's arrows reach the timeline's own keys: with a picture picked they nudged it into a new
+  // version (prep-for-prod round 1, blocking 2). The slider zooms, and the picture stays where it is.
+  await pictures.first().click()
+  await expect(page.getByTestId('track-picked')).toBeVisible()
+  await track.getByRole('slider', { name: 'Zoom' }).focus()
+  await page.keyboard.press('ArrowRight')
+  await expect.poll(async () => (await track.locator('.trk-content').boundingBox())!.width).toBeGreaterThan(wide + 2)
+  // a nudge shows the picture moving at once (the lanes are .dragging until it is sent)
+  await expect(track.locator('.trk-content')).not.toHaveClass(/\bdragging\b/)
+  await page.getByTestId('track-fit').click()
+  await page.keyboard.press('Escape')
 
   // ---- the first cut's end, dragged back over its last word: that word is cut, and nothing else ----
   const before = project()

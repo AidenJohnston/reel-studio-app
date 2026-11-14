@@ -325,8 +325,10 @@ export function TrackTimeline(props: TrackTimelineProps) {
     // the timeline's keys work from the page or the timeline itself; in Edit it myself's lists and boxes the keys are theirs
     if (e.defaultPrevented || textField(t) || document.querySelector('.modal-backdrop')) return
     if (t && t !== document.body && !root.current?.contains(t)) return
-    // the ruler is a slider: its arrows, Home and End move by seconds (rulerKey)
+    // the ruler is a slider: its arrows, Home and End move by seconds (rulerKey); a native slider (Zoom) keeps its own
+    // keys too, or its arrows would nudge the picked picture into a new version
     if (t === ruler.current && /^(Arrow|Home$|End$)/.test(e.key)) return
+    if (t instanceof HTMLInputElement && t.type === 'range' && /^(Arrow|Home$|End$|Page)/.test(e.key)) return
     const mod = e.metaKey || e.ctrlKey
     const k = e.key.toLowerCase()
     if (mod && k === 'z' && !e.shiftKey) {
