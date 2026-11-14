@@ -7,7 +7,8 @@ import { Icon } from '../../components/icons'
 import { byKeyboard, reducedMotion } from '../../components/motion'
 import { Button, IS_MAC } from '../../components/ui'
 import { animationName } from '../../../../shared/lanes'
-import { fileTitle, pressKeys, setP, wordKeys, type TabProps } from './controls'
+import { fileTitle, pressKeys, setP, Slider, wordKeys, type TabProps } from './controls'
+import { focusOf, framed, framingOf, SCALE_MAX, SCALE_MIN } from '../../../../shared/timeline-edit'
 
 type Broll = NonNullable<ProjectJson['broll']>[number]
 
@@ -40,6 +41,7 @@ export function PicturesTab({
   base,
   now,
   change,
+  settle,
   player,
   placed,
   images,
@@ -74,6 +76,8 @@ export function PicturesTab({
     return i < 0 ? '' : d.words.slice(i, Math.min(Math.max(j, i) + 1, i + 6)).map((w) => w.w).join(' ')
   }
   const isNew = (b: Broll) => !(base.p.broll ?? []).some((x) => x.id === b.id)
+  const setPicture = (id: string, next: (b: Broll) => Broll, key: string) =>
+    change(setP((p) => ({ broll: (p.broll ?? []).map((x) => (x.id === id ? next(x) : x)) })), `${key}-${id}`)
 
   const choose = async () => {
     try {
@@ -165,6 +169,7 @@ export function PicturesTab({
                 >
                   Remove
                 </Button>
+                {selected === b.id && <PictureDetails b={b} words={keptWords} set={setPicture} settle={settle} />}
               </li>
             )
           })}
@@ -187,6 +192,106 @@ export function PicturesTab({
           </Button>
         </div>
       </div>
+    </div>
+  )
+}
+
+/**
+ * The picked picture's timing and framing, which the timeline and the frame on the reel change by dragging: here they
+ * are labelled controls a keyboard reaches. Each is a change in this panel, so it goes out as the panel's next version,
+ * through the same queue as every other hand edit.
+ */
+function PictureDetails({
+  b,
+  words,
+  set,
+  settle
+}: {
+  b: Broll
+  /** the words kept: a picture's start and end are word ids, never seconds */
+  words: { id: string; w: string }[]
+  set: (id: string, next: (b: Broll) => Broll, key: string) => void
+  settle: () => void
+}) {
+  const i = words.findIndex((w) => w.id === b.anchor.from)
+  const j = words.findIndex((w) => w.id === b.anchor.to)
+  const how = framingOf(b)
+  const f = focusOf(b)
+  const moveEnd = (end: 'from' | 'to', by: -1 | 1) => {
+    const at = (end === 'from' ? i : j) + by
+    set(b.id, (x) => ({ ...x, anchor: { ...x.anchor, [end]: words[at].id } }), `pic-${end}`)
+  }
+  const step = (end: 'from' | 'to', label: string, at: number, earlier: boolean, later: boolean) => (
+    <div className="pic-end">
+      <span className="edit-slider-label">{label}</span>
+      <span className="pic-end-word" aria-live="polite">
+        “{words[at]?.w ?? ''}”
+      </span>
+      <span className="pic-end-steps">
+        <button type="button" className="icon-btn small" aria-label={`${label} one word earlier`} disabled={!earlier} onClick={() => moveEnd(end, -1)} data-testid={`pic-${end}-earlier`}>
+          <Icon name="chevron-left" size={14} stroke={2} />
+        </button>
+        <button type="button" className="icon-btn small" aria-label={`${label} one word later`} disabled={!later} onClick={() => moveEnd(end, 1)} data-testid={`pic-${end}-later`}>
+          <Icon name="chevron-right" size={14} stroke={2} />
+        </button>
+      </span>
+    </div>
+  )
+  const pct = (v: number) => `${Math.round(v * 100)}%`
+  return (
+    <div className="pic-details" data-testid="picture-details">
+      {i >= 0 && j >= i ? (
+        <>
+          {step('from', 'Starts on', i, i > 0, i < j)}
+          {step('to', 'Ends on', j, j > i, j < words.length - 1)}
+        </>
+      ) : (
+        <p className="edit-hint">Its words are cut from this version, so it doesn't show.</p>
+      )}
+      {how.scale && (
+        <Slider
+          label="Size"
+          value={f.scale}
+          shown={pct(f.scale)}
+          spoken={`${pct(f.scale)} of its usual size`}
+          min={SCALE_MIN}
+          max={SCALE_MAX}
+          step={0.05}
+          onChange={(v) => set(b.id, (x) => framed(x, { scale: v }), 'pic-scale')}
+          onDone={settle}
+          testid="pic-scale"
+        />
+      )}
+      {how.pan === 'xy' && (
+        <Slider
+          label="Left or right"
+          aria="Picture position, left to right"
+          value={f.x}
+          shown={f.x < 0.4 ? 'Left' : f.x > 0.6 ? 'Right' : 'Middle'}
+          spoken={`${pct(f.x)} from its left edge`}
+          min={0}
+          max={1}
+          step={0.05}
+          onChange={(v) => set(b.id, (x) => framed(x, { dx: focusOf(x).x - v }), 'pic-pan-x')}
+          onDone={settle}
+          testid="pic-pan-x"
+        />
+      )}
+      {how.pan && (
+        <Slider
+          label="Up or down"
+          aria="Picture position, top to bottom"
+          value={f.y}
+          shown={f.y < 0.4 ? 'Top' : f.y > 0.6 ? 'Bottom' : 'Middle'}
+          spoken={`${pct(f.y)} from its top edge`}
+          min={0}
+          max={1}
+          step={0.05}
+          onChange={(v) => set(b.id, (x) => framed(x, { dy: focusOf(x).y - v }), 'pic-pan-y')}
+          onDone={settle}
+          testid="pic-pan-y"
+        />
+      )}
     </div>
   )
 }

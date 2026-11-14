@@ -61,3 +61,53 @@ export const pressKeys = (e: React.KeyboardEvent<HTMLElement>) => {
 }
 
 export const fileTitle = (name: string): string => name.replace(/\.[^.]+$/, '').replace(/[_-]+/g, ' ').trim()
+
+/** A labelled slider with its value beside it. `onDone` runs when a drag or a key press ends. */
+export function Slider({
+  label,
+  aria,
+  value,
+  shown,
+  spoken,
+  min,
+  max,
+  step,
+  onChange,
+  onDone,
+  testid
+}: {
+  label: string
+  aria?: string
+  value: number
+  shown: string
+  spoken: string
+  min: number
+  max: number
+  step: number
+  onChange: (v: number) => void
+  onDone: (how: 'pointer' | 'key') => void
+  testid: string
+}) {
+  return (
+    <label className="edit-slider">
+      <span className="edit-slider-label">{label}</span>
+      <input
+        type="range"
+        className="slider"
+        min={min}
+        max={max}
+        step={step}
+        value={value}
+        aria-label={aria ?? label}
+        aria-valuetext={spoken}
+        onChange={(e) => onChange(Number(e.target.value))}
+        onPointerUp={() => onDone('pointer')}
+        onKeyUp={() => onDone('key')}
+        data-testid={testid}
+      />
+      <output className="edit-slider-value tnum" aria-hidden>
+        {shown}
+      </output>
+    </label>
+  )
+}

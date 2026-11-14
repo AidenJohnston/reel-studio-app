@@ -36,7 +36,7 @@ import { Icon } from '../../components/icons'
 import { byKeyboard, reducedMotion } from '../../components/motion'
 import { IS_MAC, Segmented } from '../../components/ui'
 import { usePlayhead } from '../../components/playhead'
-import { fileTitle, setP, type TabProps } from './controls'
+import { fileTitle, setP, Slider, type TabProps } from './controls'
 import { useAudition } from './preview'
 
 const secondsSpoken = (v: number): string => `${Number(v.toFixed(2))} ${v === 1 ? 'second' : 'seconds'}`
@@ -173,6 +173,8 @@ export function SoundTab({ d, base, now, change, settle, player, vclock, joins, 
   const listed = (t: string): boolean => songs?.some((m) => t === `Library/Music/${m.name}`) ?? t.startsWith('Library/')
   const elsewhere = saved && !listed(saved) ? saved : null
   const fades = musicFades(music)
+  // the song's own length when the Library knows it; a start near its end plays it from the top (engine beats.py)
+  const songEnd = Math.max(1, Math.floor(songs?.find((m) => music?.track === `Library/Music/${m.name}`)?.durationSec ?? 300))
   const cuts = cutsHint(joins)
   return (
     <div className="edit-stack">
@@ -225,6 +227,21 @@ export function SoundTab({ d, base, now, change, settle, player, vclock, joins, 
               ))}
             </select>
           </label>
+        )}
+        {/* where the song starts playing: the timeline's song drag, from the keyboard too (prep-for-prod round 1) */}
+        {!noMusic && music?.track && (
+          <Slider
+            label="Song starts from"
+            value={Math.min(songEnd, music.startAt ?? 0)}
+            shown={`${clock(Math.floor(music.startAt ?? 0))}.${Math.round(((music.startAt ?? 0) % 1) * 10) % 10}`}
+            spoken={`${Math.round((music.startAt ?? 0) * 10) / 10} seconds into the song`}
+            min={0}
+            max={songEnd}
+            step={0.1}
+            onChange={(v) => setMusic({ startAt: Math.round(v * 10) / 10 }, 'song-start')}
+            onDone={settle}
+            testid="song-start"
+          />
         )}
       </section>
 
@@ -391,55 +408,6 @@ export function SoundTab({ d, base, now, change, settle, player, vclock, joins, 
   )
 }
 
-/** A labelled slider with its value beside it. `onDone` runs when a drag or a key press ends. */
-function Slider({
-  label,
-  aria,
-  value,
-  shown,
-  spoken,
-  min,
-  max,
-  step,
-  onChange,
-  onDone,
-  testid
-}: {
-  label: string
-  aria?: string
-  value: number
-  shown: string
-  spoken: string
-  min: number
-  max: number
-  step: number
-  onChange: (v: number) => void
-  onDone: (how: 'pointer' | 'key') => void
-  testid: string
-}) {
-  return (
-    <label className="edit-slider">
-      <span className="edit-slider-label">{label}</span>
-      <input
-        type="range"
-        className="slider"
-        min={min}
-        max={max}
-        step={step}
-        value={value}
-        aria-label={aria ?? label}
-        aria-valuetext={spoken}
-        onChange={(e) => onChange(Number(e.target.value))}
-        onPointerUp={() => onDone('pointer')}
-        onKeyUp={() => onDone('key')}
-        data-testid={testid}
-      />
-      <output className="edit-slider-value tnum" aria-hidden>
-        {shown}
-      </output>
-    </label>
-  )
-}
 
 /** How long the pointer rests on a sound before it plays: passing over it on the way to Add plays nothing. */
 const HOVER_PLAY_MS = 200

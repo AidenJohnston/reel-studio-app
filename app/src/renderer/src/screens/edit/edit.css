@@ -107,6 +107,19 @@ html.kb .sfx-row { transition: none; }
 .edit-list > .picture-row.on, .edit-list > .picture-row.on + .picture-row { box-shadow: none; }
 .picture-row.on { background: var(--wash); }
 html.kb .picture-row { transition: none; }
+/* The picked picture's timing and framing (PicturesTab PictureDetails): under its row, the full width. It enters as
+   content does (180 ms, opacity and 4 px), not from the keyboard; under reduced motion it only fades. */
+.picture-row.on { flex-wrap: wrap; }
+.pic-details {
+  flex: 1 1 100%; display: flex; flex-direction: column; gap: 2px; padding: 8px 0 2px 44px; /* under the row's words, past its thumbnail */
+  transition: opacity 180ms var(--ease-enter), transform 180ms var(--ease-enter);
+  @starting-style { opacity: 0; transform: translateY(4px); }
+}
+html.kb .pic-details { transition: none; }
+@media (prefers-reduced-motion: reduce) { .pic-details { @starting-style { transform: none; } } }
+.pic-end { display: grid; grid-template-columns: 104px minmax(0, 1fr) auto; align-items: center; gap: 8px; min-height: 28px; }
+.pic-end-word { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink); font-size: var(--fs-sm); line-height: var(--lh-sm); }
+.pic-end-steps { display: flex; gap: 2px; }
 .sfx-row > .edit-row-main { width: 100%; }
 .sfx-head { display: flex; align-items: flex-start; gap: 6px; }
 .sfx-name { flex: 1; min-width: 0; border: 0; background: none; padding: 4px 0; margin: 0; font: inherit; color: var(--ink); text-align: left; cursor: pointer; line-height: var(--lh-base); border-radius: 4px; }
