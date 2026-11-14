@@ -187,6 +187,10 @@ html.kb .library-pick:active { transform: none; }
   .look:not(.on):hover .look-dot { box-shadow: inset 0 0 0 1.5px var(--ink-2); }
 }
 
+/* The colour the AI editor picked, when the Colour row offers no such option: a dot of it before its name, with a hairline
+   so white or a pale colour still shows on the track. */
+.cap-swatch { display: inline-block; width: 10px; height: 10px; margin-right: 6px; border-radius: 50%; vertical-align: -1px; box-shadow: inset 0 0 0 1px rgba(0, 0, 0, .25); }
+
 /* What happens to the edit while the editor is busy, then the footer: "2 changes · Undo · Make Version 5". */
 .edit-wait { flex: none; color: var(--ink-3); font-size: var(--fs-sm); line-height: var(--lh-sm); padding: 8px 0 0; }
 .edit-f { flex: none; display: flex; align-items: center; gap: 4px; padding: 12px 0 0; margin-top: 0; box-shadow: inset 0 1px 0 var(--line); }

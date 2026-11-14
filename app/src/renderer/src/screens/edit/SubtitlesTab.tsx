@@ -1,6 +1,7 @@
+import type { ReactNode } from 'react'
 import type { ProjectJson } from '../../../../shared/api'
 import { SIZE_PER_EM } from '../../../../shared/caption-fit'
-import { CAPTION_PRESETS, applyPreset, lookFromStyle, presetOf, rowPosition } from '../../../../shared/caption-presets'
+import { CAPTION_COLORS, CAPTION_PRESETS, applyPreset, colorName, lookFromStyle, presetOf, rowPosition } from '../../../../shared/caption-presets'
 import { SubtitleSample } from '../../components/Player'
 import { arrowPick, Segmented, tabStop } from '../../components/ui'
 import { setP, type TabProps } from './controls'
@@ -18,10 +19,6 @@ const POSITIONS = [
   { key: 'higher', label: 'Higher' },
   { key: 'lower', label: 'Lower' }
 ] as const
-const COLORS = [
-  { key: 'white', label: 'White', color: '#FFFFFF' },
-  { key: 'yellow', label: 'Yellow', color: '#FFD60A' }
-] as const
 const HIGHLIGHTS = [
   { key: 'yellow', label: 'Yellow', color: '#FFD60A' },
   { key: 'green', label: 'Green', color: '#30D158' }
@@ -32,8 +29,31 @@ const sizeKey = (st: Style): string => {
   return n < 95 ? 'small' : n > 115 ? 'big' : 'medium'
 }
 const positionKey = (st: Style): string => (Number(st.position ?? 0.75) < 0.69 ? 'higher' : 'lower')
-// a colour the AI editor picked that is neither option checks neither (#53)
-const colorKey = (st: Style): string => COLORS.find((x) => x.color === String(st.color ?? '#FFFFFF').toUpperCase())?.key ?? ''
+const colorOf = (st: Style): string => String(st.color ?? '#FFFFFF').toUpperCase()
+const colorKey = (st: Style): string => CAPTION_COLORS.find((x) => x.color === colorOf(st))?.key ?? 'current'
+/**
+ * The Colour row: the offered colours, and when the AI editor picked another one, that colour too, checked, so the
+ * row shows what the reel has (#53 left every option unchecked). Its name says it apart from an offered one ("Other
+ * red" beside Red) and its dot shows it.
+ */
+function colorOptions(st: Style): { key: string; label: ReactNode; title?: string }[] {
+  if (colorKey(st) !== 'current') return [...CAPTION_COLORS]
+  const named = colorName(colorOf(st))
+  const word = !named ? 'Another colour' : CAPTION_COLORS.some((x) => x.key === named) ? `Other ${named}` : named.charAt(0).toUpperCase() + named.slice(1)
+  return [
+    ...CAPTION_COLORS,
+    {
+      key: 'current',
+      title: 'The colour your editor picked',
+      label: (
+        <>
+          <span className="cap-swatch" style={{ background: colorOf(st) }} aria-hidden />
+          {word}
+        </>
+      )
+    }
+  ]
+}
 const highlightKey = (st: Style): string => HIGHLIGHTS.find((x) => x.color === String(st.highlight).toUpperCase())?.key ?? ''
 
 const LOOK_KEYS = CAPTION_PRESETS.map((p) => p.key)
@@ -102,7 +122,7 @@ export function SubtitlesTab({ now, change, next }: TabProps) {
           {/* a look that lights up the word being said still has a colour for the rest (#53) */}
           <div className="edit-field">
             <span className="edit-label">Colour</span>
-            <Segmented testid="cap-color" label="Colour" value={colorKey(style)} options={COLORS} onPick={(k) => setStyle({ color: COLORS.find((x) => x.key === k)!.color })} />
+            <Segmented testid="cap-color" label="Colour" value={colorKey(style)} options={colorOptions(style)} onPick={(k) => { const c = CAPTION_COLORS.find((x) => x.key === k); if (c) setStyle({ color: c.color }) }} />
           </div>
           {!!style.highlight && (
             <div className="edit-field">

@@ -132,6 +132,14 @@ export function sampleLook(style: CaptionStyle, sample: { text: string; words: n
   return look
 }
 
+/** The subtitle colours "Edit it myself" offers. The AI editor may set any colour (ai/src/tools.ts set_caption_style),
+ * and is told these values so "make them red" gives the same red either way. */
+export const CAPTION_COLORS = [
+  { key: 'white', label: 'White', color: '#FFFFFF' },
+  { key: 'yellow', label: 'Yellow', color: '#FFD60A' },
+  { key: 'red', label: 'Red', color: '#FF3B30' }
+] as const
+
 /**
  * A colour's common name, lowercase ("red", "light blue"), or null when it has none worth saying (a muted or
  * in-between shade), so a description can say "a new colour" rather than name one the reel does not show.

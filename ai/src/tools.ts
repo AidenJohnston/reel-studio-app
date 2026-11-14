@@ -1663,7 +1663,9 @@ const tools: ToolDef[] = [
       size: S.opt(S.num('font size in px at 1080 wide. Default 105 (proven readable on a phone); 84 = small, 126 = big. Never below 80', { minimum: 10, maximum: 300 })),
       maxWords: S.opt(S.int('words per caption chunk, 1-4', { minimum: 1, maximum: 12 })),
       case: S.opt(S.enum(['upper', 'lower', 'as-is', 'title'])),
-      color: S.opt(S.str('hex color like #FFFFFF', { pattern: '^#[0-9A-Fa-f]{6}([0-9A-Fa-f]{2})?$' })),
+      // the three colours Edit it myself offers (app/src/shared/caption-presets.ts CAPTION_COLORS), so a note asking for
+      // one gives the colour the Colour row then shows as picked
+      color: S.opt(S.str('hex color of the words: white #FFFFFF, yellow #FFD60A, red #FF3B30 (the colours Edit it myself offers); any other hex for another colour', { pattern: '^#[0-9A-Fa-f]{6}([0-9A-Fa-f]{2})?$' })),
       position: S.opt(S.num('vertical position of the line centre as a fraction of height. Default 0.75 = just under the chin; 0.66 = higher. 0.75 is as low as they go at the default size and stay clear of Instagram\'s caption and username, less when bigger. Lower is allowed, and the result then carries a warning to pass on', { minimum: 0.05, maximum: 0.95 })),
       highlight: S.opt(S.str('colour of the word being spoken, hex like #FFD60A; "none" turns the word highlight off')),
       pop: S.opt(S.bool()),
