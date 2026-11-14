@@ -87,7 +87,6 @@ describe('branch notes', () => {
     await entered;
     const branch = ai.applyNote(dir, 'smaller captions', () => undefined, undefined, { owner, base: 2 });
     try {
-      expect((await json(path.join(dir, 'work/.ai-edit.lock'))).pid).toBe(process.pid);
       expect((await json(path.join(dir, OWNER_LOCK))).token).toBe(owner);
       expect((await json(file)).version).toBe(3);
     } finally { release(); }

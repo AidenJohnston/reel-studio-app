@@ -27,13 +27,12 @@ describe('one writer per project', () => {
 
   it('an edit, with or without the app\'s token, refuses while another program is editing the project', async () => {
     const { dir, host, settingsDir, read, before } = await setup();
-    // a dev CLI note that is still running (its process is alive): a second dev CLI, then an app job
-    await fsp.writeFile(path.join(dir, 'work', '.ai-edit.lock'), JSON.stringify({ pid: process.ppid, at: Date.now() }));
-    for (const owner of [undefined, 'job-1']) {
-      if (owner) await fsp.writeFile(path.join(dir, OWNER_LOCK), JSON.stringify({ app: 'Reel Studio', token: owner }));
+    // a dev CLI note that is still running holds the project: a second dev CLI, then an app job's token
+    await fsp.writeFile(path.join(dir, OWNER_LOCK), JSON.stringify({ app: 'reelstudio-ai', pid: process.ppid, started: Date.now(), token: 'dev-cli', engines: [] }));
+    for (const [owner, code] of [[undefined, 'project_open'], ['job-1', 'not_owner']] as const) {
       const m = slower();
       await expect(createAI({ host, settingsDir, providerOverride: m }).applyNote(dir, 'slower', () => undefined, undefined, owner ? { owner } : {}))
-        .rejects.toMatchObject({ code: 'busy' });
+        .rejects.toMatchObject({ code });
       expect(m.requests).toEqual([]);
     }
     expect(await read()).toBe(before);

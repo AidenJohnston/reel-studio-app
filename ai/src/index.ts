@@ -285,19 +285,18 @@ export function createAI(opts: CreateAIOptions) {
   function exclusive<T>(dir: string, owner: string | undefined, fn: (owner: string) => Promise<T>): Promise<T> {
     const key = path.resolve(dir).toLowerCase();
     const prev = locks.get(key) ?? Promise.resolve();
-    // in-process queue, plus a lock FILE every edit holds for its whole run, so two edits in different
-    // processes (the app and the dev CLI, or two dev CLIs) never run on one project at once
+    // in-process queue; across processes the project's claim (owner.ts, docs/ownership.md) keeps two edits apart
     const run = prev.catch(() => undefined).then(async () => {
       if (owner) {
         assertOwner(dir, owner);
-        return withEditLock(dir, () => fn(owner));
+        return fn(owner);
       }
       const claim = await claimProject(dir);
       const unwatch = opts.host.watchSpawns?.((pid) => void claim.addEngine(pid));
       // part of an engine that would not stop may still write: the project stays claimed
       let stuck = false;
       try {
-        return await withEditLock(dir, () => fn(claim.token));
+        return await fn(claim.token);
       } catch (e: any) {
         stuck = e?.code === 'ENGINE_STUCK';
         throw e;
@@ -1282,35 +1281,4 @@ function editHost(host: EngineHost, owner: string | undefined) {
   };
 }
 
-const LOCK_STALE_MS = 3 * 60 * 60 * 1000;
-
-function alive(pid: number): boolean {
-  try { process.kill(pid, 0); return true; } catch (e: any) { return e?.code === 'EPERM'; }
-}
-
-/** <project>/work/.ai-edit.lock holds {pid, at}. Another LIVE process holding it = AIError busy; a
- * dead or 3-hour-old holder is taken over. */
-export async function withEditLock<T>(dir: string, fn: () => Promise<T>): Promise<T> {
-  const lock = path.join(dir, 'work', '.ai-edit.lock');
-  await fsp.mkdir(path.dirname(lock), { recursive: true });
-  for (let attempt = 0; ; attempt++) {
-    try {
-      const fh = await fsp.open(lock, 'wx');
-      await fh.writeFile(JSON.stringify({ pid: process.pid, at: Date.now() }));
-      await fh.close();
-      break;
-    } catch (e: any) {
-      if (e?.code !== 'EEXIST' || attempt > 0) {
-        if (e?.code === 'EEXIST') throw new AIError('busy', 'This video is being edited somewhere else right now. Try again when that finishes.');
-        throw e;
-      }
-      let held: { pid?: number; at?: number } = {};
-      try { held = JSON.parse(await fsp.readFile(lock, 'utf8')); } catch { /* unreadable = stale */ }
-      const live = held.pid && held.pid !== process.pid && alive(held.pid) && Date.now() - (held.at ?? 0) < LOCK_STALE_MS;
-      if (live) throw new AIError('busy', 'This video is being edited somewhere else right now. Try again when that finishes.');
-      await fsp.rm(lock, { force: true });
-    }
-  }
-  try { return await fn(); } finally { await fsp.rm(lock, { force: true }).catch(() => undefined); }
-}
 export { PythonEngineHost, defaultRoot } from './engineHost';

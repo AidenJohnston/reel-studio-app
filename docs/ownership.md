@@ -48,6 +48,13 @@ only once they have ended. With neither, the app claims the project while any of
 meanwhile waits (a queued note starts once they end). They read project.json as it is and never finish a pending trial
 transaction (variation.py), which could replace what a note they joined publishes.
 
+## Inside one claim
+
+`<project>/.project-owner.lock` (engine/reelengine/project.py `owner_lock`) is not a claim. It is an OS lock that
+serialises project.json writes inside one claim: the engine commands a job runs share the job's token, and this lock
+keeps two of them from writing project.json, or finishing a trial, at the same moment. The system frees it when its
+process exits.
+
 ## What runs without the lock
 
 Commands that change nothing in the project, `attach`, which only adds its own uniquely named file, and `proxy`,

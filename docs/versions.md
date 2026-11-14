@@ -202,17 +202,8 @@ Fast notes (no model) and notes that end with no change are not checked.
 
 ## One writer per project
 
-The running app is the only writer of its projects. Electron's single-instance lock is held by the OS
-until the app process dies, and inside the app the job lane runs one job or manual edit per project.
-Everything a job runs, the AI edit and each engine command, gets the job's token (`--owner`) and never
-decides ownership itself. `<project>/work/.owner.lock` only tells tools run by hand that the app has
-the project open: the engine CLI and the AI dev CLI refuse while it exists ("Reel Studio may be using
-this project. Close it, or delete <path> if it isn't running.") and never take a project over. The
-app removes leftover lock files when it starts (`app/src/main/owner.ts`).
-
-Every AI edit, the app's and the dev CLI's alike, also holds `<project>/work/.ai-edit.lock` for its
-whole run, so two edits in different processes never run on one project at once (`ai/src/index.ts`
-`withEditLock`). A lock whose process has died, or that is 3 hours old, is taken over.
+Every writer of a project, the app's jobs and its own commands and tools run by hand alike, holds the project's claim
+while it writes: [ownership.md](ownership.md) has the protocol.
 
 ## Engine processes
 
