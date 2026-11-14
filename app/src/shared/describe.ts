@@ -19,6 +19,9 @@ export const look = (s: Style): string => (s.box ? 'box' : colorName(String(s.co
  * is not among them, since naming one would guess (unboxing yellow subtitles is not "white subtitles"). */
 const receiptLook = (s: Style): string | null => (s.box || 'color' in s ? look(s) : null)
 const lookWord = (l: string): string => (l === 'box' ? 'boxed' : l === OTHER_COLOR ? 'recoloured' : l)
+// The Spoken word colours the Subtitles tab offers (edit/SubtitlesTab.tsx HIGHLIGHTS), by name.
+const LIT: Record<string, string> = { '#FFD60A': 'yellow', '#30D158': 'green' }
+const lit = (s: Style): string => (typeof s.highlight === 'string' ? s.highlight.toUpperCase() : '')
 export const name = (p: string | null | undefined): string =>
   (p ?? '').split(/[\\/]/).pop()?.replace(/\.[^.]+$/, '').replace(/[_-]+/g, ' ').trim() ?? ''
 
@@ -30,6 +33,8 @@ function subtitles(before: ProjectJson['captions'], after: ProjectJson['captions
   const a = (before?.style ?? {}) as Style
   const b = (after.style ?? {}) as Style
   const words: string[] = []
+  // A new look's name says its highlight.
+  let highlight = ''
   // A receipt's style holds only the fields that changed, so a look is named only when it records every field the
   // look draws: the rest would be guessed from defaults (unboxing yellow subtitles is not the Clean look).
   const lookOf = (s: Style): string | null => (!partial || LOOK_KEYS.every((k) => k in s) ? presetOf(s) : null)
@@ -41,9 +46,14 @@ function subtitles(before: ProjectJson['captions'], after: ProjectJson['captions
     const seen = partial ? receiptLook : look
     const lb = seen(b)
     if (lb !== seen(a)) words.push(lb === null ? 'unboxed' : lookWord(lb))
+    // within one look (the saved name stays) a changed Spoken word colour is said apart (#132); a receipt says it only
+    // when it records the highlight, since one it leaves out has not changed
+    const hb = lit(b)
+    if ((!partial || 'highlight' in b) && hb !== lit(a)) highlight = !hb ? 'words no longer light up' : LIT[hb] ? `words light up ${LIT[hb]}` : 'words light up in a new colour'
   }
   const out: string[] = []
   if (words.length) out.push(`${words.join(' ')} subtitles`)
+  if (highlight) out.push(highlight)
   if (pos(b) < pos(a) - 0.01) out.push(out.length ? 'moved up' : 'subtitles moved up')
   if (pos(b) > pos(a) + 0.01) out.push(out.length ? 'moved down' : 'subtitles moved down')
   const fixes = (after.corrections ?? []).filter((fix) =>
@@ -76,6 +86,9 @@ function subtitleActs(before: ProjectJson['captions'], after: ProjectJson['capti
     const lb = look(b)
     if (lb !== look(a)) made.push(lookWord(lb))
     if (made.length) out.push(`made the subtitles ${made.join(' and ')}`)
+    // within one look (the saved name stays), a changed Spoken word colour is said on its own (#132, b48bc649)
+    const hb = lit(b)
+    if (hb !== lit(a)) out.push(!hb ? 'stopped the words lighting up' : LIT[hb] ? `made the words light up ${LIT[hb]}` : 'made the words light up in a new colour')
   }
   const moved = pos(b) < pos(a) - 0.01 ? 'up' : pos(b) > pos(a) + 0.01 ? 'down' : null
   if (moved) out.push(out.length ? `moved them ${moved}` : `moved the subtitles ${moved}`)

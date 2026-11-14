@@ -15,6 +15,19 @@ test('first run downloads the listening model with progress', async () => {
   const model = process.env.REELENGINE_MODEL ?? 'tiny.en'
   const { app, page } = await launch({ REELSTUDIO_MODELS_DIR: models, REELENGINE_MODEL: model })
   try {
+    // Every value the footer's bar shows, as it changes (not sampled: a fast download can pass between samples), read
+    // from its aria-valuenow, which every model reports, not its words (#142, 3bb3cf38 and 36304e54). Watched from the
+    // start: the download begins by itself with the first run.
+    await page.evaluate(() => {
+      const shown: number[] = []
+      ;(window as unknown as { downloadShown: number[] }).downloadShown = shown
+      const read = (): void => {
+        const value = document.querySelector('[role=progressbar][data-testid="model-line"]')?.getAttribute('aria-valuenow')
+        if (value != null && Number(value) !== shown.at(-1)) shown.push(Number(value))
+      }
+      new MutationObserver(read).observe(document.body, { subtree: true, childList: true, attributes: true, attributeFilter: ['aria-valuenow'] })
+    })
+    const shown = (): Promise<number[]> => page.evaluate(() => (window as unknown as { downloadShown: number[] }).downloadShown)
     const t0 = Date.now()
     // The download starts by itself with the first run; it never holds a step up, so this watches the footer's line,
     // which goes away once the model is here.
@@ -23,7 +36,7 @@ test('first run downloads the listening model with progress', async () => {
     const line = page.getByTestId('model-line')
     const retry = page.getByTestId('model-retry')
     const installed = () => page.evaluate(() => window.reel.model.status().then((s) => s.installed))
-    const seen = new Set<number>()
+    let progressShot = false
     let retries = 0
     // A dropped connection stops the download and the line says so with Try again, like a person would see it.
     // Click it, as they would; the engine resumes the .part file with an HTTP Range request.
@@ -36,16 +49,19 @@ test('first run downloads the listening model with progress', async () => {
         await retry.click()
         await page.waitForTimeout(2000)
       }
-      const m = /(\d+) of (\d+) MB/.exec((await line.innerText().catch(() => '')) || '')
-      if (m && Number(m[2]) > 0) seen.add(Math.round((Number(m[1]) * 100) / Number(m[2])))
-      if (seen.size === 3) await shot(page, 'firstrun/02-progress')
+      if (!progressShot && (await shown()).length >= 3) {
+        progressShot = true
+        await shot(page, 'firstrun/02-progress')
+      }
       if (Date.now() - t0 > 25 * 60_000) throw new Error('download took over 25 minutes')
       await page.waitForTimeout(300)
     }
     const secs = Math.round((Date.now() - t0) / 1000)
-    const pcts = [...seen].sort((a, b) => a - b)
+    const pcts = await shown()
     console.log(`model ${model} downloaded in ${secs}s (${retries} resumed after a stop), progress seen: ${pcts.join(',')}`)
-    expect(pcts.length, 'saw the progress move').toBeGreaterThan(2)
+    expect(new Set(pcts).size, 'saw the progress move').toBeGreaterThan(1)
+    // A resumed download carries on from what it already had, so the bar never goes back.
+    expect(pcts).toEqual([...pcts].sort((a, b) => a - b))
     expect(readdirSync(join(models, model))).toEqual(expect.arrayContaining(['model.bin', 'config.json']))
     expect(existsSync(join(models, model, 'model.bin.part'))).toBe(false)
     await expect(line).toHaveCount(0)

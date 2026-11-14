@@ -120,20 +120,31 @@ export function typedMoment(text: string): { at: number; rest: string } | null {
   return m ? { at: Number(m[1]) * 60 + Number(m[2]), rest: text.trim().slice(m[0].length) } : null
 }
 
-// Words that point somewhere: with any of them the note may be about a place in the video, even when
-// the rest reads like a whole-reel setting ("smaller captions this section"). A list of phrases always
-// misses a wording, so the fast path is only for text with none of these words at all.
-const DEICTIC = /\b(this|these|that|here|there|now|then|moment|part|bit|section|spot|point|when|where|during|around)\b/i
+// The only words a "Just here" note may use to go without its moment: what a whole-reel setting is
+// about (captions, music), which way it goes, and filler. Place words are an open set ("the opening",
+// "the hook", "once I start the demo"), so listing them always misses one; this list is closed, and a
+// word outside it keeps the moment. Missing a setting costs a full-editor turn; dropping a place
+// changes the whole reel.
+const SETTING_WORDS = new Set([
+  'caption', 'captions', 'subtitle', 'subtitles', 'subs', 'text', 'words', 'on', 'screen', 'music', 'background', 'beat',
+  'smaller', 'bigger', 'larger', 'tinier', 'shrink', 'enlarge', 'higher', 'lower', 'up', 'down', 'quieter', 'louder',
+  'softer', 'big', 'large', 'small', 'tiny', 'loud', 'quiet', 'soft', 'hard', 'read', 'hear', 'less', 'more', 'too',
+  'no', 'remove', 'turn', 'off', 'take', 'out', 'get', 'rid', 'of', 'hide', 'without', 'kill', 'mute', 'add', 'put',
+  'back', 'bring', 'show', 'drowning', 'overpowering', 'make', 'the', 'a', 'bit', 'little', 'it', 'them', 'is', 'are',
+  'please', 'i', "can't", 'cant', 'can’t'
+])
 
 /**
- * How a "Just here" note goes, from the person's words as typed. A typed time ("At 0:05: ...") or a
- * word that points somewhere ("this", "here", "around"...) keeps the moment for the full editor. Otherwise a setting that is global by
- * nature ("smaller captions", "quieter music": `isSetting`, the AI package's own fast-note check)
- * goes without the moment, so the editor does it at once as it does on main. Anything else keeps
- * the moment.
+ * How a "Just here" note goes, from the person's words as typed. Only a note made entirely of
+ * whole-reel setting words (SETTING_WORDS) that the AI package's own fast-note check accepts
+ * (`isSetting`: "smaller captions", "quieter music") goes without the moment, so the editor does it
+ * at once as it does on main. A typed time ("At 0:05: ...") or any other word keeps the moment for
+ * the full editor.
  */
 export async function momentRoute(typed: string, isSetting: (words: string) => Promise<boolean>): Promise<'fast' | 'moment'> {
-  if (typedMoment(typed) || DEICTIC.test(typed)) return 'moment'
+  if (typedMoment(typed)) return 'moment'
+  const words = typed.toLowerCase().replace(/[.!,]+/g, ' ').split(/\s+/).filter(Boolean)
+  if (!words.every((w) => SETTING_WORDS.has(w))) return 'moment'
   return (await isSetting(typed.trim())) ? 'fast' : 'moment'
 }
 

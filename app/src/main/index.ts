@@ -43,8 +43,21 @@ import {
 } from './paths'
 import { offerMoveToApplications, writeErrorCode } from './move-to-applications'
 import { runSelfTest, selfTestArgs, type SelfTestResult } from './self-test'
-import { createEngineRunner, killAllEngines, toUserError, type RunEngine } from './engine'
-import { logDuration } from './diagnostics'
+import { createEngineRunner, killAllEngines, type RunEngine } from './engine'
+import { cpus, totalmem } from 'node:os'
+import {
+  DIAGNOSTICS_CHECK_MS,
+  DIAGNOSTICS_LOG_BYTES,
+  DIAGNOSTICS_LOG_LINES,
+  diagnosticsReport,
+  lastLines,
+  logDuration,
+  redactDiagnostics,
+  sharedDeadline,
+  timedOutText,
+  type CliFacts,
+  type Settled
+} from './diagnostics'
 import { handleMediaProtocol, registerMediaScheme } from './media'
 import {
   addChat,
@@ -176,6 +189,8 @@ import { registerCompanionIpc } from './companion-ipc'
 import { insightsSummary } from './insights'
 import { timingOf, wrappedReport, type WrappedReel } from '../shared/wrapped'
 import { lanAddresses } from './phone-share'
+import { createSupport, encodeScreenshot, supportUrl } from './support'
+import { ipcErrorReply } from './ipc-error'
 
 const TEST = process.env.REELSTUDIO_TEST === '1'
 // Test builds stand in for macOS's answers (permissions.ts parseFakes), and for a Mac itself (platform=darwin), so a
@@ -688,10 +703,9 @@ function handle(channel: string, fn: Handler): void {
       validateIpcArgs(channel, args)
       return { ok: true, value: await fn(e, ...args) }
     } catch (err) {
-      const u = toUserError(err)
-      log(`[ipc ${channel}] ${u.code}: ${u.message ?? u.userMessage}`)
-      const link = (err as { link?: unknown })?.link
-      return { ok: false, error: { code: u.code, userMessage: u.userMessage, ...(typeof link === 'string' ? { link } : {}) } }
+      const { message, ...error } = ipcErrorReply(err)
+      log(`[ipc ${channel}] ${error.code}: ${message ?? error.userMessage}`)
+      return { ok: false, error }
     }
   })
 }
@@ -705,6 +719,116 @@ let accountNameRead: Promise<string | null> | null = null
 /** firstRunAgain as it was when this launch started (settings.ts showsFirstRun). */
 let firstRunAgainAtLaunch = false
 const firstRunShows = async (): Promise<boolean> => showsFirstRun(await loadSettings(), firstRunAgainAtLaunch)
+
+// ---- Copy diagnostics (Settings > About; Help on a Mac) -----------------------------------------------------------
+async function readLogTail(): Promise<string> {
+  try {
+    const fh = await fs.open(logFile(), 'r')
+    try {
+      const { size } = await fh.stat()
+      const len = Math.min(size, DIAGNOSTICS_LOG_BYTES)
+      const buf = Buffer.alloc(len)
+      await fh.read(buf, 0, len, size - len)
+      return lastLines(buf.toString('utf8'), DIAGNOSTICS_LOG_LINES, size > len)
+    } finally {
+      await fh.close()
+    }
+  } catch {
+    return ''
+  }
+}
+
+/** The diagnostics text, redacted. Only the state, version and plan kind of each CLI go in, never a path. */
+async function diagnosticsText(): Promise<string> {
+  // Every check shares one deadline: a CLI that hangs (or ignores its stop signal) must not hold the report back.
+  const deadline = sharedDeadline(DIAGNOSTICS_CHECK_MS)
+  const call = <T>(fn: () => T | Promise<T>): Promise<Settled<T>> => deadline.within(Promise.resolve().then(fn))
+  const [rActive, rClaude, rCodex, rModel, rLog] = await Promise.all([
+    call(() => ai.active()),
+    call(() => ai.claudeCodeStatus?.() ?? null),
+    call(() => ai.codexStatus?.() ?? null),
+    call(() => models.status()),
+    call(() => readLogTail())
+  ])
+  deadline.done()
+  const r = { active: rActive, claude: rClaude, codex: rCodex, model: rModel, log: rLog }
+  const late = timedOutText(DIAGNOSTICS_CHECK_MS)
+  const value = <T>(s: Settled<T>): T | null => (s.ok ? s.value : null)
+  const names: Record<keyof typeof r, string> = {
+    active: 'AI editor',
+    claude: 'Claude Code app',
+    codex: 'Codex app',
+    model: 'listening model',
+    log: 'log'
+  }
+  const timedOut = (Object.keys(r) as (keyof typeof r)[]).filter((k) => {
+    const s = r[k]
+    return !s.ok && s.reason === 'timeout'
+  })
+  const active = value(r.active)
+  const model = value(r.model)
+  const logTail = r.log.ok ? r.log.value : `(${r.log.reason === 'timeout' ? late : 'could not read the log'})`
+  const facts = (s: Settled<{ state: string; version?: string; plan?: string } | null>): CliFacts | null => {
+    if (!s.ok) return { state: s.reason === 'timeout' ? late : 'check failed' }
+    const c = s.value
+    return c ? { state: c.state, ...(c.version ? { version: c.version } : {}), ...(c.plan ? { plan: c.plan } : {}) } : null
+  }
+  const mac = process.platform === 'darwin'
+  const osName = mac ? 'macOS' : process.platform === 'win32' ? 'Windows' : process.platform
+  const text = diagnosticsReport(
+    {
+      appVersion: app.getVersion(),
+      packaged: app.isPackaged,
+      os: `${osName} ${process.getSystemVersion()}`,
+      arch: process.arch,
+      cpu: cpus()[0]?.model?.trim() || 'unknown',
+      memoryGb: Math.round(totalmem() / 1024 ** 3),
+      ...(app.runningUnderARM64Translation ? { translated: true } : {}),
+      ...(mac ? { inApplications: app.isInApplicationsFolder() } : {}),
+      electron: process.versions.electron,
+      engine: engineMode(),
+      aiEditor: active
+        ? `${active.label}, ${active.connected ? 'connected' : 'not connected'}${active.error ? ` (${active.error.code})` : ''}`
+        : r.active.ok ? 'unknown' : r.active.reason === 'timeout' ? late : 'check failed',
+      claudeCode: facts(r.claude),
+      codex: facts(r.codex),
+      listeningModel: !model
+        ? r.model.ok ? 'unknown' : r.model.reason === 'timeout' ? late : 'check failed'
+        : model.installed
+          ? `${model.name}, ready`
+          : model.downloading
+            ? `${model.name}, downloading (${Math.round(model.pct)}%)`
+            : `${model.name}, not downloaded${model.error ? ` (${model.error})` : ''}`,
+      ...(timedOut.length ? { timedOut: timedOut.map((k) => names[k]) } : {})
+    },
+    logTail,
+    new Date()
+  )
+  // One pass over the whole text: the log and every fact above (a CPU name or a plan kind cannot carry a path, but cheap).
+  return redactDiagnostics(text, app.getPath('home'))
+}
+
+/** Puts the diagnostics text on the clipboard ("Copy diagnostics" in Settings > About, and Help on a Mac). */
+async function copyDiagnostics(): Promise<void> {
+  await clipboard.writeText(await diagnosticsText())
+  log('[diagnostics] copied to the clipboard')
+}
+
+/** "Report a problem" (main/support.ts). */
+function osLine(): string {
+  const osName = process.platform === 'darwin' ? 'macOS' : process.platform === 'win32' ? 'Windows' : process.platform
+  return `${osName} ${process.getSystemVersion()} ${process.arch}`
+}
+const support = createSupport({
+  url: supportUrl(process.env, log),
+  appVersion: app.getVersion(),
+  os: osLine(),
+  fetch: (url, init) => fetch(url, init), // Node's fetch: no Electron session, so no cookies
+  getKey: () => updateKey.get(),
+  diagnostics: diagnosticsText,
+  capture: async () => (win && !win.isDestroyed() ? encodeScreenshot(await win.webContents.capturePage()) : null),
+  log
+})
 
 async function appInfo(): Promise<AppInfo> {
   const s = await loadSettings()
@@ -1287,6 +1411,17 @@ function registerIpc(): void {
     else shell.showItemInFolder(p)
   })
   handle('app:copyText', (_e, t: string) => clipboard.writeText(String(t)))
+  handle('app:copyDiagnostics', () => copyDiagnostics())
+  handle('support:capture', () => support.capture())
+  handle('support:prepare', (_e, d) => support.prepare(d))
+  handle('support:send', (_e, id: unknown) => support.send(id))
+  handle('support:discard', () => support.discard())
+  handle('support:copy', async (_e, id: unknown) => {
+    const text = support.asText(id)
+    if (!text) throw { code: 'SUPPORT_STALE', userMessage: 'Nothing to copy yet.' }
+    await clipboard.writeText(text)
+  })
+  handle('support:email', (_e, id: unknown) => shell.openExternal(support.mailto(id)))
   handle('app:legal', (_e, doc: unknown) => fs.readFile(legalFile(doc), 'utf8'))
   handle('app:showLegal', (_e, doc: unknown) => {
     const file = legalFile(doc)
@@ -2334,12 +2469,23 @@ function createWindow(): BrowserWindow {
       showTimelineInMenu(!shown)
       log(`[settings] timeline not saved: ${String(e instanceof Error ? e.message : e).slice(0, 300)}`)
     })
-  installMenu(sendCommand, DEV_PROVIDERS || !app.isPackaged, toggleTimeline, () =>
-    // On Mac the menu outlives a closed window, so the window may be gone when this runs.
-    void menuCheckForUpdates(updates, {
-      focus: () => void showWindow(),
-      show: (o) => dialog.showMessageBox(showWindow(), o)
-    }).catch((e) => log(`[update] menu check failed: ${String(e instanceof Error ? e.message : e).slice(0, 300)}`))
+  installMenu(
+    sendCommand,
+    DEV_PROVIDERS || !app.isPackaged,
+    toggleTimeline,
+    () =>
+      // On Mac the menu outlives a closed window, so the window may be gone when this runs.
+      void menuCheckForUpdates(updates, {
+        focus: () => void showWindow(),
+        show: (o) => dialog.showMessageBox(showWindow(), o)
+      }).catch((e) => log(`[update] menu check failed: ${String(e instanceof Error ? e.message : e).slice(0, 300)}`)),
+    () =>
+      void copyDiagnostics()
+        .then(() => {
+          const opts = { type: 'info' as const, message: 'Diagnostics copied', detail: 'Paste them into your bug report.' }
+          return win && !win.isDestroyed() ? dialog.showMessageBox(win, opts) : dialog.showMessageBox(opts)
+        })
+        .catch((e) => log(`[diagnostics] copy failed: ${String((e as Error)?.message ?? e)}`))
   )
   void loadSettings().then((s) => showTimelineInMenu(s.timeline), () => undefined)
   created.once('ready-to-show', () => {

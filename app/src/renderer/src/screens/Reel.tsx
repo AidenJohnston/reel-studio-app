@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import type { ChatAction, NoteMoment, PlacedWord, ProjectDetail, ProviderInfo, VersionInfo, VersionTimeline } from '../../../shared/api'
+import type { ChatAction, NoteAttachment, NoteMoment, PlacedWord, ProjectDetail, ProviderInfo, VersionInfo, VersionTimeline } from '../../../shared/api'
 import { versionTitle } from '../../../shared/describe'
 import { MIRROR_ANSWERS, type MirrorAnswer } from '../../../shared/mirror'
 import { clock } from '../../../shared/progress'
@@ -555,6 +555,7 @@ export function Reel({ slug, at, go, draft: startDraft }: { slug: string; at?: n
           ? {
               kind: 'failed',
               why: d.lastError?.userMessage ?? 'This version could not be made.',
+              code: d.lastError?.code,
               extra: d.lastError?.code === 'MODEL_MISSING' ? <ModelDownload secondary /> : undefined,
               // the file itself, or a video that was never copied in: trying again fails the same way. With no copy the
               // stage says so with the primary button, and the log's is secondary.
@@ -584,6 +585,13 @@ export function Reel({ slug, at, go, draft: startDraft }: { slug: string; at?: n
     return words.length ? noteMoment(c.at, n, words, c.to) : noSpeech(c.at)
   }
 
+  /** A note that could not be sent comes back to the box, ahead of anything typed or attached while it was on its way:
+   * the box was cleared when it went, so that is the next note and must not be lost either (#126, b8b65e0f). */
+  const putBack = (text: string, files: NoteAttachment[]) => {
+    setDraft((typed) => (typed.trim() ? `${text}\n${typed}` : text))
+    att.restore(files)
+  }
+
   /** `add`: into the version being made now (Add now), when it can still take it */
   const send = async (add = false) => {
     const text = draft.trim()
@@ -602,7 +610,7 @@ export function Reel({ slug, at, go, draft: startDraft }: { slug: string; at?: n
         setJob({ ...EMPTY_LIVE, jobId: r.jobId, message: 'Planning your reel' })
         await load()
       } catch (e) {
-        setDraft(text)
+        putBack(text, [])
         setAlert(userMessage(e))
       }
       return
@@ -632,9 +640,8 @@ export function Reel({ slug, at, go, draft: startDraft }: { slug: string; at?: n
         setPins(next)
       }
     } catch (e) {
-      setDraft(text)
-      setChip(chip)
-      att.restore(files)
+      putBack(text, files)
+      setChip((c) => c ?? chip)
       setAlert(userMessage(e))
     }
   }

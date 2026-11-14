@@ -47,12 +47,14 @@ describe('Settings sections', () => {
     // Double-check, Look things up in parallel, How notes run and Let other AI apps use Reel Studio beside it
     expect(SETTING_IDS.filter((id) => SETTINGS[id].section === 'editor')).toEqual(['editor', 'check-edits', 'look-ups', 'note-runner', 'outside-apps', 'models', 'own-server', 'api-key'])
     const advanced = SETTING_IDS.filter((id) => SETTINGS[id].section === 'advanced')
-    expect(advanced).toEqual(['stock-keys', 'easy-ai', 'engine-cache', 'logs', 'first-run'])
+    expect(advanced).toEqual(['stock-keys', 'easy-ai', 'engine-cache', 'logs', 'report-problem', 'diagnostics', 'first-run'])
   })
 
   it('fails if the Advanced rows are missed by the words people use for them', () => {
     expect(findSettings('cache')).toEqual(new Set(['engine-cache']))
     finds('logs', 'logs')
+    finds('bug report', 'diagnostics')
+    finds('feedback', 'report-problem')
     finds('onboarding', 'first-run')
     finds('reset', 'first-run')
   })

@@ -22,6 +22,7 @@ import { StockKeys } from '../components/stock-keys'
 import { PostingRows } from '../components/PostingSettings'
 import { SocialRows } from '../components/SocialSettings'
 import { DevicesRows } from '../components/Devices'
+import { openReportProblem } from '../components/ReportProblem'
 
 /** Where the older section names (nav.ts) land now: a section, or one row of it. */
 const TARGET: Record<SettingsSection, SectionId | SettingId> = { ai: 'editor', listen: 'listening-model', where: 'library-folder', notify: 'notifications', privacy: 'privacy', posting: 'posting', about: 'about' }
@@ -168,6 +169,19 @@ export function Settings({ info, onInfo, section }: { info: AppInfo; onInfo: (i:
   const alerts = perm?.notifications
   const alertsOn = pending && pending !== 'folder' ? pending.notifications : alerts !== 'off'
   const isMac = info.platform === 'darwin'
+
+  const [diagnostics, setDiagnostics] = useState<'idle' | 'busy' | 'copied'>('idle')
+  const copyDiagnostics = async () => {
+    setDiagnostics('busy')
+    try {
+      await reel.app.copyDiagnostics()
+      setDiagnostics('copied')
+      notify('Copied. Paste it into your bug report.')
+    } catch (e) {
+      setDiagnostics('idle')
+      notify(userMessage(e), 'error')
+    }
+  }
 
   const change = async () => {
     const p = await reel.app.chooseFolder()
@@ -384,7 +398,7 @@ export function Settings({ info, onInfo, section }: { info: AppInfo; onInfo: (i:
               <StockKeys />
               <Subhead ids={['easy-ai']}>Being tested</Subhead>
               <EasyAiRow onError={(m) => notify(m, 'error')} />
-              <Subhead ids={['engine-cache', 'logs', 'first-run']}>Troubleshooting</Subhead>
+              <Subhead ids={['engine-cache', 'logs', 'report-problem', 'diagnostics', 'first-run']}>Troubleshooting</Subhead>
               <CacheRow shared={sharedModel} onError={(m) => notify(m, 'error')} />
               <SettingRow
                 id="logs"
@@ -392,6 +406,24 @@ export function Settings({ info, onInfo, section }: { info: AppInfo; onInfo: (i:
                 control={
                   <button className="btn small" onClick={() => void reel.app.showLogs().catch((e) => notify(userMessage(e), 'error'))} data-testid="show-logs">
                     Show logs
+                  </button>
+                }
+              />
+              <SettingRow
+                id="report-problem"
+                line="Sends what went wrong to the Reel Studio team. You see everything before it goes."
+                control={
+                  <button className="btn small" onClick={() => openReportProblem()} data-testid="report-problem-open">
+                    Report a problem
+                  </button>
+                }
+              />
+              <SettingRow
+                id="diagnostics"
+                line="For a bug report: which version you have, what computer it runs on, how your AI editor answered and what the app did recently. Your user name, e-mail addresses and keys are taken out; your videos' file names can still show."
+                control={
+                  <button className="btn small" onClick={() => void copyDiagnostics()} disabled={diagnostics === 'busy'} data-testid="copy-diagnostics">
+                    {diagnostics === 'copied' ? 'Copied' : diagnostics === 'busy' ? 'Copying…' : 'Copy diagnostics'}
                   </button>
                 }
               />

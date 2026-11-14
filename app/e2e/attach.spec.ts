@@ -160,5 +160,24 @@ test('note attachments: paste, drop, paperclip, chips, send', async () => {
   await page.getByTestId('send').click()
   await expect(page.getByTestId('log-note').last().locator('.bubble')).toHaveText(/^0:00cut this part$/)
   await expect(page.getByTestId('note-progress')).toHaveCount(0, { timeout: 60_000 })
+
+  // ---- fails if a note that could not be sent comes back over what was typed while it was on its way: the box
+  // clears as a note goes, so those words are the next note (#126, b8b65e0f). The note is held in main, then refused.
+  await app.evaluate(({ ipcMain }) => {
+    ipcMain.removeHandler('projects:note')
+    const waiting: ((v: unknown) => void)[] = []
+    ;(globalThis as { __noteWaiting?: typeof waiting }).__noteWaiting = waiting
+    ipcMain.handle('projects:note', () => new Promise((answer) => waiting.push(answer)))
+  })
+  await page.getByTestId('note-input').fill('zoom in on my face')
+  await page.getByTestId('send').click()
+  await expect(page.getByTestId('note-input')).toHaveValue('')
+  await page.getByTestId('note-input').fill('and cut the pause')
+  await app.evaluate(() => {
+    for (const answer of (globalThis as { __noteWaiting?: ((v: unknown) => void)[] }).__noteWaiting ?? [])
+      answer({ ok: false, error: { code: 'TEST', userMessage: 'That note could not be sent.' } })
+  })
+  await expect(page.getByTestId('change-alert')).toHaveText('That note could not be sent.')
+  await expect(page.getByTestId('note-input')).toHaveValue('zoom in on my face\nand cut the pause')
   await app.close()
 })
