@@ -285,9 +285,9 @@ def project_fps(ctx) -> float:
 def at_project_rate(ctx):
     """ctx on the project's frame clock. A card's start can snap to a beat on the frame grid
     (music.accent_time), and a draft runs on the preview grid (render.preview_fps), so a draft and the
-    final could place one animation a frame apart and name two different re-timed clips. Where a clip
-    starts, which names it, is taken on the project's clock: every render then asks for the clip
-    anim-jobs listed. A draft plays it at most one preview frame from where it places the layer."""
+    final could place one animation a frame apart and name two different re-timed clips. A re-timed clip is
+    worked out wholly on the project's clock: every render then asks for the clip anim-jobs listed. A draft
+    plays it at most one preview frame from where it places the layer."""
     fps = project_fps(ctx)
     if float((ctx.fmt or {}).get("fps") or 30) == fps:
         return ctx
@@ -347,7 +347,8 @@ def jobs(ctx) -> list[dict]:
     [{id, template, params, fps, out}] (out is an absolute path for the renderer)."""
     from .broll import _anim_of, plan_windows
     out, seen = [], set()
-    for w in plan_windows(at_project_rate(ctx)):      # where each card actually comes on
+    ctx = at_project_rate(ctx)
+    for w in plan_windows(ctx):                  # where each card actually comes on
         sc = _anim_of(ctx, w["item"])
         if sc is None:
             continue

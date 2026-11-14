@@ -162,7 +162,7 @@ def test_a_draft_plays_the_clip_anim_jobs_listed_when_starts_snap_to_frames(tmp_
     [job] = anim_timing.jobs(ctx)                      # what the app renders before the draft
     _render_stand_in(Path(job["out"]), job["template"], job["params"])
     draft = fx.make_ctx(pdir)
-    draft.fmt["fps"] = 30                              # render.run does this for a preview
+    draft.fmt = dict(draft.fmt, fps=30)                # render.run does this for a preview, on make_ctx's copy
     layers = broll.build_layers(draft)
     rec = json.loads((draft.work / "layers" / "layers.json").read_text(encoding="utf-8"))["items"][0]
     assert rec["retime"] == "retimed" and Path(layers[0].path) == Path(job["out"])
@@ -198,7 +198,7 @@ def test_a_clip_re_timed_after_a_version_was_saved_starts_a_new_version(tmp_path
     before = render.asset_fingerprint(pdir, proj)
     _render_stand_in(pdir / "work" / "animations" / "big-quote-abc.mov", "big-quote", {"text": "x"})
     after = render.asset_fingerprint(pdir, proj)
-    assert before != after and "work/animations/big-quote-abc.mov" in after
+    assert before != after and "work/animations/big-quote-abc.mov" in after["assets"]
 
 
 def test_an_editor_choice_of_full_screen_is_kept(tmp_path, video):
