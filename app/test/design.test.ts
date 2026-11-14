@@ -141,6 +141,8 @@ describe('version messages', () => {
     // yellow subtitles in a box; this edit only took the box away, so the receipt has no colour
     const unboxed = [{ kind: 'captions.style', field: 'box', before: true, after: false }]
     expect(describeFacts(unboxed, [])).toBe('unboxed subtitles')
+    const own = { title: versionTitle(unboxed, []), summary: describeFacts(unboxed, []) }
+    expect(acceptRewrite(own, unboxed, [])).toEqual(own)
     // a colour field the project never had is the default, which is white
     expect(describeFacts([...unboxed, { kind: 'captions.style', field: 'color', before: '#FFD60A', after: null }], [])).toBe('white subtitles')
   })
