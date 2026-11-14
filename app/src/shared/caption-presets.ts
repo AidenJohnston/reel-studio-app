@@ -35,7 +35,8 @@ export function applyPreset(key: string, current: CaptionStyle = {}): CaptionSty
 
 // What a style left out, the engine draws as (captions.render_ass, project.DEFAULT_CAPTION_STYLE).
 const DRAWN_AS: CaptionStyle = { ...CAPTION_PRESETS[0].style, box: false, pop: false, highlight: null }
-const LOOK_KEYS = Object.keys(DRAWN_AS).filter((k) => k !== 'size' && k !== 'position')
+/** The style fields that make a look (presetOf compares these). */
+export const LOOK_KEYS = Object.keys(DRAWN_AS).filter((k) => k !== 'size' && k !== 'position')
 const drawn = (st: CaptionStyle, k: string): unknown => {
   const v = st[k] ?? DRAWN_AS[k]
   return typeof v === 'string' ? v.toUpperCase() : v

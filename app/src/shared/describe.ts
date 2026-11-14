@@ -2,7 +2,7 @@
 // version's title and summary from its receipt facts. Keep free of Node and DOM imports.
 import type { ChatMessage, DropResult, EditFact, ProjectJson, VersionInfo, Word } from './api'
 import { keptIds } from './cut'
-import { CAPTION_PRESETS, colorName, presetOf } from './caption-presets'
+import { CAPTION_PRESETS, LOOK_KEYS, colorName, presetOf } from './caption-presets'
 import { kindsByWords, PACE_BANDS, PACE_LABELS, ZOOM_KIND_LABELS, type CutStyle } from './cut-style'
 import { isMirrored } from './mirror'
 import { gainOf, momentKey, musicFades, secondsText, sfxName } from './sfx'
@@ -15,6 +15,9 @@ export const pos = (s: Style): number => Number(s.position ?? 0.75)
 export const OTHER_COLOR = 'other colour'
 /** The subtitles' look: 'box', or the name of the colour the words are drawn in. */
 export const look = (s: Style): string => (s.box ? 'box' : colorName(String(s.color ?? '#FFFFFF')) ?? OTHER_COLOR)
+/** look() of a style rebuilt from a receipt, which lists only the style fields that changed: null when the colour
+ * is not among them, since naming one would guess (unboxing yellow subtitles is not "white subtitles"). */
+const receiptLook = (s: Style): string | null => (s.box || 'color' in s ? look(s) : null)
 const lookWord = (l: string): string => (l === 'box' ? 'boxed' : l === OTHER_COLOR ? 'recoloured' : l)
 // The Spoken word colours the Subtitles tab offers (edit/SubtitlesTab.tsx HIGHLIGHTS), by name.
 const LIT: Record<string, string> = { '#FFD60A': 'yellow', '#30D158': 'green' }
@@ -22,24 +25,31 @@ const lit = (s: Style): string => (typeof s.highlight === 'string' ? s.highlight
 export const name = (p: string | null | undefined): string =>
   (p ?? '').split(/[\\/]/).pop()?.replace(/\.[^.]+$/, '').replace(/[_-]+/g, ' ').trim() ?? ''
 
-function subtitles(before: ProjectJson['captions'], after: ProjectJson['captions']): string[] {
+/** `partial`: the styles hold only the fields a receipt says changed (describeFacts), not whole styles. */
+function subtitles(before: ProjectJson['captions'], after: ProjectJson['captions'], partial = false): string[] {
   if (!after) return []
   if (before?.enabled !== false && after.enabled === false) return ['no subtitles']
   if (before?.enabled === false && after.enabled !== false) return ['subtitles back on']
   const a = (before?.style ?? {}) as Style
   const b = (after.style ?? {}) as Style
   const words: string[] = []
-  // A new look's name says its highlight; within one look (the saved name stays) a changed highlight is said apart.
+  // A new look's name says its highlight.
   let highlight = ''
-  const preset = presetOf(b)
-  if (preset && preset !== presetOf(a)) words.push(CAPTION_PRESETS.find((x) => x.key === preset)!.label.toLowerCase())
+  // A receipt's style holds only the fields that changed, so a look is named only when it records every field the
+  // look draws: the rest would be guessed from defaults (unboxing yellow subtitles is not the Clean look).
+  const lookOf = (s: Style): string | null => (!partial || LOOK_KEYS.every((k) => k in s) ? presetOf(s) : null)
+  const preset = lookOf(b)
+  if (preset && preset !== lookOf(a)) words.push(CAPTION_PRESETS.find((x) => x.key === preset)!.label.toLowerCase())
   else {
     if (size(b) > size(a)) words.push('bigger')
     if (size(b) < size(a)) words.push('smaller')
-    const lb = look(b)
-    if (lb !== look(a)) words.push(lookWord(lb))
+    const seen = partial ? receiptLook : look
+    const lb = seen(b)
+    if (lb !== seen(a)) words.push(lb === null ? 'unboxed' : lookWord(lb))
+    // within one look (the saved name stays) a changed Spoken word colour is said apart (#132); a receipt says it only
+    // when it records the highlight, since one it leaves out has not changed
     const hb = lit(b)
-    if (hb !== lit(a)) highlight = !hb ? 'words no longer light up' : LIT[hb] ? `words light up ${LIT[hb]}` : 'words light up in a new colour'
+    if ((!partial || 'highlight' in b) && hb !== lit(a)) highlight = !hb ? 'words no longer light up' : LIT[hb] ? `words light up ${LIT[hb]}` : 'words light up in a new colour'
   }
   const out: string[] = []
   if (words.length) out.push(`${words.join(' ')} subtitles`)
@@ -245,7 +255,7 @@ function changes(facts: EditFact[], words: Word[]): Change[] {
       }
       return c as NonNullable<ProjectJson['captions']>
     }
-    const said = subtitles(side('before'), side('after'))
+    const said = subtitles(side('before'), side('after'), true)
     const first = said[0] ?? ''
     out.push({
       group: 'subtitles',
@@ -331,7 +341,7 @@ const LEXICON: [Group, Lexicon][] = [
     markers: ['subtitle'],
     nouns: ['subtitle', 'word', 'look', 'moved'],
     dirs: {
-      bigger: 'bigger', smaller: 'smaller', yellow: 'yellow', white: 'white', boxed: 'boxed', up: 'up', down: 'down',
+      bigger: 'bigger', smaller: 'smaller', yellow: 'yellow', white: 'white', boxed: 'boxed', unboxed: 'unboxed', up: 'up', down: 'down',
       no: 'off', off: 'off', back: 'on', on: 'on', fixed: 'fixed', corrected: 'fixed', new: 'changed', changed: 'changed'
     }
   }],
@@ -416,14 +426,21 @@ function ownClaims(c: Change): Map<string, number | undefined> {
   return out
 }
 
+/** The directions the app's own summary gives a change. A reworded summary replaces the whole tooltip,
+ * so it must keep every one: "bigger subtitles" alone hides "fixed 3 words". */
+function saidDirs(c: Change): string[] {
+  return splitParts(c.said).flatMap((part) => claimAbout(c.group, tokens(part))?.dirs ?? [])
+}
+
 /**
  * A small model's rewording of a version's title and summary. Kept only when it reads like a title and
  * every part (between commas or "and") means something the receipt says: each part is read as a claim
  * (kind of change, direction, number) in that kind's own words, and the receipt's change of that kind
  * must make the same claim. A number must be the app's own; "a" counts as one. In the summary, a
  * direction the app gives a number to must keep that number. A part that names no kind continues the
- * kind before it, or is any kind it is true of. Every kind must be named in the summary; only a title
- * may end in the app's "and more" form for kinds left unnamed. A quoted name must be the song's own.
+ * kind before it, or is any kind it is true of. Every kind must be named in the summary, with every
+ * direction the app's own summary gives it; only a title may end in the app's "and more" form for kinds
+ * left unnamed. A quoted name must be the song's own.
  * null = keep the app's own words.
  */
 export function acceptRewrite(text: { title: string; summary: string }, facts: EditFact[], words: Word[]): { title: string; summary: string } | null {
@@ -444,7 +461,7 @@ export function acceptRewrite(text: { title: string; summary: string }, facts: E
   for (const [t, inSummary] of [[straight(title), false], [straight(summary), true]] as const) {
     if ((t.match(QUOTED) ?? []).some((q) => !songs.has(q))) return null
     const parts = splitParts(t)
-    const named = new Set<Group>()
+    const named = new Map<Group, Set<string>>()
     let andMore = false
     let group: Group | null = null
     for (const [i, part] of parts.entries()) {
@@ -462,9 +479,10 @@ export function acceptRewrite(text: { title: string; summary: string }, facts: E
       const claim: Claim | undefined = candidates.map((g) => claimAbout(g, w)).find((c): c is Claim => !!c && holds(c, inSummary))
       if (!claim) return null
       group = claim.group
-      named.add(claim.group)
+      named.set(claim.group, new Set([...(named.get(claim.group) ?? []), ...claim.dirs]))
     }
     if (!named.size || (!andMore && own.some((c) => !named.has(c.group)))) return null
+    if (inSummary && own.some((c) => saidDirs(c).some((d) => !named.get(c.group)?.has(d)))) return null
   }
   return { title, summary }
 }

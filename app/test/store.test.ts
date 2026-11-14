@@ -347,6 +347,17 @@ describe('project store', () => {
     expect([v3.facts, v3.beforeReceipts]).toEqual([[fact(126), fact(90)], undefined])
   })
 
+  // Stop pressed while "Checking your video", or a failed cover: the export is in v2 but project.json
+  // still says 1, and the next final render deletes v2 to make a different video under that number.
+  it('a final render that stopped before it was saved is not shown as a version', async () => {
+    setupPaths()
+    await ensureRoot()
+    const dir = fakeProject('theta', { versions: [1] })
+    mkdirSync(join(dir, 'versions', 'v2'), { recursive: true })
+    writeFileSync(join(dir, 'versions', 'v2', 'export.mp4'), 'never saved')
+    expect((await listVersions(dir)).map((v) => v.n)).toEqual([1])
+  })
+
   it('recovers a project that was mid-render when the app quit', async () => {
     setupPaths()
     await ensureRoot()
