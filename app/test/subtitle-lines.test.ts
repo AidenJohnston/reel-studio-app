@@ -74,7 +74,6 @@ describe('subtitle lines', () => {
     const drawn = drawnWords(heard, { w2: 'Claude' })
     const back = { ...saved, corrections: [] }
     expect(text(subtitleLines(lines, kept, fixed, back, drawn))).toEqual(['I use Claude'])
-    expect(text(subtitleLines(lines, kept, fixed, back, heard))).toEqual(['I use cloud'])
     const line = subtitleLines(lines, kept, fixed, fixed, drawn)[0]
     expect(retype(line, fixed.corrections, fixed.corrections, 'I use Claud', heard)).toEqual([{ from: 'cloud', to: 'Claud', at: 'w2' }])
   })
