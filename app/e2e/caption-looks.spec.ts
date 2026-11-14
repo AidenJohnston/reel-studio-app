@@ -40,6 +40,9 @@ test('caption looks: size through look switches, Karaoke rows, colours that matc
     await openWith(withColor('#FF0000'))
     await expect(page.getByTestId('cap-color-red')).toHaveAttribute('aria-checked', 'true')
     await expect(page.getByTestId('cap-color-current')).toHaveCount(0)
+    // and picking the Red that is already checked keeps the editor's red: no change to make a version of
+    await page.getByTestId('cap-color-red').click()
+    await expect(page.getByTestId('change-count')).toHaveText('Nothing changed yet')
     await page.getByTestId('drawer-close').click()
 
     await openWith(withColor('#BF5AF2'))

@@ -125,7 +125,14 @@ export function SubtitlesTab({ now, change, next }: TabProps) {
           {/* a look that lights up the word being said still has a colour for the rest (#53) */}
           <div className="edit-field">
             <span className="edit-label">Colour</span>
-            <Segmented testid="cap-color" label="Colour" value={colorKey(style)} options={colorOptions(style)} onPick={(k) => { const c = CAPTION_COLORS.find((x) => x.key === k); if (c) setStyle({ color: c.color }) }} />
+            <Segmented testid="cap-color" label="Colour" value={colorKey(style)} options={colorOptions(style)} onPick={(k) => {
+                // the checked one is a no-op: Red over the editor's #FF0000 would swap in #FF3B30 and count a change
+                // nobody made (review of 4bcbe80c)
+                if (k === colorKey(style)) return
+                const c = CAPTION_COLORS.find((x) => x.key === k)
+                if (c) setStyle({ color: c.color })
+              }}
+            />
           </div>
           {!!style.highlight && (
             <div className="edit-field">
