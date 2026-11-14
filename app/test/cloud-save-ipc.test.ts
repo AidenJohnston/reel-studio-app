@@ -1,11 +1,13 @@
 // The cloud:save handler, called the way the renderer calls it, with a fake home folder for the drive.
 import { afterEach, expect, it, vi } from 'vitest'
-import { promises as fs } from 'node:fs'
+import { promises as fs, realpathSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { PhoneIpcDeps } from '../src/main/phone-ipc'
 
-const home = await fs.mkdtemp(join(tmpdir(), 'rs-cloud-ipc-'))
+// The long, real form of the temp folder: the handler resolves the video with realpathSync.native, which expands a
+// Windows short name (C:\Users\RUNNER~1), and the first test below tells this home from other drives by its prefix.
+const home = realpathSync.native(await fs.mkdtemp(join(tmpdir(), 'rs-cloud-ipc-')))
 vi.mock('electron', () => ({ app: { getPath: () => home }, BrowserWindow: {}, ShareMenu: class {}, shell: {} }))
 const { cloudSavesSettled, registerPhoneIpc } = await import('../src/main/phone-ipc')
 
@@ -60,7 +62,8 @@ it.skipIf(process.platform !== 'darwin' && process.platform !== 'win32')('fails 
     copying()
     return new Promise<never>(() => {})
   }) as typeof fs.stat)
-  void handlers.get('cloud:save')!({} as Electron.IpcMainInvokeEvent, video, iCloud, 'save-1')
+  // its own id: the save map outlives a test, and a 'save-1' the first test left running would be refused here
+  void handlers.get('cloud:save')!({} as Electron.IpcMainInvokeEvent, video, iCloud, 'save-2')
   await started
 
   vi.useFakeTimers()

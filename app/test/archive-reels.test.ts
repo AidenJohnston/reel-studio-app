@@ -141,7 +141,9 @@ it('fails if a Library ref reaches a file outside the Library or something that 
   } catch {
     /* Windows without the right to make links: no link can be planted there either */
   }
-  expect(await libraryRef('Library/Raw takes/b.mp4', lib)).toBe(realpathSync(join(lib, 'Raw takes', 'b.mp4')))
+  // .native, like libraryRef's fs.promises.realpath: the JS realpathSync keeps a Windows short name (RUNNER~1) that
+  // the native one expands, so the two disagree on the same file
+  expect(await libraryRef('Library/Raw takes/b.mp4', lib)).toBe(realpathSync.native(join(lib, 'Raw takes', 'b.mp4')))
   for (const ref of refused) {
     await expect(libraryRef(ref, lib), ref).rejects.toMatchObject({ code: 'FILE_GONE' })
   }
