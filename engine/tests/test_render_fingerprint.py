@@ -62,6 +62,21 @@ def test_a_replaced_caption_font_cannot_reuse_a_saved_render(tmp_path, monkeypat
     assert render.pick_version(tmp_path, proj) == 2
 
 
+def test_an_edited_script_file_cannot_reuse_a_saved_render(tmp_path):
+    # Fails if script.txt, which the captions follow when project.json has no script, is edited and an export
+    # hands back the old video as reused, or frames takes the old render for the edit's picture (architecture
+    # review 5).
+    proj, vdir = saved_project(tmp_path)
+    script = tmp_path / "script.txt"
+    script.write_text("Hello and welcome to the show.", encoding="utf-8")
+    projmod.write_json(vdir / "assets.json", render.asset_fingerprint(tmp_path, proj))
+    key = render.picture_key(tmp_path, proj)
+    assert render.pick_version(tmp_path, proj) == 1
+    script.write_text("Hello, and welcome back to the show.", encoding="utf-8")
+    assert render.pick_version(tmp_path, proj) == 2
+    assert render.picture_key(tmp_path, proj) != key
+
+
 def test_the_engine_version_is_the_release_version():
     # Fails if a release ships engine code under an older version: its renders carry that version in their
     # fingerprint, so a saved render made by different code could be handed back as reused.

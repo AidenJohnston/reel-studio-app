@@ -111,6 +111,16 @@ def asset_fingerprint(project_dir: Path, proj: dict, root: Optional[Path] = None
             out[f"font:{font.name}"] = [st.st_size, st.st_mtime_ns]
         except (EngineError, OSError):
             out["font"] = None
+    # with no script in project.json, captions read one from the project folder (scriptalign.script_text), and the
+    # first of these that exists is it (architecture review 5)
+    from .scriptalign import script_text
+    if not script_text(None, proj):
+        for name in ("script.txt", "script.md"):
+            f = Path(project_dir) / name
+            if f.is_file():
+                st = f.stat()
+                out[name] = [st.st_size, st.st_mtime_ns]
+                break
     return {"engineVersion": reelengine.__version__, "assets": out}
 
 
