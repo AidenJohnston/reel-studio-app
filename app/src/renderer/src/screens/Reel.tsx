@@ -114,6 +114,8 @@ export function Reel({ slug, at, go, draft: startDraft }: { slug: string; at?: n
   const [sent, setSent] = useState<HandEdit[]>([])
   // a change made on the timeline is on its way: its version takes the screen when it lands, without playing
   const timelineMade = useRef(0)
+  /** The queue ids of this panel's timeline gestures, newest last; null for one that had already run when it was read. */
+  const timelineIds = useRef<(string | null)[]>([])
   const [sound, setSound] = useState<string | null>(null)
   const [reveal, setReveal] = useState(0)
   const [picture, setPicture] = useState<string | null>(null)
@@ -750,15 +752,31 @@ export function Reel({ slug, at, go, draft: startDraft }: { slug: string; at?: n
   const timelineEdit = async (g: Gesture) => {
     setSent((x) => [...x, g.edit])
     timelineMade.current++
+    const had = new Set(d.queue.map((q) => q.id))
     try {
       await reel.projects.handEdit(slug, g.edit, g.summary, countChanges(g.edit, d.words))
-      await load()
+      // sendHand queues the edit before it answers, and a running one stays in the queue until done (main/note-queue.ts)
+      const next = await load()
+      timelineIds.current.push(next?.queue.find((q) => q.hand && !had.has(q.id))?.id ?? null)
     } catch (e) {
       timelineMade.current = Math.max(0, timelineMade.current - 1)
       notify(userMessage(e), 'error')
     } finally {
       setSent((x) => x.filter((y) => y !== g.edit))
     }
+  }
+  /** Cmd/Ctrl+Z on the timeline: a gesture still waiting its turn is taken back; one being made, or made, is a version,
+   * which Versions goes back from. A gesture made while nothing was running starts at once, so it is always that. */
+  const undoTimeline = () => {
+    if (!timelineIds.current.length) return
+    const id = timelineIds.current.pop()
+    if (!id || !d.queue.some((q) => q.id === id && !q.attempt))
+      return notify('That change is already a version. To go back, open Versions and choose the one before it.')
+    timelineMade.current = Math.max(0, timelineMade.current - 1)
+    reel.queue
+      .cancel(slug, id)
+      .then(() => (notify('Took back your last timeline change.'), load()))
+      .catch((e) => notify(userMessage(e), 'error'))
   }
   /** A picture or its new file, as update_broll changes it; null when it isn't on the timeline any more. */
   const pictureEdit = (id: string, next: (b: Broll) => Broll) => {
@@ -808,6 +826,7 @@ export function Reel({ slug, at, go, draft: startDraft }: { slug: string; at?: n
     setPicture(null)
     // a version the timeline made after this lands as any other does
     timelineMade.current = 0
+    timelineIds.current = []
   }
   const watch = (n: number) => {
     setCompare(null)
@@ -1157,6 +1176,7 @@ export function Reel({ slug, at, go, draft: startDraft }: { slug: string; at?: n
                         }}
                         onGesture={(g) => void timelineEdit(g)}
                         onSwap={(id) => void swapPicture(id)}
+                        onUndo={undoTimeline}
                       />
                     )
                   ) : (
