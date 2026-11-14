@@ -80,6 +80,14 @@ def cmd_init(args):
                        faster_exports=args.faster_exports, keep_order=args.keep_order)
 
 
+def cmd_detect_mirror(args):
+    """Does a take look mirrored? (the check `init` runs on every new take; mirror_detect.py)"""
+    import tempfile
+    from . import mirror_detect
+    with tempfile.TemporaryDirectory() as work:
+        return mirror_detect.detect(Path(args.file), Path(work))
+
+
 def cmd_transcribe(args):
     from . import transcribe
     return transcribe.run(_project(args), model_name=args.model, language=args.language,
@@ -459,7 +467,7 @@ def cmd_analyze_music(args):
     """Tempo, energy, mood, loudness curve and a suggested start point for a song. `file` may be a
     path or a Library/... reference (resolved against the Reel Studio root). `--library`: every song
     in Library/Music at once (one process; the AI listens to the whole library on each edit).
-    Cached per file."""
+    `--fps`: also the beat grid to store in project.music.beats (beats.quantise). Cached per file."""
     from . import tools
     if args.library:
         lib = tools.root_dir(args.root) / "Library" / "Music"
@@ -489,6 +497,9 @@ def cmd_analyze_music(args):
         raise EngineError("MUSIC_MISSING", f"no such song: {p}", "I can't find that song. Pick another one.")
     progress("music", 10, "Listening to the song", force=True)
     r = dict(_music_features(p))
+    if args.fps:
+        from . import beats
+        r["beatGrid"] = beats.quantise(r.get("beats") or [], args.fps, r["duration"], beats.file_sha256(p))
     if args.no_beats:
         r.pop("beats", None)
     if not args.curve:
@@ -499,13 +510,25 @@ def cmd_analyze_music(args):
 def cmd_anim_context(args):
     """Free region above the eyebrows + word times for an animation over --from..--to (see
     broll.anim_context). The AI calls this before rendering an animation."""
-    from . import broll, project as projmod, render, tools
+    from . import broll
+    return broll.anim_context(_anim_ctx(args), args.word_from, args.word_to, args.duration)
+
+
+def _anim_ctx(args):
+    """A draft render context for the project (cut, words, face track): nothing is rendered."""
+    from . import project as projmod, render, tools
     pdir = _project(args).resolve()
     proj = projmod.load(pdir, file=_in_work(args, "project_file"))
     words = projmod.load_transcript(pdir, proj)["words"]
     tl = projmod.timeline(pdir, proj, words)
-    ctx = render.make_ctx(pdir, proj, tl, True, tools.root_dir(args.root), pdir / "work" / "render")
-    return broll.anim_context(ctx, args.word_from, args.word_to, args.duration)
+    return render.make_ctx(pdir, proj, tl, True, tools.root_dir(args.root), pdir / "work" / "render")
+
+
+def cmd_anim_jobs(args):
+    """Animation clips the current cut needs re-rendered (beats re-timed to the words, see
+    anim_timing). The app renders each one before a render."""
+    from . import anim_timing
+    return {"jobs": anim_timing.jobs(_anim_ctx(args))}
 
 
 def cmd_attach(args):
@@ -593,6 +616,8 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--title", default="My video")
     sp.add_argument("--slug")
     sp.add_argument("files", nargs="+")
+    sp = add("detect-mirror", cmd_detect_mirror, "does a take look mirrored (writing reads backwards)?")
+    sp.add_argument("file")
     sp = add("transcribe", cmd_transcribe, "speech to words")
     sp.add_argument("--model")
     sp.add_argument("--language")
@@ -743,6 +768,9 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--duration", type=float)
     sp.add_argument("--root")
     sp.add_argument("--project-file")
+    sp = add("anim-jobs", cmd_anim_jobs, "animation clips to re-render for the current cut")
+    sp.add_argument("--root")
+    sp.add_argument("--project-file")
     sp = add("attach", cmd_attach, "add a picture, GIF or short clip attached to a note")
     sp.add_argument("file")
     sp.add_argument("--name", help="the file's original name (shown to the user)")
@@ -751,6 +779,7 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--track")
     sp.add_argument("--root")
     sp.add_argument("--no-beats", action="store_true")
+    sp.add_argument("--fps", type=float, help="add beatGrid: the beats as whole frames at this rate")
     sp.add_argument("--curve", action="store_true", help="include the 5 s loudness curve")
     sp.add_argument("--library", action="store_true", help="every song in Library/Music (features only)")
     return p

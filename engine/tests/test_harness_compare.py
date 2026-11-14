@@ -296,3 +296,89 @@ def test_a_proxy_run_refuses_a_take_whose_copy_was_not_made(tmp_path):
     (take / "session.json").write_text('{"steps": []}', encoding="utf-8")
     with pytest.raises(RuntimeError, match="preview copies not made"):
         replay.replay(replay.Take("t", take), Cand(), [], tmp_path / "scratch", None, "ffprobe", proxy=True)
+
+
+def test_a_note_state_with_a_saved_version_replays_its_stills_from_the_draft(tmp_path, monkeypatch):
+    """A real note's frozen state can have version > 0, and copy_project leaves out every saved
+    version. The stills must come from the draft just made: without a file, `frames` takes the
+    newest render that still shows the edit or draws stills from the project (frames.py), and neither
+    is the draft the checks compare them with."""
+    from types import SimpleNamespace
+    from reelengine.render import preview_dir
+    src = tmp_path / "take"
+    (src / "media").mkdir(parents=True)
+    (src / "media" / "take01.mp4").write_bytes(b"media")
+    (src / "project.json").write_text("{}", encoding="utf-8")
+    (src / "versions" / "v2").mkdir(parents=True)
+    (src / "versions" / "v2" / "export.mp4").write_bytes(b"old export")
+
+    class FakeEngine:
+        """Like the engine, except that `frames` must be given the draft just made."""
+        def run(self, command, args):
+            proj = __import__("pathlib").Path(args[args.index("--project") + 1])
+            out = preview_dir(proj)
+            out.mkdir(parents=True, exist_ok=True)
+            if command == "render":
+                f = out / ("draft.mp4" if "--draft" in args else "window.mp4" if "--window" in args else "final.mp4")
+                f.write_bytes(command.encode())
+                return SimpleNamespace(seconds=0.1, result={"file": str(f), "duration": 1.0})
+            assert command == "frames"
+            assert "--file" in args, "stills asked for without naming the draft"
+            video = args[args.index("--file") + 1]
+            assert __import__("pathlib").Path(video) == out / "draft.mp4"
+            still = out / "still.png"
+            still.write_bytes(b"png")
+            return SimpleNamespace(seconds=0.1, result={"video": str(video), "frames": [{"t": 0.5, "file": str(still)}]})
+
+    monkeypatch.setattr(replay, "_complete_video", lambda *a: None)
+    monkeypatch.setattr(replay.media, "read_image", lambda p: None)
+    take = SimpleNamespace(id="note-v2", project=src, session=["note"], state=lambda step: {"version": 2})
+    refs = [{"fps": 30, "previewFps": 30, "stills": [0.5], "window": [0.0, 1.0]}]
+    out = replay.replay(take, FakeEngine(), refs, tmp_path / "scratch", None, "ffprobe")
+    assert out["seconds"]["still"] == [0.1]
+
+
+def test_the_harness_preview_rate_is_the_engines():
+    from reelengine.render import preview_fps
+    for fps in (24, 25, 29.97, 30, 40, 47.952, 48, 50, 59.94, 60):
+        assert replay.preview_rate(fps) == preview_fps(fps), fps
+
+
+@pytest.mark.parametrize("fps", [60, 50, 59.94])
+def test_high_rate_plans_sit_on_the_frame_grid_of_the_final_and_the_previews(fps):
+    pfps = replay.preview_rate(fps)
+    p = replay.plan_previews(3.47, 12.0, fps, pfps)
+    for t in [*p["window"], *p["stills"]]:
+        for rate in (fps, pfps):
+            assert abs(t * rate - round(t * rate)) < 1e-6, (t, rate)
+
+
+@pytest.mark.skipif(not (FFMPEG and FFPROBE), reason="needs ffmpeg and ffprobe")
+def test_a_30_fps_preview_of_a_60_fps_final_passes_its_checks(tmp_path):
+    """A 60 fps project's previews run at 30 (render.preview_fps): every preview frame is the final's
+    frame at the same time, so a correct draft, window and still must pass against the 60 fps final."""
+    ref, draft, window = tmp_path / "final.mp4", tmp_path / "draft.mp4", tmp_path / "window.mp4"
+    lossless = ["-c:v", "libx264", "-qp", "0", "-preset", "ultrafast", "-pix_fmt", "yuv444p"]
+    subprocess.run([FFMPEG, "-v", "error", "-f", "lavfi", "-i", "testsrc2=s=108x192:r=60:d=1.2",
+                    "-f", "lavfi", "-i", "sine=frequency=440:duration=1.2", *lossless,
+                    "-c:a", "pcm_s16le", "-ar", "48000", "-shortest", str(ref).replace(".mp4", ".mov")], check=True)
+    src = str(ref).replace(".mp4", ".mov")
+    subprocess.run([FFMPEG, "-v", "error", "-i", src, *lossless, "-c:a", "aac", "-b:a", "192k", str(ref)], check=True)
+    # every other frame of the final, as an editing preview takes it
+    subprocess.run([FFMPEG, "-v", "error", "-i", src, "-vf", "fps=30", *lossless, "-c:a", "aac", "-b:a", "192k",
+                    str(draft)], check=True)
+    a, b = 0.2, 1.0                     # a window that starts on a frame of both clocks
+    subprocess.run([FFMPEG, "-v", "error", "-ss", f"{a:.6f}", "-to", f"{b:.6f}", "-i", src, "-vf", "fps=30",
+                    *lossless, "-c:a", "aac", "-b:a", "192k", str(window)], check=True)
+    th = {"captionPsnrMinDb": 40.0, "otherPsnrMinDb": 40.0, "meanColorMaxDelta": 1.0,
+          "audioOffsetMaxMs": 30.0, "audioLevelMaxDb": 1.0}
+    whole = checks.check_preview_video(FFMPEG, FFPROBE, ref, draft, [], th, 60.0, (108, 192), preview_fps=30.0)
+    assert whole["failures"] == [] and whole["status"] == "pass", whole
+    part = checks.check_preview_video(FFMPEG, FFPROBE, ref, window, [], th, 60.0, (108, 192),
+                                      start=a, end=b, preview_fps=30.0)
+    assert part["failures"] == [] and part["status"] == "pass", part
+    # a still asked for between two preview frames is the next preview frame (frames.py's seek)
+    png = tmp_path / "still.png"
+    subprocess.run([FFMPEG, "-v", "error", "-ss", "0.050", "-i", str(draft), "-frames:v", "1", str(png)], check=True)
+    still = checks.check_still(FFMPEG, FFPROBE, ref, png, 0.05, [], th, (108, 192), preview_fps=30.0)
+    assert still["status"] == "pass", still

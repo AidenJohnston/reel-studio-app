@@ -39,7 +39,7 @@ include-package-data = true
 include = ["reelengine*"]
 
 [tool.setuptools.package-data]
-reelengine = ["schema/*.json", "fonts/*", "models/*", "sfx/*", "templates/**/*"]
+reelengine = ["schema/*.json", "fonts/*", "models/*", "sfx/*", "ocr/*", "templates/**/*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

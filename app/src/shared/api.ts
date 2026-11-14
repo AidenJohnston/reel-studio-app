@@ -26,6 +26,7 @@ import type { CutStyle, Zoom } from './cut-style'
 import type { ReferenceEntry, ReferenceView, Readout } from './references'
 import type { Niche, NicheTurn, NicheTurnResult, SavedNiche } from './niche'
 export type { VersionRow } from './version-diff'
+import type { MirrorAnswer } from './mirror'
 export type { ChatAction } from './notes'
 export type { CoverCandidate } from './cover'
 
@@ -194,6 +195,8 @@ export interface ChatMessage {
   planRaw?: unknown
   /** About more reels from this video: what the editor found, or the reels being made. It belongs to no note. */
   reels?: true
+  /** The takes a mirror question is about (shared/mirror.ts): its buttons act on these only. */
+  sources?: string[]
 }
 
 /** done: the note made a new version. failed: an error, or nothing changed. stopped: Stop, or the app quit. */
@@ -367,6 +370,17 @@ export interface PacePreview { paces: Record<string, { perMinute: number; openin
 /** One join of a cut, as the engine's match-joins answers for it. */
 export interface MatchVerdict { keep: number; matched: boolean; why?: string }
 
+/** `sources[].mirrorCheck` (engine/reelengine/mirror_detect.py). Only `mirrored` flips a take at import;
+ * `maybe-mirrored` makes the editor ask. */
+export interface MirrorCheck {
+  verdict: 'mirrored' | 'maybe-mirrored' | 'as-filmed' | 'unsure' | 'unknown'
+  /** plain words, e.g. "the writing behind you reads backwards" */
+  why?: string
+  camera?: 'front' | 'back'
+  letters?: { asFilmed: number; flipped: number }
+  answer?: 'flipped' | 'kept' | 'undone'
+}
+
 export interface ProjectJson {
   schemaVersion: number
   id: string
@@ -376,8 +390,9 @@ export interface ProjectJson {
   updatedAt: string
   version: number
   format?: { width: number; height: number; fps: number }
-  /** `mirror`: the take is mirrored, the engine flips the picture (absent = as filmed) */
-  sources?: { id: string; path: string; originalName?: string; duration?: number; rotation?: number; mirror?: boolean }[]
+  /** `mirror`: the take is mirrored, the engine flips the picture (absent = as filmed). `mirrorCheck`:
+   * what init saw when it looked for a mirrored take, and what the user then chose (shared/mirror.ts). */
+  sources?: { id: string; path: string; originalName?: string; duration?: number; rotation?: number; mirror?: boolean; mirrorCheck?: MirrorCheck }[]
   /** The group this reel belongs to on Reels ("Sourdough basics"). */
   series?: string
   transcript?: { file: string; language?: string }
@@ -1444,6 +1459,11 @@ export interface ReelApi {
   sfx: {
     /** Every built-in sound effect, with a URL to hear it. */
     pack(): Promise<SoundEffect[]>
+  }
+  mirror: {
+    /** A button under the editor's "I flipped your video" / "Flip it?" line. `change` = what to call
+     * the new version to make (empty: the picture did not change). */
+    answer(slug: string, messageId: string, action: MirrorAnswer): Promise<{ change: string }>
   }
   dev: {
     /** Test builds only. `template` defaults to the bundled self-test template. */

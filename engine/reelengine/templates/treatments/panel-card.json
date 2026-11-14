@@ -1,0 +1,23 @@
+{
+  "id": "panel-card",
+  "label": "Panel",
+  "description": "A screenshot framed on a white panel, or (no asset) a few sentences set on a white panel, level above the face. A screenshot too small to read framed there is shown as a plain card.",
+  "hidesFace": false,
+  "assetKinds": [
+    "image"
+  ],
+  "params": {
+    "text": {
+      "default": null,
+      "help": "the words for a text panel (no asset)"
+    },
+    "tilt": {
+      "default": 0.0,
+      "help": "degrees"
+    },
+    "scale": {
+      "default": 1.0,
+      "help": "1.0 = as big as fits"
+    }
+  }
+}

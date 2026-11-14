@@ -35,7 +35,7 @@ Recommendation: close each with a comment pointing at the release PR once it mer
 | Group | Branch | PRs |
 |---|---|---|
 | Notes and AI core (landed) | `port/0.2.0/notes-core` | #137 #138 #139 #140 (atomic notes, one writer per project), #144, #143, #135, #117, #129, #145, #127, #128, #153, #34 |
-| Render engine | `port/0.2.0/engine` | #124, #116, #146, #156, #151, #149, #154, #155, #172, #173, #178, #180 |
+| Render engine (landed) | `port/0.2.0/engine` | #124, #116, #146, #156, #151, #149, #154, #155, #172, #173, #178, #180 |
 | UI (landed) | `port/0.2.0/ui` | #3, #133 (for #4), #17, #126, #130, #131, #132, #118, #147, #134, #142, #152, #174, #185 |
 | CI, updater, packaging (landed) | `port/0.2.0/ship` | CI green on all three OSes, #120, #121, #179, #123, #125, #136, #168, #169, #177 |
 | Second wave, after notes core and engine land | to be named | #157, #150, #184, #170, #171, #182, #183 |
@@ -51,8 +51,12 @@ The second wave waits because those PRs are built on the new note flow from #140
 2. **Which branch ships.** To be filled in with the recommendation in the release PR.
 3. **AI context budget.** 0.2.0 sends more fixed context than main: 634,443 characters and 42 tools, against main's 447,274 and 26, measured in CI run 43592033947. `ai/context-budget.json` is re-pinned to the measured numbers. A PR into main that grows the budget needs the `ai-context-increase` label, so the release PR needs that label from Sam.
 4. **Engine version.** The app is 0.2.0, and the engine stays at 0.1.2. The engine's version is part of each render's fingerprint, so bumping it makes saved projects render again instead of reusing their last render. Recommendation: bump the engine to 0.2.0. The redesign's engine renders differently (for example #186 runs the final scale on one thread), and stopping old renders from being reused is what the fingerprint is for.
-5. **#177's leak-check hooks.** #177 lets `.claude/settings.json` through the check, because that file carries the repo's agent hook, and it scans PR titles and bodies. Both changes are #177's own; nothing else in the check's rules changed.
-6. **Run the macOS workflow pass after freeing disk.** The real-app pass on macOS runs only when the Mac has at least 12 GiB free. On Nov 14 it had 10 to 11 GiB, because swap grew as the agents ran. Until the pass runs, the macOS evidence is CI's macOS jobs and the macOS installer's bundled-engine check.
+5. **Sound decisions from #178.**
+   - Music fade-in: #178 removes it, and the release's Sound tab defaults it to 0.6 s. The port kept 0.6 s so the engine matches the UI. Recommendation: keep it. The song now starts on its attack, and anyone can set the fade-in to 0.
+   - Sound-effect cap: #178 allows one effect plus one per 8 seconds. That cap is left out, because it dropped effects people add by hand and the hits that smash cuts add. If Sam wants a cap, apply it only to effects the editor adds.
+   - Two tools overlap on zooms and b-roll: the release's `set_beat_accents` and #178's `set_sound_moments`. Recommendation: give each edit type one owner.
+6. **#177's leak-check hooks.** #177 lets `.claude/settings.json` through the check, because that file carries the repo's agent hook, and it scans PR titles and bodies. Both changes are #177's own; nothing else in the check's rules changed.
+7. **Run the macOS workflow pass after freeing disk.** The real-app pass on macOS runs only when the Mac has at least 12 GiB free. On Nov 14 it had 10 to 11 GiB, because swap grew as the agents ran. Until the pass runs, the macOS evidence is CI's macOS jobs and the macOS installer's bundled-engine check.
 
 ## Status
 
@@ -74,3 +78,11 @@ Updated as each group lands.
   - #152 was already in by content.
   - The Electron end-to-end specs the port added or adapted are typechecked only. CI doesn't run them, so they wait on the Windows real-app pass.
   - Report a problem (#185) needs the site's support endpoint (reel-studio-site#16) deployed. Until then a send fails and offers email instead.
+- Render engine landed (merge 04d8189c). CI at the port's head aeec915a passes on every job (run 43598216051). Results:
+  - #155, #172 and #173 are ported. #172 and #173's animation jobs now join the project's owner token and render at the project's frame rate.
+  - #178 is merged, keeping the release's beat tracker.
+  - #180 is merged. "Flip it" goes through the hand-edit queue, so it makes a new version under the one-writer rule.
+  - #124, #116, #146, #156, #151, #149 and #154 were already in by content.
+  - #175's fixes for #146 and #155 are ported.
+  - Known issue: the version check fingerprints every re-timed animation clip on disk, so rendering a draft of another state can give an unchanged export a new version number. Frames are never wrong, and saved versions are never rewritten.
+  - Known issue: `app/e2e/mirror-detect.spec.ts` still drives the old Reel screen, and CI doesn't run end-to-end specs.

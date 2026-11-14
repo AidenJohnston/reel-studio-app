@@ -118,6 +118,7 @@ import type { AgentResult } from './ai-types'
 import { loadAI } from './ai'
 import type { AI, EngineHost } from './ai-types'
 import { closeAnimationRenderer, renderAnimation, TEST_TEMPLATE } from './animation'
+import { withAnimationRetiming } from './anim-retime'
 import { captureWebsite } from './capture'
 import { createModelManager } from './models'
 import { createWorkGate } from './work-gate'
@@ -164,7 +165,7 @@ import { exportPlatforms, sweepExportStaging, type ExportTry } from './platform-
 import { proposeTry } from './try-proposal'
 import { foldProposal, makeReels, prepareReel, startProposal, type ReelsDeps } from './propose-reels'
 import { versionMessage } from '../shared/describe'
-import { mergeSourcesPatch } from '../shared/mirror'
+import { MIRROR_ANSWERS, answerMirror, declinedQuestion, mergeSourcesPatch, mirrorNotices, type MirrorAnswer, type MirrorQuestion } from '../shared/mirror'
 import { assertWordCutEditable } from '../shared/cut'
 import { displayPath } from '../shared/display-path'
 import { channelOf } from '../shared/channel'
@@ -271,7 +272,8 @@ const renderSlot = withRenderSlot(
   }),
   (owner, waiting) => jobs.waitingForRender(owner, waiting)
 )
-const runEngine: RunEngine = renderSlot.run
+// every render first re-times the animations the cut moved (anim-retime.ts), before it waits for the render slot
+const runEngine: RunEngine = withAnimationRetiming(renderSlot.run, renderAnimation, log)
 // Its own runner per build, with the same engine setup, so removing a project can wait for the exit.
 const proxies = createProxyBuilds(
   (hooks) =>
@@ -540,7 +542,7 @@ async function startNote(slug: string, { id: noteId, text: own, attachments, mom
       }
       const extra = r.notice?.userMessage ? ` ${r.notice.userMessage}` : ''
       // the editor's summary may echo aiText, moment and word ids included
-      const reply = await replyAskingAboutStyle(r, personText(r.summary, aiText, text) + extra)
+      const reply = await replyAskingAboutStyle(slug, r, personText(r.summary, aiText, text) + extra)
       return { ...reply, outcome: noteOutcome(before, r), made: { by: 'note', summary: text } }
     },
     { note: text || attachments.map((f) => f.name).join(', '), record, pause: (e) => pauseFor(e, pauseCtx('note', startedAt, editor)) }
@@ -888,7 +890,7 @@ function startFirstEdit(slug: string, initArgs: { title: string; files: string[]
       emit({ type: 'status', message: 'Copying your video', pct: 0 })
       // an archive pick's parts name their files by position (archive-reels.ts), so its copy never re-sorts them by date
       const keepOrder = st.fromArchive ? ['--keep-order'] : []
-      await runEngine(
+      const made = (await runEngine(
         'init',
         owned(['--project', dir, '--title', title, '--slug', slug, ...(fasterExports ? ['--faster-exports'] : []), ...keepOrder], owner).concat(files),
         // A copy is instant. A clip whose frame timing varies is re-encoded first (engine init.py says
@@ -900,7 +902,9 @@ function startFirstEdit(slug: string, initArgs: { title: string; files: string[]
               : { type: 'status', message: 'Copying your video', pct: Math.round(p.pct * 0.01) }
           ),
         signal
-      )
+      )) as { sources?: ProjectJson['sources'] } | null
+      // init looked at each take for a mirrored picture (engine mirror_detect.py): a flip is never silent
+      for (const q of mirrorNotices(made?.sources)) await askMirror(slug, q)
     }
     // a reel made from another reel's proposal is copied in and seeded from it, on a resume too if the app closed
     // between the two, so it never becomes an edit of the whole video
@@ -972,8 +976,13 @@ function startFirstEdit(slug: string, initArgs: { title: string; files: string[]
     })
     if (r.notice?.userMessage) await addChat(slug, 'editor', r.notice.userMessage)
     await groupReel(slug).catch((e) => log(`[series] ${slug}: ${String(e).slice(0, 300)}`))
-    return replyAskingAboutStyle(r, r.summary)
+    return replyAskingAboutStyle(slug, r, r.summary)
   }, { pause, record: started })
+}
+
+/** A mirror question in the chat, with the takes it is about (its buttons act on those only). */
+function askMirror(slug: string, q: MirrorQuestion): Promise<void> {
+  return addChat(slug, 'editor', q.text, undefined, q.actions, undefined, undefined, undefined, undefined, q.sources).then(() => undefined)
 }
 
 /** Which model made a version, beside it (`versions/vN/made-with.json`, as title.json is): its line in the notes names
@@ -984,8 +993,12 @@ async function recordMadeWith(dir: string, r: AgentResult): Promise<void> {
 }
 
 /** The editor's reply into the chat, then one "Remember this for next time?" per My style rule (style-consent.ts). */
-function replyAskingAboutStyle(r: AgentResult, summary: string): Promise<{ summary: string; version?: number; chat: ChatLine[] }> {
-  return askAboutStyle({ styleRules: () => ai.styleRules(), removeStyleRule: (id, o) => ai.removeStyleRule(id, o) }, r, summary)
+async function replyAskingAboutStyle(slug: string, r: AgentResult, summary: string): Promise<{ summary: string; version?: number; chat: ChatLine[] }> {
+  const reply = await askAboutStyle({ styleRules: () => ai.styleRules(), removeStyleRule: (id, o) => ai.removeStyleRule(id, o) }, r, summary)
+  // the editor saw backwards writing in a take the user had said is the right way round: it may not flip it, so the
+  // user decides with one tap (shared/mirror.ts declinedQuestion)
+  const q = r.mirrorDeclined?.length ? declinedQuestion((await readProject(slug)).sources, r.mirrorDeclined) : null
+  return q ? { ...reply, chat: [...reply.chat, { from: 'editor', text: q.text, actions: q.actions, sources: q.sources }] } : reply
 }
 
 const EDITABLE: (keyof ProjectJson)[] = ['title', 'cut', 'captions', 'music', 'broll', 'zooms', 'cover', 'post']
@@ -2264,6 +2277,40 @@ function registerIpc(): void {
     const pack = await readJson<{ sounds?: { id: string; job: string; file: string; seconds: number; onsetMs: number }[] }>(join(dir, 'pack.json'), {})
     return (pack.sounds ?? []).map((x) => ({ id: x.id, kind: x.job, seconds: x.seconds, onsetMs: x.onsetMs, url: mediaUrl(join(dir, x.file)) }))
   })
+
+  // "Undo flip" under "I flipped your video", or "Flip it" / "Keep as filmed" under "Flip it?" (shared/mirror.ts).
+  // Either way the buttons go and the editor answers. A flip or an undo is a change made by hand (Edit it myself's
+  // queue): it waits for a running job and makes the next version, and applyHand keeps the answer in mirrorCheck.
+  // Keep as filmed changes no picture, so only its answer is written, as a manual edit is (refused while a job runs).
+  // One answer at a time per project: a second quick click finds the buttons gone and changes nothing.
+  handle('mirror:answer', (_e, slug: string, messageId: string, action: MirrorAnswer) =>
+    serialized(`mirror-answer:${slug}`, async () => {
+      if (!MIRROR_ANSWERS.includes(action)) return { change: '' }
+      const asked = (await readAppState(slug)).chat.find((x) => x.id === messageId)
+      if (!asked?.actions?.includes(action)) return { change: '' }
+      const ids = asked.sources ?? []
+      const p = await readProject(slug)
+      const r = answerMirror(p.sources, action, ids)
+      if (r.change) {
+        const was = new Map((p.sources ?? []).map((x) => [x.id, x.mirror === true]))
+        const mirror = r.sources.filter((x) => was.get(x.id) !== (x.mirror === true)).map((x) => ({ source: x.id, on: x.mirror === true }))
+        const edit = parseHandEdit({ set: [], items: [], words: { cut: [], keep: [] }, mirror, joins: [] })
+        await noteQueue.sendHand(slug, { edit, changes: mirror.length }, r.change, p.version ?? 0)
+      } else if (r.reply) {
+        await jobs.hold(slug, async () => {
+          const q = await readProject(slug)
+          q.sources = answerMirror(q.sources, action, ids).sources
+          await writeProject(slug, q)
+        })
+      }
+      await updateAppState(slug, (st) => {
+        const x = st.chat.find((y) => y.id === messageId)
+        if (x) delete x.actions
+      })
+      if (r.reply) await addChat(slug, 'editor', r.reply)
+      return { change: r.change }
+    })
+  )
 
   handle('update:state', () => updates.state())
   handle('update:check', () => updates.check('button'))

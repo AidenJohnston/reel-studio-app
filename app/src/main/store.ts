@@ -288,7 +288,8 @@ export async function addChat(
   suggestion?: string,
   attachments?: ChatMessage['attachments'],
   moment?: ChatMessage['moment'],
-  proposal?: ChatMessage['proposal']
+  proposal?: ChatMessage['proposal'],
+  sources?: ChatMessage['sources']
 ): Promise<string> {
   const id = randomUUID()
   await updateAppState(slug, (s) => {
@@ -297,7 +298,7 @@ export async function addChat(
       ...stamp({
         from, text, version,
         ...(actions?.length ? { actions } : {}), ...(suggestion ? { suggestion } : {}), ...(attachments?.length ? { attachments } : {}),
-        ...(moment ? { moment } : {}), ...(proposal ? { proposal } : {})
+        ...(moment ? { moment } : {}), ...(proposal ? { proposal } : {}), ...(sources?.length ? { sources } : {})
       }),
       id
     })
@@ -656,6 +657,10 @@ export function checklist(p: ProjectJson, words: Word[], kept: string[], version
       done: words.length > 0,
       detail: undefined
     },
+    // a flipped take is listed with why (when the app flipped it), and the Reel screen offers Undo
+    ...(p.sources?.some((s) => s.mirror === true)
+      ? [{ key: 'mirror', label: 'Flipped the picture (it was mirrored)', done: true, detail: p.sources.find((s) => s.mirror === true)?.mirrorCheck?.why }]
+      : []),
     {
       key: 'cut',
       label: aiEdited ? 'Picked your best takes and cut the pauses' : 'Cut the pauses and repeated starts',

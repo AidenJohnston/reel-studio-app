@@ -8,7 +8,8 @@ import { ANIMATION_TEMPLATES, ENGINE_FED, alignWordTimes, itemTimes } from '../s
 import { executeTool, newToolState, toolByName, ToolContext } from '../src/tools';
 import { loadProject, saveProject } from '../src/project';
 import { StyleStore } from '../src/style';
-import { FakeHost, commitImage, makeProject, tinyPng } from './helpers';
+import { createAI } from '../src';
+import { FakeHost, ScriptedModel, call, commitImage, makeProject, tinyPng, tmpDir } from './helpers';
 
 const templatesDir = path.resolve(__dirname, '..', '..', 'templates', 'animations');
 
@@ -74,6 +75,21 @@ describe('make_animation', () => {
       template: 'big-quote', params: { text: 'Keep moving' },
     });
     expect(result.isError).toBe(false);
+    expect(host.animations[0].fps).toBe(60);
+  });
+
+  it('an edit through createAI keeps the project frame rate for its animations', async () => {
+    // a note runs its tools on the edit's wrapped engine (index.ts editHost), not on the host itself
+    const { host, dir } = await ctxFor();
+    const project = await loadProject(dir);
+    project.format.fps = 60;
+    await saveProject(dir, project);
+    const m = new ScriptedModel([
+      { toolCalls: [call('make_animation', { template: 'big-quote', params: { text: 'Keep moving' } })] },
+      { toolCalls: [call('finish', { summary_for_user: 'Added a quote.' })] },
+    ]);
+    await createAI({ host, settingsDir: tmpDir('settings '), providerOverride: m }).applyNote(dir, 'add a quote', () => undefined);
+    expect(host.animations).toHaveLength(1);
     expect(host.animations[0].fps).toBe(60);
   });
 

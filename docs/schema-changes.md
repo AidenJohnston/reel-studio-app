@@ -248,6 +248,7 @@ Existing project shapes remain valid. New shapes can require a newer engine, as 
   to come in. Below 0.01 s it is 0.01 s, so the first sample never clicks. Until now the fade-in was fixed; `fadeOut`
   was already a field. Set by "Edit it myself" (0 to 2 seconds there).
 
+
 ## 2026-11-12 (captions follow the script)
 
 - `script` (text, `{text}`, or the app's `{hook, script, shots}` from a reel's plan, whose hook and lines are read as
@@ -263,3 +264,43 @@ Existing project shapes remain valid. New shapes can require a newer engine, as 
   and `key` (a hash of the mapping `version`, the script and the transcript words). The file is rebuilt when the
   key no longer matches and removed when the project no longer has a script; the AI shows it only while the key
   matches the current script. Anchors stay on transcript word ids: only the text drawn for them changes.
+
+## 2026-11-12 (beat sync, music drops, reverb throw)
+
+- `music.beats` (`{fps, frames, seconds, sha256}`, absent = none): the song's beat grid, each beat a whole frame
+  of SONG time, with the song's length and the SHA-256 of the file it was measured on. Written by `choose_music`
+  when it picks a song (engine `analyze-music --fps`) and replaced when the song changes. Stored rather than
+  re-detected so the same project always lands the same edits on the same frames. A grid whose hash isn't the
+  playing file's (the song was swapped by hand) is ignored, and the AI measures the song again when asked for
+  the beat. A `startAt` less than 1 s from the song's end plays the song from the top, and the grid is read from
+  there too (`beats.effective_start`, one rule for the mixer and the beats).
+- `music.onBeat` (array of `"cuts"`, `"zooms"`, `"broll"`, absent = none): those land on the nearest beat in
+  reach. A jump cut (between kept ranges, or where a long pause was taken out) moves at most 0.15 s by changing
+  only the silence before it; a zoom punches in up to
+  0.15 s before its word or 0.06 s after; a b-roll entrance moves up to 0.15 s earlier or 0.1 s later.
+- `music.drops` (`[{from, to}]` word ids, absent = none): the music is gone 40 ms before `from` and comes back on
+  the first beat within 1 s after `to` ends (0.15 s after it with no beat in reach). The song keeps running
+  underneath. Remapped after a re-transcription like the other anchors.
+- `voice.reverbThrow` (boolean, absent = false): an echo tail on the word the video ends on (the last word of
+  its last segment, so a word kept twice echoes at the end), from that word's final 0.7 s at most. It peaks 8 dB
+  under that word and fades out if it is still ringing when the video ends. The tail depends only on that word's
+  samples, so a preview window or an earlier edit gives the same tail.
+- All three are written by the AI's `set_sound_moments`; turning one off removes its field.
+- `analyze-music` now suggests a start on the song's first attack after the calm bar (`suggestedStartAt`).
+  The fade-in default is unchanged on release/0.2.0 (0.6 s, `fadeIn` sets it; `fadeIn: 0` starts the song
+  on that hit). The beat tracker is release/0.2.0's (beat phase fix of 2026-10-23), not #178's.
+
+## 2026-11-12 (mirrored take found at import)
+
+- `sources[].mirrorCheck` (object, optional): what `init` saw when it looked at the take for a mirrored picture
+  (`engine/reelengine/mirror_detect.py`): `verdict` (`mirrored` / `maybe-mirrored` / `as-filmed` / `unsure` /
+  `unknown`), `why` (plain words the app may show), `camera` (`front` / `back`, from an iPhone file's lens tag)
+  and `letters` (letters of everyday words read as filmed and flipped). No timings, so the same take writes the
+  same record. The render never reads it: only `mirror` changes the picture, so renders stay deterministic.
+- `init` now writes `sources[].mirror = true` for a `mirrored` take. A `maybe-mirrored` one is left alone and the
+  app asks. The user's choice goes in `mirrorCheck.answer` (`undone` / `flipped` / `kept`): from the chat
+  buttons ("Undo flip", "Flip it", "Keep as filmed"), or the "Flip picture" switch in Cover (both through Edit it myself's queue). So
+  nothing is undone or asked twice. After `undone` / `kept` only the user's own tap flips that take again: the AI
+  editor's `get_project` shows `userSaidAsFilmed`, its `set_mirror` refuses to flip the take whatever the note says,
+  and the app asks "Flip it?" instead. Each mirror question in the chat keeps the ids of its takes
+  (`ChatMessage.sources`, app state), and its buttons act on those takes only.

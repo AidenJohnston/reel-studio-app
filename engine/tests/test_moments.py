@@ -84,9 +84,10 @@ def test_a_moved_card_shows_where_it_was_and_where_it_is(tmp_path):
 
 def test_a_card_cut_short_by_a_new_neighbour_is_redrawn_over_its_whole_span(tmp_path):
     old = base_project(captions_on=False)
-    old["broll"] = [card("b1", "w4", "w4", fade=0.3)]  # one word, held to the 2 s minimum; its fade-out moves
+    old["broll"] = [card("b1", "w4", "w12")]           # a line longer than the 2 s every card holds
     new = copy.deepcopy(old)
-    new["broll"].append(card("b2", "w7", "w8"))        # starts inside b1's hold: b1 hands over to it
+    # starts after b1's 2 s hold but inside its line: b1 hands over to it (one inside the hold would wait, #173)
+    new["broll"].append(card("b2", "w10", "w11"))
     a_old, a_new = span_of(tmp_path, old, "b1"), span_of(tmp_path, new, "b1")
     b2 = span_of(tmp_path, new, "b2")
     assert a_new[1] < a_old[1] and a_new[0] == a_old[0]
