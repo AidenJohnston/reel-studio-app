@@ -1,5 +1,5 @@
-// The cover picker: frames picked from the video in one strip, each named for its time and why, the line under the
-// strip saying both for the chosen one, a pick saved as that exact frame, and the frame at the playhead taken as the
+// The cover picker: frames picked from the video in one strip, each named for its time and why, drawn flipped while
+// Flip the picture is changed but not saved, the line under the strip saying both for the chosen one, a pick saved as that exact frame, and the frame at the playhead taken as the
 // person's own pick. Run after a build:
 // npx playwright test e2e/cover.spec.ts
 import { test, expect } from '@playwright/test'
@@ -28,6 +28,16 @@ test('cover suggestions say when and why, mark the chosen frame, and save it as 
   // the stand-in engine's first frame: eyes open and face in focus beat its neighbours
   await expect(picks.first()).toHaveAccessibleName(/^0:\d\d, Eyes open, face in focus$/)
   await expect(page.getByText('Drag to fine-tune')).toHaveCount(0)
+
+  // fails if the stills keep the saved orientation while Flip the picture is changed but not saved: the engine made them
+  // from the saved project, and the cover renders flipped (#17, c1cab1b5). Turned back off, they are as they were made.
+  const still = picks.first().locator('img')
+  const turned = () => still.evaluate((img) => getComputedStyle(img).transform)
+  await expect.poll(turned).toBe('none')
+  await page.getByTestId('mirror-on').check()
+  await expect.poll(turned).toBe('matrix(-1, 0, 0, 1, 0, 0)')
+  await page.getByTestId('mirror-on').uncheck()
+  await expect.poll(turned).toBe('none')
 
   await picks.nth(0).click()
   // the frames carry no words; the line under the strip reads the chosen one's
