@@ -117,7 +117,13 @@ describe('honest progress', () => {
     expect(t.snapshot()).toMatchObject({ etaSec: null, overdue: true })
   })
 
-  it('keeps the final render overdue when aggregate progress outlives its estimate', () => {
+  /** While a job runs past what was expected, the bar rises at every later snapshot and stays below 99. */
+  const rises = (seen: number[]): void => {
+    for (let i = 1; i < seen.length; i++) expect(seen[i]).toBeGreaterThan(seen[i - 1])
+    expect(seen.at(-1)).toBeLessThan(99)
+  }
+
+  it('keeps the final render overdue and its bar moving below 99 when aggregate progress outlives its estimate', () => {
     let now = 0
     const t = new ProgressTracker('rerender', 60, empty(), () => now)
     t.update('final', 0)
@@ -125,6 +131,43 @@ describe('honest progress', () => {
     t.update('final', 50, true)
     now = 4000
     expect(t.snapshot()).toMatchObject({ etaSec: null, overdue: true })
+    const early = t.snapshot().overall
+    now = 40_000
+    const late = t.snapshot().overall
+    expect(early).toBeLessThan(99)
+    expect(late).toBeGreaterThan(early)
+    expect(late).toBeLessThan(99)
+    // The render reports 100 while the cover and check still run: a longer projection, and the bar keeps moving.
+    t.update('final', 100, true)
+    const seen = [t.snapshot().overall]
+    for (now of [45_000, 60_000, 4_000_000]) seen.push(t.snapshot().overall)
+    rises(seen)
+  })
+
+  it('fails if a later report that puts the projection ahead of the clock holds the bar still', () => {
+    let now = 0
+    const t = new ProgressTracker('rerender', 60, empty(), () => now)
+    t.update('final', 0)
+    now = 1000
+    t.update('final', 50, true)
+    now = 4000
+    t.snapshot()
+    now = 40_000
+    const seen = [t.snapshot().overall]
+    t.update('final', 60, true) // 60% at 40 s: the job now looks 66.7 s long, so it is no longer past it
+    for (now of [45_000, 60_000, 70_000, 4_000_000]) seen.push(t.snapshot().overall)
+    rises(seen)
+  })
+
+  it('fails if a whole-job report after a long overrun restarts the bar lower', () => {
+    let now = 0
+    const t = new ProgressTracker('rerender', 60, empty(), () => now)
+    t.update('final', 5)
+    now = 280_000
+    const seen = [t.snapshot().overall] // ten times the 28 s estimate, no whole-job percent yet
+    t.update('final', 100, true)
+    for (now of [290_000, 300_000, 600_000, 2_800_000]) seen.push(t.snapshot().overall)
+    rises(seen)
   })
 
   it('recalibrates remaining engine defaults from a slow first step', () => {

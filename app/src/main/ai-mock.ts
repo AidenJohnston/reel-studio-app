@@ -95,6 +95,17 @@ const sameRule = (s: string): string =>
 type StyleData = { rules: StyleRule[]; damaged?: string; forgotten?: string[]; proposals?: MemorySuggestion[]; [field: string]: unknown }
 
 const LOWERCASE_CAPTIONS = 'Use lowercase subtitles.'
+/** The one typed rule there is (isCaptionCase in ai/src/style.ts). Anything else in `payload`, such as a hand edit,
+ * makes the rule a plain sentence. */
+const isCaptionCase = (x: unknown): boolean => {
+  const c = x as { kind?: unknown; case?: unknown } | null
+  return c?.kind === 'caption-case' && c.case === 'lower'
+}
+/** Every question the person said Yes to for this rule (answeredYes in ai/src/style.ts). */
+const answeredYes = (r: StyleRule): string[] => {
+  const also: unknown = r.consent?.also
+  return r.consent ? [r.consent.proposal, ...(Array.isArray(also) ? also.filter((x): x is string => typeof x === 'string') : [])] : []
+}
 
 /** The practice editor's three reels in one video, in its own voice. */
 const PRACTICE_REELS = [
@@ -447,7 +458,7 @@ export const createMockAI: CreateAI = ({ host, managedCodex }) => {
         onEvent({ type: 'tool', name: 'write_post', summary: 'Wrote your caption and hashtags' })
       }
       const rules = await withStyle(async (s) => s.rules).catch((): StyleRule[] => [])
-      const lower = rules.some((r) => r.payload?.case === 'lower' && !r.paused)
+      const lower = rules.some((r) => isCaptionCase(r.payload) && !r.paused)
       if (lower) p.captions = { ...p.captions, style: { ...p.captions?.style, case: 'lower' } }
       await writeProject(projectDir, p)
 
@@ -504,7 +515,7 @@ export const createMockAI: CreateAI = ({ host, managedCodex }) => {
         }]
         await writeProject(projectDir, saved)
         const rules = await withStyle(async (s) => s.rules).catch((): StyleRule[] => [])
-        const styleProposal: StyleProposal | undefined = rules.some((x) => x.payload)
+        const styleProposal: StyleProposal | undefined = rules.some((x) => isCaptionCase(x.payload))
           ? undefined
           : { id: randomUUID(), text: LOWERCASE_CAPTIONS, payload: { kind: 'caption-case', case: 'lower' }, source: { project: p.id, title: p.title, version } }
         return { summary: 'I made the subtitles lowercase.', version, styleRulesAdded: [], changed: ['captions'], ...(styleProposal ? { styleProposal } : {}) }
@@ -740,13 +751,34 @@ export const createMockAI: CreateAI = ({ host, managedCodex }) => {
     // The same answers as the real store (ai/src/style.ts): a removed rule's question cannot bring it back, and the
     // same question answered again returns the rule it saved.
     async approveStyleProposal(proposal) {
+      // As the real store: a question that is not exactly this rule saves nothing, and the rule is stored in the app's
+      // own form, never the fields the question came with.
+      // (a question still on screen from before the app said "subtitles" carries the old words)
+      if (!proposal?.id || (proposal.text !== LOWERCASE_CAPTIONS && proposal.text !== 'Use lowercase captions.') || !isCaptionCase(proposal.payload)) {
+        throw new Error('the question does not match the rule it would save')
+      }
       return withStyle(async (s) => {
         if (s.forgotten?.includes(proposal.id)) return { status: 'forgotten' as const }
-        const same = s.rules.find((r) => r.consent?.proposal === proposal.id)
-        if (same) return { status: same.payload ? ('saved' as const) : ('exists' as const) }
-        if (s.rules.some((r) => r.payload)) return { status: 'exists' as const }
         const at = new Date().toISOString()
-        const rule = { id: randomUUID(), text: LOWERCASE_CAPTIONS, createdAt: at, payload: proposal.payload, source: proposal.source, consent: { proposal: proposal.id, at } }
+        const same = s.rules.find((r) => answeredYes(r).includes(proposal.id))
+        if (same && !isCaptionCase(same.payload)) return { status: 'exists' as const }
+        if (same) {
+          if (same.paused) {
+            delete same.paused
+            await saveRules(s, s.rules)
+          }
+          return { status: 'saved' as const }
+        }
+        const typed = s.rules.find((r) => isCaptionCase(r.payload))
+        if (typed) {
+          typed.consent = typed.consent ? { ...typed.consent, also: [...answeredYes(typed).slice(1), proposal.id] } : { proposal: proposal.id, at }
+          const wasPaused = !!typed.paused
+          delete typed.paused
+          await saveRules(s, s.rules)
+          return { status: wasPaused ? ('saved' as const) : ('exists' as const) }
+        }
+        const source = { project: String(proposal.source?.project ?? ''), title: String(proposal.source?.title ?? '').slice(0, 120), version: Number(proposal.source?.version) || 0 }
+        const rule: StyleRule = { id: randomUUID(), text: LOWERCASE_CAPTIONS, createdAt: at, payload: { kind: 'caption-case', case: 'lower' }, source, consent: { proposal: proposal.id, at } }
         await saveRules(s, [...s.rules, rule])
         return { status: 'saved' as const }
       })
@@ -778,8 +810,8 @@ export const createMockAI: CreateAI = ({ host, managedCodex }) => {
         const index = s.rules.findIndex((r) => r.id === id)
         if (index < 0) return null
         const rule = s.rules[index]
-        const asked = rule.consent?.proposal
-        if (asked) s.forgotten = [...(s.forgotten ?? []), asked]
+        const asked = answeredYes(rule)
+        if (asked.length) s.forgotten = [...(s.forgotten ?? []), ...asked]
         await saveRules(s, s.rules.filter((r) => r.id !== id))
         return { rule, index }
       })

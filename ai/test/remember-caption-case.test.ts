@@ -244,6 +244,32 @@ describe('answering the question', () => {
     expect((await ai().styleRules()).map((x) => x.text)).toEqual(['Use lowercase subtitles.']);
   });
 
+  it('Yes to a second question while the rule is saved is kept with it, so removing the rule blocks that question too', async () => {
+    const { dir, ai, newVideo } = await setup();
+    const a = (await ai(new ScriptedModel([{ toolCalls: [lowercase()] }, finish()])).applyNote(dir, 'make the captions lowercase', () => undefined)).styleProposal!;
+    const other = await newVideo(dir);
+    const b = (await ai(new ScriptedModel([{ toolCalls: [lowercase()] }, finish()])).applyNote(other, 'lowercase captions please', () => undefined)).styleProposal!;
+    expect(await ai().approveStyleProposal(a)).toMatchObject({ status: 'saved' });
+    // b's reply is lost, so its buttons are still there
+    expect(await ai().approveStyleProposal(b)).toMatchObject({ status: 'exists' });
+
+    await ai().removeStyleRule((await ai().styleRules())[0].id);
+    expect(await ai().approveStyleProposal(b)).toEqual({ status: 'forgotten' });
+    expect(await ai().styleRules()).toEqual([]);
+  });
+
+  it('Yes again to the question of a rule paused since turns it back on, so "saved" is true for the next video', async () => {
+    const { dir, ai, newVideo } = await setup();
+    const r = await ai(new ScriptedModel([{ toolCalls: [lowercase()] }, finish()])).applyNote(dir, 'make the captions lowercase', () => undefined);
+    await ai().approveStyleProposal(r.styleProposal!);
+    await ai().updateStyleRule((await ai().styleRules())[0].id, { paused: true });
+
+    expect(await ai().approveStyleProposal(r.styleProposal!)).toMatchObject({ status: 'saved' });
+    const next = await newVideo(dir);
+    await ai().firstEdit(next, () => undefined);
+    expect(await caseOf(next)).toBe('lower');
+  });
+
   it('a Yes and a rule saved at once through two separate AI objects keep both', async () => {
     const { dir, ai } = await setup();
     const asked = (await ai(new ScriptedModel([{ toolCalls: [lowercase()] }, finish()])).applyNote(dir, 'make the captions lowercase', () => undefined)).styleProposal!;

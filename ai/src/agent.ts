@@ -184,8 +184,10 @@ async function mapLimit<T, R>(items: T[], limit: number, fn: (x: T, i: number) =
   };
   // every started call ends before this returns or throws: a Stop must not leave a download writing
   const ran = await Promise.allSettled(Array.from({ length: Math.min(limit, items.length) }, worker));
-  const rejected = ran.find((r): r is PromiseRejectedResult => r.status === 'rejected');
-  if (rejected) throw rejected.reason;
+  const errors = ran.flatMap((r) => (r.status === 'rejected' ? [r.reason] : []));
+  // a call whose engine would not stop outranks a Stop or a failure beside it: the editor must not roll
+  // back files that engine may still be writing (editor.ts engineStuck)
+  if (errors.length) throw errors.find((e) => e?.code === 'ENGINE_STUCK') ?? errors[0];
   return out;
 }
 
@@ -213,10 +215,20 @@ async function runCalls(o: RunAgentOptions, calls: ToolCall[]): Promise<ToolResu
 }
 
 export async function runAgent(o: RunAgentOptions): Promise<RunAgentResult> {
-  try { return await agentLoop(o); } finally {
-    // a provider whose dispose throws must not leave this run's candidate stills and downloads on disk
-    try { await o.provider.dispose?.(); } finally { if (!o.keepCandidates) await discardAssetCandidates(o.ctx); }
+  let result: RunAgentResult;
+  try {
+    result = await agentLoop(o);
+  } catch (e) {
+    // the run's own error decides what the editor does next (an engine that would not stop keeps the
+    // project as it is): a model process that would not stop either is only reported beside it
+    await (async () => o.provider.dispose?.())().catch((d) => o.onEvent({ type: 'status', message: d?.userMessage ?? String(d) }));
+    // this run's candidate stills and downloads go either way; a failed removal must not hide `e` either
+    if (!o.keepCandidates) await discardAssetCandidates(o.ctx).catch(() => undefined);
+    throw e;
   }
+  // a provider whose dispose throws must not leave this run's candidate stills and downloads on disk
+  try { await o.provider.dispose?.(); } finally { if (!o.keepCandidates) await discardAssetCandidates(o.ctx); }
+  return result;
 }
 
 async function agentLoop(o: RunAgentOptions): Promise<RunAgentResult> {

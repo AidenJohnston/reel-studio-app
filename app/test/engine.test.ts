@@ -1,10 +1,17 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { mkdirSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { createEngineRunner, killAllEngines, LineSplitter, parseEngineLine, type EngineError } from '../src/main/engine'
-import { isAlive } from '../src/main/proctree'
+import { isAlive, killTree } from '../src/main/proctree'
 import { APP_DIR, FAKE_ENGINE, makeClip, PYTHON, setupPaths } from './helpers'
 import { engineCacheDir, engineEnv, initPaths } from '../src/main/paths'
+
+// Off: the real killTree. On: a kill that fails, as for an engine blocked in the kernel, which survives SIGKILL.
+const refuseKill = vi.hoisted(() => ({ on: false }))
+vi.mock(import('../src/main/proctree'), async (real) => {
+  const m = await real()
+  return { ...m, killTree: (pid: number) => (refuseKill.on ? Promise.resolve(false) : m.killTree(pid)) }
+})
 
 it('applies engine cache precedence', () => {
   const userDataDir = join(APP_DIR, 'isolated user data')
@@ -242,6 +249,24 @@ describe('engine runner (against the stand-in engine)', () => {
     await expect(run('crash', [], (pr) => (grandchild = Number(pr.message)))).rejects.toMatchObject({ code: 'ENGINE_CRASHED' })
     expect(grandchild).toBeGreaterThan(0)
     expect(isAlive(grandchild)).toBe(false)
+  }, 30000)
+
+  it('Stop of an engine that would not die reports it at once and leaves it registered', async () => {
+    setupPaths()
+    let pid = 0
+    let exited = false
+    const run = runner(join(APP_DIR, 'test', 'fixtures', 'sleeper'), {}, (p) => (pid = p), () => (exited = true))
+    const ac = new AbortController()
+    refuseKill.on = true
+    try {
+      // the engine never closes, so a Stop that waits for it never ends
+      await expect(run('sleep', [], () => ac.abort(), ac.signal)).rejects.toMatchObject({ code: 'ENGINE_STUCK' })
+      expect(exited).toBe(false)
+      expect(isAlive(pid)).toBe(true)
+    } finally {
+      refuseKill.on = false
+      if (pid) await killTree(pid)
+    }
   }, 30000)
 
   it('an already-aborted signal never starts the engine', async () => {

@@ -32,10 +32,14 @@ export interface RenderInfo {
   checker?: boolean;
 }
 
-/** An AI edit's checked My style rules. `before`: the ones already failing in the version the edit started from.
- * Those are named in the reply, never chased: "make the subtitles blue" must not send the AI after b-roll placed
- * three notes ago. */
-export interface NoteRules { active: CheckedRule[]; before: Set<string> }
+/** An AI edit's checked My style rules. `before`: the ones already failing in the version the edit started from;
+ * `unknown`: ones that version was never measured against (rendered before checks, or before the rule was saved or
+ * turned back on); `startFailures`: that version's report of them. An edit has to meet neither: they are named in
+ * the reply, never chased, so "make the subtitles blue" must not send the AI after b-roll placed three notes ago. */
+export interface NoteRules { active: CheckedRule[]; before: Set<string>; unknown: Set<string>; startFailures: RuleFailure[] }
+
+/** A rule this edit need not meet: the reel already broke it, or may have. */
+const exempt = (rules: NoteRules | undefined, id: string) => !!rules && (rules.before.has(id) || rules.unknown.has(id));
 
 export interface ToolState {
   changed: Set<string>;
@@ -44,6 +48,8 @@ export interface ToolState {
   styleSuggestions: string[];
   /** ids of the rules above, so a failed note can take them back out of My style */
   styleRuleIds: string[];
+  /** paused rules this note turned back on, so a failed note can pause them again */
+  styleRulesResumed: { id: string; text: string }[];
   /** every user-facing tool summary, in order (an honest "what I changed" when the agent stops early) */
   summaries: string[];
   renders: RenderInfo[];
@@ -127,7 +133,7 @@ export interface ToolDef extends ToolSchema {
 }
 
 export function newToolState(): ToolState {
-  return { changed: new Set(), styleRulesAdded: [], styleSuggestions: [], styleRuleIds: [], summaries: [], renders: [], finished: null, toolCalls: 0, aiCalls: [], edits: 0, pictureEdit: 0 };
+  return { changed: new Set(), styleRulesAdded: [], styleSuggestions: [], styleRuleIds: [], styleRulesResumed: [], summaries: [], renders: [], finished: null, toolCalls: 0, aiCalls: [], edits: 0, pictureEdit: 0 };
 }
 
 /** A snapshot's version counter can lag its folder. Keep allocation and history from the live
@@ -278,6 +284,13 @@ export function notePrefix(noteId: string): string {
 /** A name for a file this task adds to work/assets (a slug follows). */
 function assetName(ctx: ToolContext, hint: string): string {
   return ctx.note ? `${notePrefix(ctx.note.id)}${hint}` : hint;
+}
+
+/** assetName for a picture, made a slug of 40 characters at most. The hint is made a slug first, and
+ * one with nothing usable in it becomes `fallback`: a note's file must keep its whole prefix, dash
+ * included, or it would pass as saved (projectAssets). */
+function assetSlug(ctx: ToolContext, hint: string, fallback = 'image'): string {
+  return assetName(ctx, slugName(hint, ctx.note ? 40 - notePrefix(ctx.note.id).length : 40, fallback));
 }
 
 /** Files already in work/assets the editor may reuse: everything except a download from a note that
@@ -724,7 +737,7 @@ export function visibleChangeSinceRender(ctx: ToolContext): boolean {
 /** `announce: false`: a note's final video is shown only once the note is saved (editor.ts). */
 /** The checked rules a render failed that this edit has to meet (not the ones failing before it). */
 export function unmetRules(ctx: ToolContext, report = ctx.state.ruleChecks): RuleFailure[] {
-  return (report?.failures ?? []).filter((f) => !ctx.rules?.before.has(f.id));
+  return (report?.failures ?? []).filter((f) => !exempt(ctx.rules, f.id));
 }
 
 /** `stopOnRules`: a final render that fails a rule this edit has to meet stops before its encode (the result says
@@ -737,7 +750,7 @@ export async function doRender(ctx: ToolContext, draft: boolean, announce = true
   const made = draft && drawn?.draft?.file ? drawn.draft : null;
   const args = [...(draft ? ['--draft', ...previewArgs(ctx)] : []), ...versionArgs(ctx)];
   if (ctx.rules && !made) {
-    const stopOn = opts.stopOnRules && !draft ? ctx.rules.active.filter((r) => !ctx.rules!.before.has(r.id)).map((r) => r.id) : [];
+    const stopOn = opts.stopOnRules && !draft ? ctx.rules.active.filter((r) => !exempt(ctx.rules, r.id)).map((r) => r.id) : [];
     const file = rulesFilePath(ctx);
     await fsp.mkdir(path.dirname(file), { recursive: true });
     await fsp.writeFile(file, rulesFile(ctx.rules.active, stopOn));
@@ -877,7 +890,7 @@ async function downloadImage(ctx: ToolContext, url: string, nameHint?: string): 
   const ext = sniffImage(buf);
   if (!ext) throw new ToolInputError(`that link is not an image (${res.headers.get('content-type') ?? 'unknown type'})`);
   const urlPath = new URL(got.url).pathname;
-  const base = slugName(nameHint ?? assetName(ctx, path.basename(urlPath, path.extname(urlPath))));
+  const base = nameHint ?? assetSlug(ctx, path.basename(urlPath, path.extname(urlPath)));
   const dir = path.join(ctx.projectDir, 'work', 'assets');
   await fsp.mkdir(dir, { recursive: true });
   // claim the name with the write itself: fetch_image runs in parallel
@@ -949,7 +962,7 @@ async function captureSite(ctx: ToolContext, url: string, layout: 'phone' | 'des
   if (!ctx.host.captureWebsite) throw new ToolInputError('website screenshots only work in the Reel Studio app; use search_images or a text-pop with the name');
   let host = '';
   try { host = new URL(/^[a-z][a-z0-9+.-]*:/i.test(url.trim()) ? url.trim() : `https://${url.trim()}`).hostname.replace(/^www\./i, ''); } catch { /* the host refuses it below */ }
-  const base = slugName(assetName(ctx, nameHint || `${host || 'website'}-screen`));
+  const base = assetSlug(ctx, nameHint || `${host || 'website'}-screen`, 'website-screen');
   const dir = path.join(ctx.projectDir, 'work', 'assets');
   await fsp.mkdir(dir, { recursive: true });
   let name = `${base}.png`; let n = 2;
@@ -981,8 +994,9 @@ async function fetchImageWithThumb(ctx: ToolContext, url: string, nameHint?: str
   if (!/^https?:\/\//i.test(url)) throw new ToolInputError('url must start with http:// or https://');
   // the name is a slug before it reaches the engine's argv; the engine slugs too
   const urlPath = new URL(url).pathname;
-  const hint = nameHint ?? (ctx.note ? path.basename(urlPath, path.extname(urlPath)) : undefined);
-  const name = hint ? slugName(assetName(ctx, hint)) : undefined;
+  const hint = nameHint || (ctx.note ? path.basename(urlPath, path.extname(urlPath)) : '');
+  // a note's picture always gets a name: the engine's own (image.png) carries no note prefix
+  const name = hint || ctx.note ? assetSlug(ctx, hint) : undefined;
   try {
     const r = await engine(ctx, 'fetch-image', ['--url', url, ...(name ? ['--name', name] : [])], 'Downloading the picture');
     const asset = r?.asset;
@@ -2485,16 +2499,20 @@ const tools: ToolDef[] = [
         if (!ctx.state.styleRulesAdded.includes(text)) ctx.state.styleRulesAdded.push(text);
         return { content: { ok: true, saved: text }, summary: `Saved to My style: "${text}"` };
       }
-      if (existing) {
-        // No note copy to save it with: add() turns it back on now. Not in styleRuleIds, because undoing this note
-        // must not delete a rule that was there before it.
-        const r = await ctx.style.add(text);
-        return { content: { ok: true, alreadySaved: r.rule.text, turnedBackOn: true }, summary: `Turned back on in My style: "${r.rule.text}"` };
-      }
       if (noteAsksToRemember(ctx.userNote)) {
+        // No note copy to save it with (a first edit), so My style is written now. One store call decides and
+        // writes, so only what this edit did is undone if it fails: a rule it saved is removed, and a paused rule it
+        // turned back on (not one that was already on) is paused again (editor.ts undoStyleRules).
         const r = await ctx.style.add(text);
-        if (r.added) { ctx.state.styleRulesAdded.push(r.rule.text); ctx.state.styleRuleIds.push(r.rule.id); }
-        return { content: { ok: true, saved: r.rule.text }, summary: r.added ? `Saved to My style: "${r.rule.text}"` : undefined };
+        if (r.added) {
+          ctx.state.styleRulesAdded.push(r.rule.text); ctx.state.styleRuleIds.push(r.rule.id);
+          return { content: { ok: true, saved: r.rule.text }, summary: `Saved to My style: "${r.rule.text}"` };
+        }
+        if (r.resumed) {
+          ctx.state.styleRulesResumed.push({ id: r.rule.id, text: r.rule.text });
+          return { content: { ok: true, alreadySaved: r.rule.text, turnedBackOn: true }, summary: `Turned back on in My style: "${r.rule.text}"` };
+        }
+        return { content: { ok: true, alreadySaved: r.rule.text } };
       }
       if (!ctx.state.styleSuggestions.includes(text)) ctx.state.styleSuggestions.push(text);
       return { content: { ok: true, proposed: text, note: 'NOT saved. The app will ask the user "Remember this for next time?". Do not say you saved it or that you will remember it.' } };

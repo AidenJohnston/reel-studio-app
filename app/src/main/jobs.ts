@@ -299,9 +299,16 @@ export function createJobManager(
         // record of that earlier job must stay for settleInterrupted. With a stuck engine nothing is
         // cleaned up or let go: it may still be writing.
         if (slug && owner && !stuck.has(slug)) {
-          await cleanPartialVersions(projectDir(slug)).catch(() => [])
+          // a version it could not remove (Windows refuses while a file is open) is left for the next
+          // start or job on the project, which tries again (store.ts settleInterrupted)
+          const cleaned = await cleanPartialVersions(projectDir(slug)).then(() => true, (e) => {
+            log(`[job ${kind}] could not remove an unfinished version: ${(e as Error)?.message ?? e}`)
+            return false
+          })
           await updateAppState(slug, (s) => {
             s.job = null
+            if (cleaned) delete s.cleanupOwed
+            else s.cleanupOwed = true
             if (kind === 'first-edit') s.status = cancelled || paused ? 'interrupted' : 'failed'
             if (paused) s.paused = paused
             // An export failure is shown in the export dialog; the video itself is fine.
