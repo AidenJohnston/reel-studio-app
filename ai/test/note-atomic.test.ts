@@ -1,6 +1,6 @@
 // A note is all-or-nothing (editor.ts applyNote): the ways a real note ends, on a project that already
 // has its first edit (a cut and Version 1), as every note does.
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import * as fs from 'node:fs';
 import * as fsp from 'node:fs/promises';
 import * as path from 'node:path';
@@ -219,6 +219,43 @@ describe('a note that finishes is saved in one write', () => {
     expect(r).not.toHaveProperty('version');
     expect(host.calls.filter((c) => c.command === 'render')).toEqual([]);
     expect(JSON.parse(await read()).notes.at(-1)).toMatchObject({ id: 'job-3', applied: [], reply });
+  });
+});
+
+describe('a saved note stays saved', () => {
+  const ledger = async (dir: string) => (await fsp.readFile(path.join(dir, 'work', 'assets', 'manifest.jsonl'), 'utf8')).trim().split('\n').map((l) => JSON.parse(l));
+  const place = (asset: string, from: string, to: string) => call('add_broll', { anchor: { from, to }, treatment: 'side-card', asset, animation: null, params: {} });
+
+  it('fails if an error after project.json points at the new version takes back a picture that version uses', async () => {
+    const { root, dir, host, settingsDir, read } = await setup();
+    await fsp.writeFile(path.join(root, 'Library', 'Images', 'loaf.png'), tinyPng([20, 20, 220]));
+    await fsp.writeFile(path.join(root, 'Library', 'Images', 'bread.png'), tinyPng());
+    // an earlier note froze a picture, so the ledger exists before the one under test
+    await createAI({ host, settingsDir, providerOverride: new ScriptedModel([{ toolCalls: [place('Library/Images/loaf.png', 'w29', 'w30')] }, finish('Added the loaf.')]) })
+      .applyNote(dir, 'show my loaf', () => undefined);
+    expect(JSON.parse(await read()).version).toBe(2);
+    // My style turns unreadable once Version 3 is saved: the last read, for the rules to propose, fails
+    const checks = StyleStore.prototype.checks;
+    const spy = vi.spyOn(StyleStore.prototype, 'checks').mockImplementation(async function (this: unknown) {
+      if (JSON.parse(await read()).version === 3) throw Object.assign(new Error('EACCES: permission denied, open style.json'), { code: 'EACCES' });
+      return checks.call(this as StyleStore);
+    });
+    let r;
+    try {
+      r = await createAI({ host, settingsDir, providerOverride: new ScriptedModel([{ toolCalls: [place('Library/Images/bread.png', 'w33', 'w34')] }, finish('Added the bread.')]) })
+        .applyNote(dir, 'show my bread', () => undefined, undefined, { id: 'job-bread' });
+    } finally {
+      spy.mockRestore();
+    }
+    expect(spy).toHaveBeenCalled();
+    expect(r).toMatchObject({ version: 3, summary: expect.stringContaining('Added the bread.') });
+    const saved = JSON.parse(await read());
+    expect(saved.notes.at(-1)).toMatchObject({ id: 'job-bread', version: 3 });
+    const picture = saved.broll.find((b: { anchor: { from: string } }) => b.anchor.from === 'w33').asset;
+    expect(picture).toMatch(/^work\/assets\/frozen\/image\/[0-9a-f]{64}\.png$/);
+    expect(fs.existsSync(path.join(dir, picture))).toBe(true);
+    expect(JSON.parse(await fsp.readFile(path.join(dir, 'versions', 'v3', 'project.json'), 'utf8')).broll.map((b: { asset: string }) => b.asset)).toContain(picture);
+    expect((await ledger(dir)).map((a) => a.committedPath)).toEqual([expect.stringMatching(/frozen\/image\//), picture]);
   });
 });
 

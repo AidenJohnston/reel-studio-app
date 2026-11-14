@@ -396,9 +396,16 @@ const withRulesReply = (summary: string, ctx: ToolContext, unreadable: StyleRule
  * approves meets them), minus ones already in My style. A kind this reel can't measure is asked as plain words. */
 async function checkedProposals(deps: EditorDeps, ctx: ToolContext, measuredBefore: Measured | null): Promise<{ styleChecks?: StyleCheckProposal[]; styleSuggestions: string[] }> {
   const measured = ctx.state.ruleChecks?.measured ?? measuredBefore;
-  const saved = new Set((await deps.style.checks()).active.map((r) => r.text));
-  const styleChecks: StyleCheckProposal[] = [];
   const styleSuggestions = [...ctx.state.styleSuggestions];
+  // Runs once the version is saved, so it must not fail the edit: with My style unreadable (EACCES, a damaged
+  // file) the checked proposals are dropped and the saved version stands.
+  const mine = await deps.style.checks().catch((e) => {
+    console.warn('Could not read My style to propose checked rules; the saved edit stands without them.', e);
+    return null;
+  });
+  if (!mine) return { styleSuggestions };
+  const saved = new Set(mine.active.map((r) => r.text));
+  const styleChecks: StyleCheckProposal[] = [];
   for (const { text, choice } of ctx.state.styleChecks ?? []) {
     const check = checkFromMeasured(choice, measured);
     if (!check) { if (!styleSuggestions.includes(text)) styleSuggestions.push(text); continue; }
@@ -758,6 +765,8 @@ export async function applyNote(deps: EditorDeps, provider: ModelProvider | null
   let stuck = false;
   // the AI run's task, once it draws changed moments in the note's folder
   let drawing: ToolContext | undefined;
+  // project.json points at the note's version: from then on nothing it froze or recorded may be taken back
+  let published = false;
   try {
     let ctx = await begin();
     const { p: p0 } = await load(ctx);
@@ -842,6 +851,7 @@ export async function applyNote(deps: EditorDeps, provider: ModelProvider | null
     // A note run in an MCP harness (dev only) has no loop of ours for the fix: its reply still names any failing rule.
     const fix = deps.harness ? undefined : rulesFixer(deps, provider, ctx, onEvent, signal, note.trim() || undefined);
     const result = await saveNote(deps, ctx, base, baseVersion, { text: note.trim(), label, summary, attachments: recorded }, opts.saveStyleRules !== false, { fix, unreadable });
+    published = true;
     if (review && result.version !== undefined) {
       try {
         await saveCheck(projectDir, result.version, review.record);
@@ -853,7 +863,7 @@ export async function applyNote(deps: EditorDeps, provider: ModelProvider | null
     started = p0;
   } catch (e) {
     stuck = engineStuck(e);
-    if (!stuck) {
+    if (!stuck && !published) {
       await restoreCredits(projectDir, creditsBefore);
       await restoreAssets(projectDir, assetsBefore, ledgerBefore);
     }
