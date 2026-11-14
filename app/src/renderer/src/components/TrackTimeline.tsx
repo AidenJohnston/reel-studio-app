@@ -530,7 +530,12 @@ export function TrackTimeline(props: TrackTimelineProps) {
                     aria-label={pictureLabel(p)}
                     title={fixed ?? undefined}
                     onPointerDown={(e) => pictureDrag(e, p, 'move')}
-                    onKeyDown={(e) => e.key === 'Enter' && onPicture(on ? null : p.id)}
+                    onKeyDown={(e) => {
+                      // a button's keys: Enter or Space picks it, and Space never reaches the player (play/pause)
+                      if (e.key !== 'Enter' && e.key !== ' ') return
+                      e.preventDefault()
+                      if (!e.repeat) onPicture(on ? null : p.id)
+                    }}
                     data-testid="track-picture"
                     data-id={p.id}
                   >
@@ -659,6 +664,14 @@ function CaptionBlock({
 }) {
   const [text, setText] = useState(c.text)
   useEffect(() => setText(c.text), [c.text, editing])
+  // Enter or Escape put the keyboard back on the line they closed; Tab or a click away go where they go
+  const block = useRef<HTMLDivElement>(null)
+  const refocus = useRef(false)
+  useEffect(() => {
+    if (editing || !refocus.current) return
+    refocus.current = false
+    block.current?.focus({ preventScroll: true })
+  }, [editing])
   if (editing)
     return (
       <input
@@ -673,9 +686,13 @@ function CaptionBlock({
         onBlur={() => onDone(text.trim() === c.text ? null : text)}
         onKeyDown={(e) => {
           e.stopPropagation()
-          if (e.key === 'Enter') e.currentTarget.blur()
+          if (e.key === 'Enter') {
+            refocus.current = true
+            e.currentTarget.blur()
+          }
           if (e.key === 'Escape') {
             e.preventDefault()
+            refocus.current = true
             setText(c.text)
             onDone(null)
           }
@@ -685,6 +702,7 @@ function CaptionBlock({
     )
   return (
     <div
+      ref={block}
       className="trk-cap"
       style={{ left, width }}
       role="button"
@@ -693,7 +711,11 @@ function CaptionBlock({
       title={c.text}
       onPointerDown={(e) => e.stopPropagation()}
       onClick={() => !locked && onOpen()}
-      onKeyDown={(e) => e.key === 'Enter' && !locked && onOpen()}
+      onKeyDown={(e) => {
+        if (e.key !== 'Enter' && e.key !== ' ') return
+        e.preventDefault() // Space opens the line, never plays or pauses the reel
+        if (!locked && !e.repeat) onOpen()
+      }}
       data-testid="track-caption"
     >
       {c.text}

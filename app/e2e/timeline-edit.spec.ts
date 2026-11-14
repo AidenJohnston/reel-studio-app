@@ -143,6 +143,8 @@ test('editing timeline: trim a cut, move, resize, frame and delete a picture, mo
   await input.fill('every morning eye')
   await shot(page, 'track-03-subtitle')
   await page.keyboard.press('Enter')
+  // the keyboard is back on the line it fixed, not lost to the page (prep-for-prod round 1, blocking 7)
+  await expect(page.getByTestId('track-caption').first()).toBeFocused()
   await made()
   expect(project().captions.corrections).toEqual([{ from: 'I', to: 'eye', at: 'f2' }])
   await expect(page.getByTestId('track-caption').first()).toHaveText('every morning eye')

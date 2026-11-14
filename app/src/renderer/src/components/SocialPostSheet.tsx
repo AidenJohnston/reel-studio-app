@@ -151,7 +151,7 @@ export function SocialPostSheet({
 
   const head = (
     <div className="row" style={{ justifyContent: 'space-between' }}>
-      <h2>{HEADINGS[platform][typeof phase === 'object' && 'done' in phase ? 1 : 0]}</h2>
+      <h2 id="social-post-title">{HEADINGS[platform][typeof phase === 'object' && 'done' in phase ? 1 : 0]}</h2>
       {!sending && !(typeof phase === 'object' && 'done' in phase) && (
         <button className="btn ghost small" onClick={onBack} data-testid="social-back">
           <Icon name="back" size={16} /> Back

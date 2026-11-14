@@ -568,7 +568,7 @@ export function Outs({
         </div>
       )}
       {socialSheet && social && (
-        <Modal onClose={() => !postBusy.current && setSocialSheet(null)} wide testid="social-dialog">
+        <Modal onClose={() => !postBusy.current && setSocialSheet(null)} wide testid="social-dialog" labelledBy="social-post-title">
           <SocialPostSheet
             platform={socialSheet.platform}
             slug={slug}
@@ -588,7 +588,7 @@ export function Outs({
         </Modal>
       )}
       {postSheet && (
-        <Modal onClose={() => !postBusy.current && setPostSheet(null)} wide testid="post-dialog">
+        <Modal onClose={() => !postBusy.current && setPostSheet(null)} wide testid="post-dialog" labelledBy="post-title">
           <PostSheet
             video={postSheet.video}
             slug={slug}

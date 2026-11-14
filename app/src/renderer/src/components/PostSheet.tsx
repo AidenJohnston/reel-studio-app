@@ -212,7 +212,7 @@ export function PostSheet({
 
   const head = (
     <div className="row" style={{ justifyContent: 'space-between' }}>
-      <h2>{state === 'done' ? POST_COPY.doneHeading : POST_COPY.heading}</h2>
+      <h2 id="post-title">{state === 'done' ? POST_COPY.doneHeading : POST_COPY.heading}</h2>
       {!sending && state !== 'done' && (
         <button className="btn ghost small" onClick={onBack} data-testid="post-back">
           <Icon name="back" size={16} /> Back
