@@ -43,10 +43,14 @@ def test_two_final_renders_have_equal_frames(tmp_path):
     fx.set_project(ctx, cover={"atSourceTime": 1.0, "source": "s1", "text": None})
     md5s = []
     for i in range(2):
+        # each run draws every frame again: no saved version to hand back, no chunk to reuse (Astra engine review,
+        # invariant 1: deleting only the MP4 let the second run copy the first run's chunks)
+        shutil.rmtree(pdir / "versions", ignore_errors=True)
+        shutil.rmtree(pdir / "work" / "render" / "chunks", ignore_errors=True)
         res = render.run(pdir, draft=False, root=tmp_path / "root", verify=False, cover=False)
         assert res["encoder"] == "libx264"
+        assert res["chunks"] is None or res["chunks"]["encoded"] == list(range(res["chunks"]["total"]))
         out = Path(res["file"])
         md5s.append(_video_md5(out))
-        out.unlink()
     assert len(md5s[0]) >= 60
     assert md5s[0] == md5s[1]
