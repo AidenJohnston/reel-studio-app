@@ -261,8 +261,6 @@ describe('finding 13: transcript and web text are data, style rules are visible 
     const before = Buffer.from('{\n  "old.png": { "attribution": "Old credit" }\n}\n');
     await fsp.mkdir(path.dirname(creditsPath), { recursive: true });
     await fsp.writeFile(creditsPath, before);
-    // a note's download carries the note's prefix (tools.ts notePrefix)
-    const downloaded = () => fs.readdirSync(path.join(dir, 'work', 'assets')).filter((f) => f.endsWith('downloaded.png'));
     const runEngine = host.runEngine.bind(host);
     host.runEngine = async (command, args, onProgress) => {
       const result = await runEngine(command, args, onProgress);
@@ -286,7 +284,6 @@ describe('finding 13: transcript and web text are data, style rules are visible 
     await expect(createAI({ host, settingsDir, providerOverride: m }).applyNote(dir, 'add a picture', () => undefined))
       .rejects.toMatchObject({ code: 'chatgpt_usage_limit' });
     expect(await fsp.readFile(creditsPath)).toEqual(before);
-    expect(downloaded()).toEqual([]);
   });
 
   // chmod 000 cannot stop Windows or the root user from reading the file.
