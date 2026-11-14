@@ -12,7 +12,7 @@ Sam set the scope on Nov 14: every open PR goes in. A PR written against main's 
 
 1. `release/0.2.0` starts at `ui/capcut-timeline` (9dc6a8f0). That branch was 1307 commits ahead of main and 11 behind.
 2. Main's 11 newer commits are merged in (10cfa4bc). Three files conflicted, all GitHub config: `.github/VOUCHED.td`, `.github/labels.json` and `.github/workflows/labels.yml`. Main's #181 had folded size, type, area and trust labelling into `labels.yml` and deleted `pr-size.yml` and `pr-vouch.yml`. Main's versions won, and the redesign's copies of those two workflows were removed, because keeping them would label every PR twice with different size thresholds. The redesign's `DO NOT MERGE` label and its two trusted authors were kept.
-3. PRs that merged with no conflicts went in as they are: #186, #188, #122, #148, #141.
+3. PRs that merged with no conflicts went in as they are: #186, #188, #122, #148, #141. #188 keeps `ui/capcut-timeline` as its base. Its head 812da975 is already in this branch, so it stays open as the review record of the hill climb's round 0. Retargeting it would show an empty diff.
 4. A CI trigger was added so pushes to `release/**` and `port/**` run the full matrix (adf5f035). Before this, CI had never run on `ui/capcut-timeline`: it had no push trigger and no PR until #188.
 5. The rest are ported in four groups, each on its own branch, then merged here in dependency order. Each group's conflict resolutions are logged in its merge commits. The groups are listed below.
 
