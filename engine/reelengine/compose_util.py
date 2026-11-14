@@ -631,11 +631,18 @@ def map_box_rect(box, rect, out_w: int, out_h: int, mirror: bool = False):
 
 
 def reframe_vf(ctx, sid: str) -> str:
-    """The cut video's picture for source `sid` (display px in, output px out), as the render makes
-    it: the same crop, the same scale, and the flip last for a mirrored take."""
+    """The cut video's picture for source `sid` (display px in, output px out), as the final render makes it: an
+    HDR take tone-mapped first (render.HDR_CHAIN, when this FFmpeg has zscale), the same crop, the same scale, and
+    the flip last for a mirrored take. A split view's speaker half is drawn through this (broll._split_video), so
+    it gets the colours the rest of the video has (Astra engine review 4)."""
+    from . import tools
+    from .render import HDR_CHAIN
     W, H, _ = fmt_of(ctx)
     x, y, cw, ch = reframe_rect(ctx, sid)
-    return f"crop={cw}:{ch}:{x}:{y},scale={W}:{H}" + (",hflip" if source_mirrored(ctx, sid) else "")
+    vf = f"crop={cw}:{ch}:{x}:{y},scale={W}:{H}" + (",hflip" if source_mirrored(ctx, sid) else "")
+    if (source_entry(ctx, sid) or {}).get("hdr") and "zscale" in tools.filters():
+        vf = f"{HDR_CHAIN},{vf}"
+    return vf
 
 
 def fmt_of(ctx) -> tuple[int, int, float]:
