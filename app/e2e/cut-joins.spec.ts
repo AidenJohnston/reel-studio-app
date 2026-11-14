@@ -47,7 +47,7 @@ test('transitions: picked by hand, a match kept only where it lines up, made int
         const sw = document.querySelector('[data-testid="cut-mode"]')!
         const col = sw.closest('.edit-b')!.getBoundingClientRect()
         const r = sw.getBoundingClientRect()
-        const clipped = [...sw.querySelectorAll('button')].filter((b) => b.scrollWidth > b.clientWidth).map((b) => b.textContent)
+        const clipped = Array.from(sw.querySelectorAll('button')).filter((b) => b.scrollWidth > b.clientWidth).map((b) => b.textContent)
         return { clipped, inside: r.left >= col.left - 0.5 && r.right <= col.right + 0.5 }
       }), { message: 'Cut switch at 1100 x 720' })
       .toEqual({ clipped: [], inside: true })
