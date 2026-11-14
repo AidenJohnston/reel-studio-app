@@ -15,11 +15,15 @@ export const pos = (s: Style): number => Number(s.position ?? 0.75)
 export const OTHER_COLOR = 'other colour'
 /** The subtitles' look: 'box', or the name of the colour the words are drawn in. */
 export const look = (s: Style): string => (s.box ? 'box' : colorName(String(s.color ?? '#FFFFFF')) ?? OTHER_COLOR)
+/** look() of a style rebuilt from a receipt, which lists only the style fields that changed: null when the colour
+ * is not among them, since naming one would guess (unboxing yellow subtitles is not "white subtitles"). */
+const receiptLook = (s: Style): string | null => (s.box || 'color' in s ? look(s) : null)
 const lookWord = (l: string): string => (l === 'box' ? 'boxed' : l === OTHER_COLOR ? 'recoloured' : l)
 export const name = (p: string | null | undefined): string =>
   (p ?? '').split(/[\\/]/).pop()?.replace(/\.[^.]+$/, '').replace(/[_-]+/g, ' ').trim() ?? ''
 
-function subtitles(before: ProjectJson['captions'], after: ProjectJson['captions']): string[] {
+/** `partial`: the styles hold only the fields a receipt says changed (describeFacts), not whole styles. */
+function subtitles(before: ProjectJson['captions'], after: ProjectJson['captions'], partial = false): string[] {
   if (!after) return []
   if (before?.enabled !== false && after.enabled === false) return ['no subtitles']
   if (before?.enabled === false && after.enabled !== false) return ['subtitles back on']
@@ -31,8 +35,9 @@ function subtitles(before: ProjectJson['captions'], after: ProjectJson['captions
   else {
     if (size(b) > size(a)) words.push('bigger')
     if (size(b) < size(a)) words.push('smaller')
-    const lb = look(b)
-    if (lb !== look(a)) words.push(lookWord(lb))
+    const seen = partial ? receiptLook : look
+    const lb = seen(b)
+    if (lb !== seen(a)) words.push(lb === null ? 'unboxed' : lookWord(lb))
   }
   const out: string[] = []
   if (words.length) out.push(`${words.join(' ')} subtitles`)
@@ -234,7 +239,7 @@ function changes(facts: EditFact[], words: Word[]): Change[] {
       }
       return c as NonNullable<ProjectJson['captions']>
     }
-    const said = subtitles(side('before'), side('after'))
+    const said = subtitles(side('before'), side('after'), true)
     const first = said[0] ?? ''
     out.push({
       group: 'subtitles',
