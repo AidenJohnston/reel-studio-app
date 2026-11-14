@@ -14,9 +14,14 @@ some points" at a +13 dB gap; +19 dB passed. So the mixer:
   4. ducks under speech: the music comes up a little in the pauses and dips just before the voice
      returns, so a word is never fighting a swell
   5. applies the project's word-anchored automation (gainDb between two words)
-  6. fades in gently (never a loud first frame) and fades out at the end, over `fadeIn` and `fadeOut`
-  7. adds the project's sound effects (sfx.py), placed and levelled against the same voice
-  8. two-pass loudness: measure the mix, apply a static gain to -14 LUFS, true-peak limit
+  6. starts on the song's attack (analyze_track's suggestedStartAt is a transient), fades it in over
+     `fadeIn` (0.6 s unless set; DECLICK_S at least, so it never clicks) and out at the end over `fadeOut`
+  7. drops the music out for a named line (music.drops: from the line's first word through its last)
+     and brings it back hard on the first beat after it, the way an editor lets a punchline land in
+     silence; the song keeps running underneath, so it comes back on the grid
+  8. adds the project's sound effects (sfx.py), placed and levelled against the same voice, and the
+     reverb throw on the last word (voice.reverbThrow: an echo tail on the voice's final THROW_S)
+  9. two-pass loudness: measure the mix, apply a static gain to -14 LUFS, true-peak limit
      (4x oversampled), measure again and correct the residual
 
 The music also gets a gentle low cut (highpass 90 Hz, -6 dB shelf at 160 Hz): the original
@@ -37,8 +42,9 @@ from typing import Optional
 
 import numpy as np
 
-from .compose_util import (EngineError, ffmpeg_bin, fmt_of, log, probe, report, resolve_asset, run, word_end,
-                           word_start)
+from . import beats as beatmod
+from .compose_util import (EngineError, ctx_words, ffmpeg_bin, fmt_of, log, probe, report, resolve_asset, run,
+                           word_end, word_start)
 from .project import song_ref
 
 SR = 48000
@@ -55,6 +61,15 @@ CUT_CAP = 12.0            # loud bars cut at most this much
 MUSIC_EQ = "highpass=f=90,lowshelf=f=160:g=-6"
 BEAT_MAX_SHIFT = 0.12
 DECLICK_S = 0.01          # the shortest fade-in: long enough that the first sample does not click
+DECLICK = 0.005           # the song's first and last edges, and a drop's: long enough not to click
+DROP_LEAD = 0.04          # the music is gone this long before the line's first word
+DROP_BACK_WITHIN = 1.0    # it comes back on the first beat this soon after the line...
+DROP_BACK_AFTER = 0.15    # ...or, with no beat in reach, this long after the line's last word
+THROW_S = 0.7             # the reverb throw catches the voice's final 0.7 s
+THROW_DB = -8.0           # its tail peaks this far under the voice's speech loudness
+THROW_RT60 = 1.6          # seconds for the tail to fall 60 dB
+THROW_END_FADE = 0.1      # a tail still ringing at the end of the video fades over this
+MIX_VERSION = 5           # bump when the mix changes for the same inputs (the mix cache key)
 
 
 # --- decoding ----------------------------------------------------------------------------------
@@ -344,9 +359,129 @@ def fade_lengths(mcfg: dict) -> tuple[float, float]:
     return fi, float(mcfg.get("fadeOut", 1.5) or 0.0)
 
 
+
+def _ramp(n: int, up: bool) -> np.ndarray:
+    r = np.linspace(0, 1, max(1, n), dtype=np.float32)
+    return r if up else r[::-1]
+
+
+def drop_windows(ctx, mcfg: dict, dur: float, track: Optional[Path]) -> list[dict]:
+    """music.drops -> [{"from", "to", "out", "back", "onBeat"}] on the output clock, frame-aligned: the music
+    leaves DROP_LEAD before the line's first word and comes back on the first beat within
+    DROP_BACK_WITHIN of its last word (else DROP_BACK_AFTER after it). A line the cut removed, or one
+    that ends where it starts, has no window."""
+    fps = fmt_of(ctx)[2]
+    grid = beatmod.output_grid(ctx.project, track)
+    out = []
+    for d in mcfg.get("drops") or []:
+        t0, t1 = word_start(ctx, d.get("from")), word_end(ctx, d.get("to"))
+        if t0 is None or t1 is None or t1 <= t0:
+            continue
+        a = max(0.0, round((t0 - DROP_LEAD) * fps) / fps)
+        back = beatmod.next_beat(t1, grid, DROP_BACK_WITHIN)
+        b = min(dur, back if back is not None else round((t1 + DROP_BACK_AFTER) * fps) / fps)
+        if b > a:
+            out.append({"from": d.get("from"), "to": d.get("to"), "out": round(a, 4), "back": round(b, 4),
+                        "onBeat": back is not None})
+    return out
+
+
+def drop_gate(n: int, windows: list[dict], offset: float = 0.0) -> np.ndarray:
+    """Per-sample music gain: 0 inside each drop window, 1 elsewhere, DECLICK ramps at the edges."""
+    g = np.ones(n, np.float32)
+    k = int(DECLICK * SR)
+    for w in windows:
+        a, b = int(round((w["out"] - offset) * SR)), int(round((w["back"] - offset) * SR))
+        a, b = max(0, a), min(n, b)
+        if b <= a:
+            continue
+        g[a:b] = 0.0
+        lo = max(0, a - k)
+        g[lo:a] = np.minimum(g[lo:a], _ramp(a - lo, False)[: a - lo])
+        hi = min(n, b + k)
+        g[b:hi] = np.minimum(g[b:hi], _ramp(hi - b, True)[: hi - b])
+    return g
+
+
+def throw_impulse(sr: int = SR) -> np.ndarray:
+    """A stereo reverb impulse response, generated (no file, no dependency) and identical on every run:
+    seeded decorrelated noise under an exponential decay of THROW_RT60, 25 ms pre-delay, band-limited
+    to 250 Hz - 6 kHz so the tail is airy rather than boomy. Unit energy."""
+    n = int(THROW_RT60 * sr)
+    rng = np.random.default_rng(20261112)               # PCG64: the same numbers on every machine
+    t = np.arange(n) / sr
+    ir = rng.standard_normal((n, 2)) * np.exp(-6.91 * t / THROW_RT60)[:, None]
+    f = np.fft.rfftfreq(n, 1 / sr)
+    band = 1 / np.sqrt(1 + (250 / np.maximum(f, 1)) ** 4) / np.sqrt(1 + (f / 6000) ** 4)
+    ir = np.fft.irfft(np.fft.rfft(ir, axis=0) * band[:, None], n, axis=0)
+    ir = np.concatenate([np.zeros((int(0.025 * sr), 2)), ir])
+    return (ir / np.sqrt((ir ** 2).sum() / 2)).astype(np.float32)
+
+
+def final_word(ctx) -> Optional[tuple[str, float, float]]:
+    """(id, output start, output end) of the word the video ends on: the last word of the cut's last
+    segment, placed through that segment. A word id can play twice (a range kept twice) and a word's text
+    can repeat, so neither the id's first appearance nor its text says where the video ends."""
+    segs = list(getattr(ctx, "out_timeline", None) or [])
+    wid = segs[-1].last_word if segs else None
+    w = ctx_words(ctx).get(wid) if wid else None
+    if w is None:
+        return None
+    last = segs[-1]
+
+    def out_at(t: float) -> float:          # through the pieces of the last kept range, newest first
+        for seg in reversed(segs):
+            if seg.source == last.source and seg.src_start - 1e-6 <= t <= seg.src_end + 1e-6:
+                return seg.out_start + (t - seg.src_start)
+            if seg.first_word is not None:
+                return seg.out_start        # the range's first piece: snapping moved its start past t
+        return last.out_start
+    end = last.out_start + (min(float(w["e"]), last.src_end) - last.src_start)
+    return wid, min(out_at(float(w["s"])), end), end
+
+
+def reverb_throw(ctx, voice: np.ndarray, offset: float = 0.0) -> tuple[Optional[np.ndarray], Optional[dict]]:
+    """The wet tail of a reverb fed only the voice's final THROW_S (from the final word's end back, never
+    before that word starts), as a track the length of `voice`. A pure function of that send: its samples
+    are placed on the output clock's sample grid, the impulse response is fixed, and the tail's loudest
+    moment sits THROW_DB under the word it echoes. Nothing else in the voice (an earlier edit, or how much
+    of the video a preview window holds) changes it. The dry voice is untouched. A tail still ringing when
+    the video ends fades out over THROW_END_FADE. (None, None) when there is no final word."""
+    fw = final_word(ctx)
+    if fw is None:
+        return None, None
+    wid, ws, we = fw
+    base = int(round(offset * SR))
+    a = max(0, int(round(max(ws, we - THROW_S) * SR)) - base)
+    b = min(len(voice), int(round((we + 0.03) * SR)) - base)
+    if b - a < int(0.05 * SR):
+        return None, None
+    send = voice[a:b].copy()
+    k = int(0.01 * SR)
+    send[:k] *= _ramp(k, True)[:, None]
+    send[-k:] *= _ramp(k, False)[:, None]
+    ir = throw_impulse()
+    m = len(send) + len(ir) - 1
+    nfft = 1 << (m - 1).bit_length()
+    wet = np.fft.irfft(np.fft.rfft(send, nfft, axis=0) * np.fft.rfft(ir, nfft, axis=0), nfft, axis=0)[:m]
+    # level from the word it echoes, measured on the whole tail before the video's end can cut it: a soft
+    # last word gets a soft tail, and a word lost in room noise cannot become a loud wash of that noise
+    word = float(lufs(block_power(np.pad(send, ((int(0.4 * SR), 0), (0, 0))), SR, 0.4, 0.05)).max())
+    peak = float(lufs(block_power(wet, SR, 0.4, 0.05)).max())
+    wet = (wet * 10 ** ((word + THROW_DB - peak) / 20)).astype(np.float32)
+    out = np.zeros_like(voice)
+    n = min(m, len(voice) - a)
+    out[a:a + n] = wet[:n]
+    if n < m:                                   # cut off by the end of the video
+        f = min(n, int(THROW_END_FADE * SR))
+        out[a + n - f:a + n] *= _ramp(f, False)[:, None]
+    return out, {"word": wid, "from": round((a + base) / SR, 3), "to": round((b + base) / SR, 3),
+                 "underWordDb": THROW_DB}
+
+
 def build_audio(ctx, voice_wav) -> Path:
-    """Cut voice wav (output timeline) + project.music + project.sfx -> work/audio/mix-<hash>.wav at -14 LUFS.
-    Writes the measured numbers beside the mix (mix-<sig>.json)."""
+    """Cut voice wav (output timeline) + project.music + project.sfx + project.voice -> work/audio/mix-<hash>.wav
+    at -14 LUFS. Writes work/audio/mix.json with the measured numbers."""
     voice_wav = Path(voice_wav)
     work = Path(ctx.work) / "audio"
     work.mkdir(parents=True, exist_ok=True)
@@ -380,10 +515,13 @@ def build_audio(ctx, voice_wav) -> Path:
             log(f"# sound effects skipped: {exc!r}")
     # a mix that is silent on purpose (no sound in any source, no song; multi-source) is normalized differently
     expected_silence = getattr(ctx, "expected_silence", False)
-    key = [4, expected_silence, str(voice_wav), voice_wav.stat().st_size, voice_wav.stat().st_mtime_ns,
+    vcfg = (ctx.project or {}).get("voice") or {}
+    key = [MIX_VERSION, expected_silence, str(voice_wav), voice_wav.stat().st_size, voice_wav.stat().st_mtime_ns,
            mcfg, str(track) if track else None, track.stat().st_mtime_ns if track else None, offset]
     if smash_times:
         key.append(["smash", smash_times, fmt_of(ctx)[2]])
+    if vcfg:
+        key.append(vcfg)
     if effects is not None:
         key.append(fx_key)
         ctx.sfx_mixed = rows
@@ -416,9 +554,11 @@ def build_audio(ctx, voice_wav) -> Path:
         fi, fo = fade_lengths(mcfg)
         fin = min(n, int(fi * SR))
         gain[:fin] *= np.linspace(0, 1, fin, dtype=np.float32)
-        if fo > 0:
-            k = min(n, int(fo * SR))
-            gain[n - k:] *= np.linspace(1, 0, k, dtype=np.float32)
+        k = min(n, int(max(fo, DECLICK) * SR))     # fadeOut 0 still ends without a click
+        gain[n - k:] *= _ramp(k, False)
+        drops = drop_windows(ctx, mcfg, offset + dur, track)
+        if drops:
+            gain *= drop_gate(n, drops, offset)
         bed = music * gain[:, None]
         # measured gap while speaking, before the final normalisation (a constant gain keeps it)
         speech, V = speech_mask(voice)
@@ -430,10 +570,17 @@ def build_audio(ctx, voice_wav) -> Path:
         mrep.update({"track": str(track), "startAt": round(start, 3), "songShorterThanVideo": bool(short),
                      "measuredGapDb": None if gap is None else round(gap, 2),
                      "gapP10Db": None if gap_p10 is None else round(gap_p10, 2)})
+        if drops:
+            mrep["drops"] = drops
         rep["music"] = mrep
     if effects is not None:
         mix = mix + effects
         rep["sfx"] = rows
+    if vcfg.get("reverbThrow"):
+        wet, trep = reverb_throw(ctx, voice, offset)
+        if wet is not None:
+            mix = mix + wet
+            rep["reverbThrow"] = trep
     report(ctx, "music", 70, "Balancing the sound")
     mix, lrep = normalize(ctx, mix, work, expected_silence=expected_silence)
     rep.update(lrep)
@@ -600,7 +747,49 @@ def find_arrivals(curve: list, window: float, lookback: float = 30.0, top: int =
             for d, o, b, a in sorted(picked, key=lambda m: m[1])]
 
 
-ANALYSIS_VERSION = 4     # recompute beat grids made with rounded phase strides and early timestamps
+ANALYSIS_VERSION = 5     # bump when analyze_track's output changes (the analysis cache key); 5: the start
+                         # moved onto the song's attack (attack_at)
+ATTACK_SEARCH = 4.0      # look this far past the chosen bar for the song's next attack
+ATTACK_PREROLL = 0.003   # start this much before the transient, so its front edge is not shaved
+ATTACK_RISE_DB = 3.0     # less of a rise than this is not an attack
+ONSET_FFT, ONSET_HOP = 1024, 512
+
+
+def attack_in(mono: np.ndarray, sr: int, lo: float, hi: float) -> Optional[float]:
+    """Seconds of the attack in mono[lo:hi], to the millisecond, or None if nothing rises there.
+    The level at a moment is the RMS of the 10 ms before it (a window that ends there, so a rise is
+    timed where it starts; 10 ms also smooths out a bass note's cycle). The attack is the steepest
+    10 ms rise in the span, at least ATTACK_RISE_DB, timed where it has climbed halfway in dB: a pad
+    sounding under the hit, or chords beating against each other, moves the level less than a hit."""
+    a, b = max(0, int(lo * sr)), min(len(mono), int(hi * sr))
+    w, h = max(1, int(0.010 * sr)), max(1, sr // 1000)
+    steps = w // h
+    if b - a < w + 2 * steps * h:
+        return None
+    c = np.concatenate([[0.0], np.cumsum(mono[a:b].astype(np.float64) ** 2)])
+    ends = np.arange(w, b - a + 1, h)
+    db = 10 * np.log10(np.maximum((c[ends] - c[ends - w]) / w, 1e-12))
+    rise = db[steps:] - db[:-steps]                 # rise[j]: from db[j] to db[j + steps], 10 ms later
+    j = int(np.argmax(rise))
+    if rise[j] < ATTACK_RISE_DB:
+        return None
+    i = j + int(np.argmax(db[j:j + steps + 1] >= db[j] + rise[j] / 2))
+    return (a + ends[i]) / sr
+
+
+def attack_at(mono: np.ndarray, sr: int, env: np.ndarray, t: float) -> float:
+    """The first strong attack at or after t (within ATTACK_SEARCH), less ATTACK_PREROLL: a song started
+    there hits on the video's first frame, as an editor's cut does, instead of fading up mid-note. A
+    strong onset is a spectral-flux frame 2 standard deviations over the mean (the onset-rate test);
+    the attack is found inside that frame's window by `attack_in`. t unchanged when there is none."""
+    if not len(env) or env.std() <= 0:
+        return t
+    frame_t = np.flatnonzero(env > env.mean() + 2 * env.std()) * ONSET_HOP / sr
+    for f in frame_t[(frame_t >= t - ONSET_FFT / sr) & (frame_t <= t + ATTACK_SEARCH)]:
+        a = attack_in(mono, sr, f - 0.02, f + 2 * ONSET_FFT / sr)
+        if a is not None and a >= t - 0.02:
+            return max(0.0, round(float(a) - ATTACK_PREROLL, 3))
+    return t
 
 
 def mood_of(energy: str, brightness: str, dynamic: bool, bpm) -> str:
@@ -642,8 +831,8 @@ def analyze_track(path, ctx=None) -> dict:
         seg = st[k: k + int(window)]
         curve.append([float(k), round(float(np.mean(np.maximum(seg, -60.0))), 1)])
     arrivals = find_arrivals(curve, window)
-    n_fft, hop = 1024, 512
-    env = _onset_envelope(mono.astype(np.float32), sr, n_fft, hop)
+    hop = ONSET_HOP
+    env = _onset_envelope(mono.astype(np.float32), sr, ONSET_FFT, hop)
     bpm, beats, conf = _tempo_and_beats(env, sr / hop)
     beats = [b for b in beats if b < len(mono) / sr]
     onset_rate = float((env > env.mean() + 2 * env.std()).mean() * sr / hop) if len(env) else 0.0
@@ -666,20 +855,21 @@ def analyze_track(path, ctx=None) -> dict:
             "builds" if arrivals and max(a["riseDb"] for a in arrivals) >= 6 else "steady"]
     if dyn >= 12:
         tags.append("dynamic")
-    # where to start: on a quiet bar before the biggest arrival (never a loud first frame), else
-    # just after the lead silence
+    # where to start: a quiet bar before the biggest arrival (so the video has somewhere to build to),
+    # else just after the lead silence; then on that bar's first attack, not wherever the bar begins
     start = lead
     if arrivals:
         big = max(arrivals, key=lambda a: a["riseDb"])
         quiet = [t for t, v in curve if t < big["at"] and v <= big["fromLUFS"] + 1.0]
         if quiet:
             start = max(lead, float(quiet[-1]))
+    start = attack_at(mono, sr, env, start)
     return {"path": str(path), "duration": round(info["duration"], 2), "integratedLUFS": round(I, 1),
             "leadSilence": lead, "curve": curve, "arrivals": arrivals, "bpm": bpm, "beats": beats,
             "beatConfidence": conf, "onsetRate": round(onset_rate, 2), "spectralCentroid": round(centroid),
             "dynamicRangeDb": round(dyn, 1), "energy": energy, "tags": tags,
             "mood": mood_of(energy, tags[1], dyn >= 12, bpm),
-            "suggestedStartAt": round(start, 2)}
+            "suggestedStartAt": start}
 
 
 # Song analysis takes 5-18 s and a song is picked again and again (every video, every note that changes the
@@ -736,9 +926,11 @@ def analyze_track_cached(path, ctx=None, cache_dir: Optional[Path] = None) -> di
 
 
 def track_start(mcfg: dict, duration: float, offset: float = 0.0) -> float:
-    """The mixer restarts a song when its requested in-point leaves less than a second."""
-    start = float(mcfg.get("startAt", 0.0) or 0.0) + offset
-    return 0.0 if start >= duration - 1.0 else start
+    """Where the mix reads the song for output second `offset`: the song's real start (beats.effective_start,
+    the rule the beat grid is read with: a startAt less than a second from the end plays from the top), then
+    the window's offset. The rule is applied before the offset, so a preview window plays the song the full
+    render plays at that moment."""
+    return beatmod.effective_start(float(mcfg.get("startAt", 0.0) or 0.0), duration) + offset
 
 
 def accent_beats(ctx) -> list[float]:

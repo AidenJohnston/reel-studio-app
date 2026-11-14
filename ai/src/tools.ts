@@ -8,7 +8,7 @@ import { AssetCandidate, AssetKind, FrozenAsset, MediaEngine, PendingAsset, ASSE
 import { StockSearch, StockProvider } from './stock';
 import { readAttachment } from './attachments';
 import {
-  Analysis, Broll, CaptionStyle, ClipItem, CutItem, LIBRARY_FOLDERS, LibraryKind, MusicFrozen, MusicLevel, Project, Sfx, Transcript, TREATMENTS, Word, WordAnchor, Zoom,
+  Analysis, BEAT_KINDS, BeatGrid, BeatKind, Broll, CaptionStyle, ClipItem, CutItem, ITEM_TREATMENTS, LIBRARY_FOLDERS, LibraryKind, Music, MusicDrop, MusicFrozen, MusicLevel, Project, Sfx, TEXT_TREATMENTS, Transcript, TREATMENTS, Word, WordAnchor, Zoom,
   anchorText, anchorWords, approxDuration, approxOutputTimes, keptWords, loadAnalysis, loadProject, loadTranscript,
   captionsUnderInstagram, nextBrollId, clipProblem, normalizeKeep, captionCorrectionProblem, saveProject, validateProject, wordIndex, anchorProblem, PROJECT_FILE, versionDir, JOIN_TRANSITIONS, SEARCHED_JOINS, listVersions, versionLine, withWordsBack,
 } from './project';
@@ -81,6 +81,8 @@ export interface ToolState {
   finishRefused?: boolean;
   /** rules the AI proposed with a check: the app turns each into a checked rule measured on the finished video */
   styleChecks?: { text: string; choice: CheckChoice }[];
+  /** takes set_mirror would have flipped, but the user had said they are the right way round: the app asks */
+  mirrorDeclined?: string[];
 }
 
 export interface ToolContext {
@@ -152,7 +154,7 @@ export async function noteBase(ctx: ToolContext, live: Project, n: number): Prom
     if (problems.length) throw invalid(problems.join('; '));
     const refs = [
       ...snapshot.sources.map((s) => s.path), snapshot.music.track,
-      ...snapshot.broll.flatMap((b) => [b.asset, ...(['post-wall', 'icon-wall'].includes(b.treatment) && Array.isArray(b.params?.items) ? b.params.items.filter((x): x is string => typeof x === 'string') : [])]),
+      ...snapshot.broll.flatMap((b) => [b.asset, ...(ITEM_TREATMENTS.includes(b.treatment) && Array.isArray(b.params?.items) ? b.params.items.filter((x): x is string => typeof x === 'string') : [])]),
     ];
     for (const ref of refs) {
       if (!ref) continue;
@@ -471,12 +473,18 @@ function projectView(ctx: ToolContext, p: Project, t: Transcript): unknown {
     version: p.version,
     format: p.format,
     ...(p.cutStyle ? { cutStyle: p.cutStyle, cutStyleSettings: CUT_STYLES[p.cutStyle.preset] } : {}),
-    sources: p.sources.map((s) => ({ id: s.id, duration: s.duration, mirror: s.mirror === true })),
+    sources: p.sources.map((s) => ({
+      id: s.id, duration: s.duration, mirror: s.mirror === true,
+      // the user answered the app's "it looked mirrored" line with "Undo flip" or "Keep as filmed"
+      ...(s.mirrorCheck?.answer === 'undone' || s.mirrorCheck?.answer === 'kept' ? { userSaidAsFilmed: true } : {}),
+    })),
     cut: cutSummary(t, p),
     captions: p.captions,
-    music: p.music,
+    music: musicView(p.music, times),
     broll: p.broll.map((b) => ({ ...b, says: quote(t, b.anchor), approxOutSec: times.get(b.anchor.from)?.s ?? null })),
     zooms: p.zooms.map((z) => ({ ...z, says: quote(t, z.anchor) })),
+    // set_sfx replaces the list: a later note can only keep the effects it can see
+    ...(p.sfx?.length ? { sfx: p.sfx } : {}),
     cover: p.cover,
     post: p.post,
     // a receipt is for the app's version buttons; sent with every note it grows each request
@@ -504,6 +512,49 @@ export function versionArgs(ctx: { note?: { parent?: number; mergeParent?: numbe
   const parent = ctx.note?.parent ? ['--parent', String(ctx.note.parent)] : [];
   if (ctx.note?.mergeParent !== undefined) parent.push('--merge-parent', String(ctx.note.mergeParent));
   return [...(ctx.jobId ? ['--job-id', ctx.jobId] : []), ...parent];
+}
+
+/** Where the song really starts (engine beats.effective_start): a start less than END_MARGIN_S from the
+ * song's end plays it from the top. */
+const END_MARGIN_S = 1.0;
+export const effectiveStart = (startAt: number, seconds: number) =>
+  (startAt || 0) < Math.round(seconds * 100) / 100 - END_MARGIN_S ? Math.max(0, startAt || 0) : 0;
+
+/** The music as the model sees it: the beat grid's frames (hundreds of numbers only the engine reads)
+ * become its tempo and beat count, and each drop says when the music comes back on a beat. */
+export function musicView(m: Music, times: Map<string, { s: number; e: number }>): unknown {
+  const { beats, ...rest } = m;
+  if (!beats) return rest;
+  const f = beats.frames;
+  const steps = f.slice(1).map((x, i) => x - f[i]).sort((a, b) => a - b);
+  const bpm = steps.length ? Math.round((60 * beats.fps) / steps[steps.length >> 1]) : null;
+  const heard = f.map((x) => x / beats.fps - effectiveStart(m.startAt, beats.seconds)).filter((t) => t >= 0);
+  const drops = m.drops?.map((d) => {
+    const end = times.get(d.to)?.e;
+    const back = end === undefined ? undefined : heard.find((t) => t >= end && t - end <= 1);
+    return { ...d, backOnBeatAtSec: back === undefined ? null : Math.round(back * 100) / 100 };
+  });
+  return { ...rest, beats: { bpm, count: f.length }, ...(drops ? { drops } : {}) };
+}
+
+async function fileSha256(file: string): Promise<string> {
+  const h = createHash('sha256');
+  for await (const chunk of fs.createReadStream(file)) h.update(chunk as Buffer);
+  return h.digest('hex');
+}
+
+/** The file the mix plays (engine project.song_ref): the frozen copy of the Library song `track` names while it
+ * is that song's, else track itself. */
+function playedSong(m: Music): string | null {
+  const f = m.frozen;
+  return m.track && f && f.track === m.track && f.path ? f.path : m.track;
+}
+
+/** Whether the stored beat grid was measured on the song file that plays now (a song changed by hand keeps
+ * the old song's grid, which the engine then ignores). */
+async function gridMatches(grid: BeatGrid | undefined, songFile: string | null): Promise<boolean> {
+  if (!grid?.sha256 || !songFile) return false;
+  try { return grid.sha256 === await fileSha256(songFile); } catch { return false; }
 }
 
 async function engine(ctx: ToolContext, command: string, extra: string[] = [], stageMessage?: string): Promise<any> {
@@ -1239,14 +1290,20 @@ async function librarySongs(ctx: ToolContext): Promise<any[] | null> {
 
 export const MUSIC_TAIL_S = 0.3;
 
-/** Song facts from engine `analyze-music` (tempo, energy, a calm start point). Null if unavailable. */
-async function analyzeMusic(ctx: ToolContext, ref: string): Promise<any | null> {
+/** Song facts from engine `analyze-music` (tempo, energy, the start point on its attack) for the model, and
+ * the beat grid to store in music.beats (never shown to the model). Null if unavailable. */
+async function analyzeMusic(ctx: ToolContext, ref: string, fps: number): Promise<{ song: any; beats: BeatGrid | null } | null> {
   try {
-    const r = await engine(ctx, 'analyze-music', [ref, '--no-beats'], 'Listening to the song');
+    const r = await engine(ctx, 'analyze-music', [ref, '--no-beats', '--fps', String(fps)], 'Listening to the song');
     if (!r || typeof r !== 'object') return null;
+    const grid = r.beatGrid;
     return {
-      duration: r.duration, bpm: r.bpm, energy: r.energy, mood: r.mood, tags: r.tags, suggestedStartAt: r.suggestedStartAt,
-      arrivals: Array.isArray(r.arrivals) ? r.arrivals.map((a: any) => ({ at: a.at, riseDb: a.riseDb })) : undefined,
+      song: {
+        duration: r.duration, bpm: r.bpm, energy: r.energy, mood: r.mood, tags: r.tags, suggestedStartAt: r.suggestedStartAt,
+        arrivals: Array.isArray(r.arrivals) ? r.arrivals.map((a: any) => ({ at: a.at, riseDb: a.riseDb })) : undefined,
+      },
+      beats: grid && Array.isArray(grid.frames) && grid.frames.length && typeof grid.sha256 === 'string'
+        ? { fps: grid.fps, frames: grid.frames, seconds: grid.seconds, sha256: grid.sha256 } : null,
     };
   } catch {
     return null;
@@ -1254,15 +1311,18 @@ async function analyzeMusic(ctx: ToolContext, ref: string): Promise<any | null> 
 }
 
 const ANIM_PARAMS = animationParamsSchema();
+const sfxIdsWithEnergy = (energy: number) => SFX_SOUNDS.filter((s) => s.energy === energy).map((s) => s.id).join(', ');
 
 interface AnimContext { t0: number; region?: { x: number; y: number; w: number; h: number }; layout?: 'top' | 'full'; words: TimedWord[]; exact: boolean }
 
 /** Where the clip will start, the free space above the face and each anchor word's time from the
- *  clip start: from the engine (exact, `anim-context`), else approximated from the cut here. */
-async function animContext(ctx: ToolContext, anchor: WordAnchor, duration: number): Promise<AnimContext | null> {
+ *  clip start: from the engine (exact, `anim-context`), else approximated from the cut here. The
+ *  engine re-times the animation with the same question when the cut moves (engine anim_timing), so
+ *  `duration` is passed only when the editor set one. */
+async function animContext(ctx: ToolContext, anchor: WordAnchor, duration: unknown): Promise<AnimContext | null> {
   try {
     const r = await ctx.host.runEngine('anim-context', [...projectArgs(ctx, 'anim-context'), '--from', anchor.from, '--to', anchor.to,
-      '--duration', String(duration)], undefined, ctx.signal);
+      ...(typeof duration === 'number' ? ['--duration', String(duration)] : [])], undefined, ctx.signal);
     if (r && Array.isArray(r.words)) return { t0: r.t0, region: r.region, layout: r.layout, words: r.words, exact: true };
   } catch {
     // an older engine without anim-context: approximate timings, no region
@@ -1301,7 +1361,7 @@ async function makeAnimation(ctx: ToolContext, template: string, raw: Record<str
   if (opts.topOnly) params.layout = 'top';
   let timing = 'template default timing';
   if (anchor) {
-    const ac = await animContext(ctx, anchor, Number(params.duration ?? spec.defaultDuration ?? 3.5));
+    const ac = await animContext(ctx, anchor, params.duration);
     if (ac) {
       if (params.layout === undefined && ac.layout === 'full' && !opts.topOnly) params.layout = 'full';   // no readable room above the face
       if (ac.region && params.layout !== 'full') params.region = ac.region;
@@ -1402,13 +1462,22 @@ function readPage(content: unknown, args: { offset?: number | null; limit?: numb
   return { text: text.slice(offset, end), page: { offset, limit, total: text.length, nextOffset: end < text.length ? end : null } };
 }
 
+const BOX = S.arr(S.num(undefined, { minimum: 0, maximum: 1 }), undefined, { minItems: 4, maxItems: 4 });
+
 const PARAMS = S.obj({
   side: S.opt(S.enum(['left', 'right', 'auto'], 'side-card / phone-card: which side of the face (auto = the roomier side)')),
   tilt: S.opt(S.num('degrees, e.g. -2.5 (cards and text-pop); 0 for the square hook title')),
   scale: S.opt(S.num('1.0 = default size')),
-  text: S.opt(S.str('words shown by text-pop: the 3-7 word hook title, or the 1-4 key words of the line; from what is said')),
+  text: S.opt(S.str('words shown by text-pop, title-card or a text panel-card: the 3-7 word hook title, or the 1-4 key words of the line; from what is said. receipt: its source. logo-row: a lone logo\'s name')),
   iconic: S.opt(S.bool('true when the picture is a logo or icon (it reads at a smaller size); null = guess')),
   style: S.opt(S.enum(['pop', 'label'], 'text-pop look: label = dark words on a white box, as written (the hook title, a step label "2: Editing"); pop = big outlined capitals (one key word or number). Default pop')),
+  items: S.opt(S.arr(S.str(), 'logo-row, phone-row, post-wall, icon-wall: picture (or phone clip) paths, in the order said')),
+  hook: S.opt(S.bool('title-card: true = the opening hook, square (null = square only in the first second)')),
+  join: S.opt(S.bool('true = stack on the card just before instead of replacing it; they leave together')),
+  circle: S.opt({ ...BOX, description: 'circle-callout: the spot to circle' }),
+  circleAt: S.opt(S.str('circle-callout: word id the loop is drawn on (null = the second word)')),
+  cropBox: S.opt({ ...BOX, description: 'any picture: show only this part' }),
+  blurBoxes: S.opt(S.arr(BOX, 'any picture: parts to blur (names, faces, numbers)')),
 });
 
 // What sets a caption look in Edit it myself apart (app/src/shared/caption-presets.ts). Size, Position, Colour
@@ -1440,6 +1509,27 @@ type FootageResult = {
 
 function isFootageResult(value: unknown): value is FootageResult {
   return validate(FOOTAGE_RESULT, value).length === 0;
+}
+
+// the cards ai/prompts/system.md doesn't describe yet; boxes on a picture are [x, y, w, h] fractions of it
+const TREATMENT_HELP = 'Boxes are [x, y, w, h] fractions of the picture. title-card: the hook or a title, words filling a white label. '
+  + 'panel-card: a screenshot framed on a white panel, or sentences on one. logo-row: real logos in a row. phone-row: 2-4 phones side by side (may cover the face). '
+  + 'circle-callout: a screenshot, then a red loop around params.circle. wide-clip: borrowed footage in its own framing over a blur of itself. '
+  + 'receipt: a screenshot as proof, labelled with its source (params.text).';
+
+/** params.items as placed files, each frozen as it is placed like `asset` (placementAsset), or the problem. */
+async function resolveItems(ctx: ToolContext, params: Record<string, any> | null | undefined): Promise<string[] | undefined> {
+  if (!Array.isArray(params?.items)) return undefined;
+  const out: string[] = [];
+  for (const it of params!.items as string[]) {
+    try {
+      out.push(await placementAsset(ctx, it));
+    } catch (e) {
+      if (e instanceof ToolInputError) throw new ToolInputError(`params.items: ${e.message} (use Library/... paths from list_library, or assetIds from resolve_asset)`);
+      throw e;
+    }
+  }
+  return out;
 }
 
 const tools: ToolDef[] = [
@@ -1857,7 +1947,7 @@ const tools: ToolDef[] = [
     description: 'Pick the song: a Library/Music path from list_library (frozen as it is placed), a committed music assetId from resolve_asset, or null for no music. level: under-voice (default) | quiet | loud-intro.',
     parameters: S.obj({
       track: S.opt(S.str('e.g. "Library/Music/song.mp3", a music assetId from resolve_asset commit, or null to remove music')),
-      startAt: S.opt(S.num('seconds into the song to start; leave null and the engine enters on a calm bar before the first big hit', { minimum: 0 })),
+      startAt: S.opt(S.num('seconds into the song to start; leave null and it starts on the first hit of a calm bar before the big build', { minimum: 0 })),
       level: S.opt(S.enum(['under-voice', 'quiet', 'loud-intro'])),
     }),
     async run(ctx, args) {
@@ -1902,20 +1992,29 @@ const tools: ToolDef[] = [
         frozen = library ? { track: library, path: r.ref } : undefined;
         sameSong = same || (library !== null && library === cur.track);
       }
-      const prev = (await loadProject(ctx.projectDir, ctx.note?.file)).music;
-      const newSong = ref !== prev.track && !sameSong;
-      // a new song with no start point: start where the engine hears a calm bar before the build
-      const song = abs && newSong ? await analyzeMusic(ctx, abs) : null;
+      const { p: before } = await load(ctx);
+      const prev = before.music;
+      // the same song name over another file (replaced by hand) is a new song: its grid is stale
+      const newSong = (ref !== prev.track && !sameSong) || (!!abs && !!prev.beats && !(await gridMatches(prev.beats, abs)));
+      // a new song with no start point: start on the attack the engine hears after a calm bar
+      const heard = abs && newSong ? await analyzeMusic(ctx, abs, before.format.fps) : null;
+      const song = heard?.song ?? null;
       const startAt = args.startAt !== null && args.startAt !== undefined ? args.startAt
         : (song && typeof song.suggestedStartAt === 'number' ? song.suggestedStartAt : (newSong ? 0 : undefined));
       if (startAt !== undefined && validate(S.num(undefined, { minimum: 0 }), startAt).length) {
         throw new ToolInputError('music startAt must be a finite number >= 0');
       }
-      await mutate(ctx, 'music', (p) => {
+      // with edits on the beat, another song, no song or another start point moves the picture too
+      const movesBeats = !!prev.onBeat?.length && (newSong || (ref !== null) !== prev.enabled
+        || (startAt !== undefined && startAt !== prev.startAt));
+      await mutate(ctx, movesBeats ? 'beat' : 'music', (p) => {
         p.music.track = ref;
         if (frozen) p.music.frozen = frozen; else delete p.music.frozen;
         p.music.enabled = ref !== null;
         if (startAt !== undefined) p.music.startAt = startAt;
+        if (newSong) {                     // another song's beats would put cuts between this one's
+          if (heard?.beats) p.music.beats = heard.beats; else delete p.music.beats;
+        }
         if (args.level) p.music.level = args.level as MusicLevel;
         // hand edits end the song WITH the last word (a ~0.3 s tail), not a long fade under it
         if (ref !== null && newSong) p.music.fadeOut = MUSIC_TAIL_S;
@@ -1927,7 +2026,8 @@ const tools: ToolDef[] = [
       const summary = !name ? 'Took the music out'
         : !newSong && prev.enabled ? (args.level && args.level !== prev.level ? levelWord[args.level] ?? 'Adjusted the music' : 'Adjusted the music')
         : `Added the song "${name}"`;
-      return { content: { ok: true, music: ctx.project!.music, ...(song ? { song } : {}) }, summary };
+      const times = approxOutputTimes(ctx.transcript!, ctx.project!.cut.keep, ctx.project!.cut.gapCap);
+      return { content: { ok: true, music: musicView(ctx.project!.music, times), ...(song ? { song } : {}) }, summary };
     },
   },
   {
@@ -1945,11 +2045,63 @@ const tools: ToolDef[] = [
     },
   },
   {
+    name: 'set_sound_moments',
+    description: 'Only when the note asks; null leaves a field as it is. onBeat: these land on the song\'s beats. '
+      + 'drops: lines the music cuts out for, back on the next beat (one or two at most). reverbThrow: an echo on the last word.',
+    parameters: S.obj({
+      onBeat: S.opt(S.arr(S.enum(BEAT_KINDS))),
+      drops: S.opt(S.arr(S.obj({ from: S.str('first word id'), to: S.str('last word id') }))),
+      reverbThrow: S.opt(S.bool()),
+    }),
+    async run(ctx, args) {
+      const { p, t } = await load(ctx);
+      const onBeat: BeatKind[] | null = args.onBeat ? [...new Set<BeatKind>(args.onBeat)] : null;
+      const drops: MusicDrop[] | null = args.drops;
+      drops?.forEach((d, i) => checkAnchor(t, d, `drops[${i}]`));
+      const music = p.music.enabled && p.music.track;
+      if (!music && (onBeat?.length || drops?.length)) {
+        return {
+          content: { ok: false, note: 'This video has no song, so nothing can land on the beat or drop out. Tell the user plainly and offer to add a song from their Library. Do not say you changed it.' },
+          summary: 'No song to time to',
+        };
+      }
+      let heard: Awaited<ReturnType<typeof analyzeMusic>> = null;
+      // a song chosen before beats were stored: listen to it once now (a drop comes back on the next beat
+      // too, and without one, a moment after its line)
+      // or one changed by hand, whose stored grid belongs to the old song
+      const songFile = music ? resolveAsset(ctx, playedSong(p.music)!)?.abs ?? null : null;
+      if ((onBeat?.length || drops?.length) && !(await gridMatches(p.music.beats, songFile))) {
+        heard = songFile ? await analyzeMusic(ctx, songFile, p.format.fps) : null;
+        if (onBeat?.length && !heard?.beats) throw new ToolInputError('no steady beat was found in this song, so there is nothing to land on: tell the user and leave onBeat null');
+      }
+      // landing on beats moves the picture, and so does a grid restored under edits already on the beat;
+      // drops and the echo are only heard
+      const movesBeats = !!onBeat || (!!heard?.beats && !!p.music.onBeat?.length);
+      await mutate(ctx, movesBeats ? 'beat' : 'music', (q) => {
+        if (heard) { if (heard.beats) q.music.beats = heard.beats; else delete q.music.beats; }
+        if (onBeat) { if (onBeat.length) q.music.onBeat = onBeat; else delete q.music.onBeat; }
+        if (drops) { if (drops.length) q.music.drops = drops.map(({ from, to }) => ({ from, to })); else delete q.music.drops; }
+        if (args.reverbThrow === true) q.voice = { ...q.voice, reverbThrow: true };
+        else if (args.reverbThrow === false && q.voice) {
+          delete q.voice.reverbThrow;
+          if (!Object.keys(q.voice).length) delete q.voice;
+        }
+      });
+      const said = [
+        onBeat && (onBeat.length ? `Put the ${onBeat.join(' and ').replace('broll', 'pictures')} on the beat` : 'Took the edits off the beat'),
+        drops && (drops.length ? `Dropped the music for ${drops.length === 1 ? 'a line' : `${drops.length} lines`}` : 'Kept the music playing'),
+        args.reverbThrow === true ? 'Added an echo on the last word' : args.reverbThrow === false ? 'Took the echo off the last word' : null,
+      ].filter(Boolean);
+      return { content: { ok: true, music: { onBeat: ctx.project!.music.onBeat ?? [], drops: ctx.project!.music.drops ?? [] }, voice: ctx.project!.voice ?? {} },
+        summary: said.join('. ') || 'Left the sound as it was' };
+    },
+  },
+  {
     name: 'add_broll',
-    description: 'Put a visual on screen over a word range. Give exactly one of asset or animation. asset is a Library/... picture or clip path from list_library (frozen as it is placed), or the assetId of a web or project picture or clip committed with resolve_asset. text-pop needs only params.text. text-behind draws one or two big words BEHIND the speaker, who stays in front of them (it needs only params.text; params.size and params.color as for text-pop).',
+    description: 'Put a visual on screen over a word range. Give exactly one of asset or animation. asset is a Library/... picture or clip path from list_library (frozen as it is placed), or the assetId of a web or project picture or clip committed with resolve_asset. text-pop needs only params.text. text-behind draws one or two big words BEHIND the speaker, who stays in front of them (it needs only params.text; params.size and params.color as for text-pop). title-card and a text panel-card need only words; logo-row and phone-row take params.items. A card that comes sooner than 2 s after the one on screen waits, unless params.join stacks it on that one.',
     parameters: S.obj({
       anchor: ANCHOR,
-      treatment: S.enum(TREATMENTS),
+      treatment: S.enum(TREATMENTS, TREATMENT_HELP),
       asset: S.opt(S.str('a Library/... picture or clip path, or a picture or video assetId from resolve_asset commit')),
       animation: S.opt(S.obj({
         template: S.enum(ANIMATION_IDS),
@@ -1968,14 +2120,15 @@ const tools: ToolDef[] = [
           { fullScreen: args.treatment === 'full-frame' });
         asset = made.asset;
         args.treatment = 'animation';                 // a finished full-frame layer, never a card
-      } else if (!WORD_TREATMENTS.has(args.treatment)) {
-        throw new ToolInputError('give a committed asset or animation (only text-pop and text-behind work with text alone)');
+      } else if (!TEXT_TREATMENTS.includes(args.treatment) && !(ITEM_TREATMENTS.includes(args.treatment) && args.params?.items?.length)) {
+        throw new ToolInputError(`give a committed asset or animation (only ${TEXT_TREATMENTS.join(', ')} work with words alone; ${ITEM_TREATMENTS.join(', ')} take params.items)`);
       }
       if (WORD_TREATMENTS.has(args.treatment) && !asset && !args.params?.text) throw new ToolInputError(`${args.treatment} needs params.text`);
+      const items = await resolveItems(ctx, args.params);
       let id = '';
       await mutate(ctx, 'broll', (p) => {
         id = nextBrollId(p);
-        const b: Broll = { id, anchor: { from: args.anchor.from, to: args.anchor.to }, leadIn: 0.13, treatment: args.treatment, asset, params: stripNulls(args.params ?? {}) };
+        const b: Broll = { id, anchor: { from: args.anchor.from, to: args.anchor.to }, leadIn: 0.13, treatment: args.treatment, asset, params: stripNulls({ ...(args.params ?? {}), ...(items ? { items } : {}) }) };
         checkBrollAssets(ctx, b);
         p.broll.push(b);
       });
@@ -2030,6 +2183,7 @@ const tools: ToolDef[] = [
           : `Re-timed the animation on "${says}"`;
         return { content: { ok: true, asset: made.asset, layout: made.layout, readable: made.readable, placement: ANIMATION_PLACEMENT }, summary };
       }
+      const items = await resolveItems(ctx, args.params);
       let says = '';
       await mutate(ctx, 'broll', (p) => {
         const b = p.broll.find((x) => x.id === args.id);
@@ -2037,7 +2191,7 @@ const tools: ToolDef[] = [
         if (args.anchor) b.anchor = { from: args.anchor.from, to: args.anchor.to };
         if (args.treatment) b.treatment = args.treatment;
         if (asset) b.asset = asset;
-        if (args.params) b.params = { ...b.params, ...stripNulls(args.params) };
+        if (args.params) b.params = { ...b.params, ...stripNulls({ ...args.params, ...(items ? { items } : {}) }) };
         checkBrollAssets(ctx, b);
         says = quote(t, b.anchor);
       });
@@ -2180,7 +2334,7 @@ const tools: ToolDef[] = [
     description: 'Replace all sound effects. Add them only when the user\'s note asks for sound effects. Most lines get none, and a video with none is fine. Each one hits exactly on its moment, given by one of at.word (that word starts), at.broll (that b-roll appears) or at.cut (the cut into the kept range that starts with that word). Prefer short sounds (energy 1 and 2); a long one (energy 3) at most once. A riser builds for 1.5 to 3 seconds BEFORE its moment. The engine plays one at a time, at most one every 2 seconds, and keeps each one under the voice. Empty list = none.',
     parameters: S.obj({
       sfx: S.arr(S.obj({
-        sound: S.enum(SFX_SOUNDS.map((s) => s.id), `Built-in sounds, name and energy (how long it carries: 1 a tap, 2 a short swell, 3 long): ${SFX_SOUNDS.map((s) => `${s.id} ${s.energy}`).join(', ')}`),
+        sound: S.enum(SFX_SOUNDS.map((s) => s.id), `Built-in sounds. Energy (how long it carries) is 1, a tap, except 2, a short swell: ${sfxIdsWithEnergy(2)}; and 3, long: ${sfxIdsWithEnergy(3)}`),
         at: S.obj({
           word: S.opt(S.str('word id: the sound hits as this word starts (a zoom or caption lands there)')),
           broll: S.opt(S.str('b-roll id: the sound hits as that b-roll appears')),
@@ -2219,11 +2373,18 @@ const tools: ToolDef[] = [
     async run(ctx, args) {
       const on = args.on === true;
       const hit: string[] = [];
+      // The user already answered the app's "it looked mirrored" line with "as filmed": only their own tap
+      // changes that again. The take is recorded instead, and the app asks "Flip it?" (one tap).
       await mutate(ctx, 'mirror', (p) => {
         const all = args.source === null || args.source === undefined;
         if (!all && !p.sources.some((s) => s.id === args.source)) return `unknown source ${args.source}`;
+        const kept = (s: Project['sources'][number]) => on && (s.mirrorCheck?.answer === 'undone' || s.mirrorCheck?.answer === 'kept');
+        const targets = p.sources.filter((s) => all || s.id === args.source);
+        const declined = targets.filter(kept).map((s) => s.id);
+        if (declined.length) ctx.state.mirrorDeclined = [...new Set([...(ctx.state.mirrorDeclined ?? []), ...declined])];
+        if (targets.every(kept)) return 'the user chose to keep this video as filmed (userSaidAsFilmed), so only they can flip it: the app now shows them a Flip it button. Say so in one line.';
         for (const s of p.sources) {
-          if (!all && s.id !== args.source) continue;
+          if ((!all && s.id !== args.source) || kept(s)) continue;
           hit.push(s.id);
           if (on) s.mirror = true; else delete s.mirror;    // absent = as shot (old projects look the same)
         }

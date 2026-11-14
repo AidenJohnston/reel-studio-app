@@ -57,6 +57,41 @@ describe('set_mirror', () => {
     expect((await executeTool(ctx, 'set_mirror', { on: 'yes', source: null })).isError).toBe(true);
   });
 
+  it('get_project says when the user already chose "as filmed" in the app', async () => {
+    const { ctx, dir } = await ctxFor();
+    const p = await loadProject(dir);
+    p.sources[0].mirrorCheck = { verdict: 'mirrored', answer: 'undone' };
+    p.sources.push({ ...p.sources[0], id: 's2', mirrorCheck: { verdict: 'maybe-mirrored', answer: 'kept' } });
+    p.sources.push({ ...p.sources[0], id: 's3', mirror: true, mirrorCheck: { verdict: 'maybe-mirrored', answer: 'flipped' } });
+    p.sources.push({ ...p.sources[0], id: 's4', mirrorCheck: { verdict: 'unsure' } });
+    await saveProject(dir, p);
+    const seen = JSON.parse((await executeTool(ctx, 'get_project', {})).content).sources;
+    expect(seen.map((s: { userSaidAsFilmed?: boolean }) => s.userSaidAsFilmed ?? null)).toEqual([true, true, null, null]);
+    expect(seen[2].mirror).toBe(true);
+  });
+
+  it('never re-flips a take the user said is the right way round, whatever the note says: it records it for the app to ask', async () => {
+    const { ctx, dir } = await ctxFor();
+    const p = await loadProject(dir);
+    p.sources[0].mirrorCheck = { verdict: 'mirrored', answer: 'undone' };
+    p.sources.push({ ...p.sources[0], id: 's2', mirrorCheck: { verdict: 'unsure' } });
+    await saveProject(dir, p);
+    // the editor's own look at the frames (first edit), a note about something else, one that only
+    // sounds like it ("inverted colors"), and even a real request: only the user's tap in the app flips it
+    for (const note of [undefined, 'make the subtitles bigger', 'inverted colors on the captions', 'unmirror my video']) {
+      ctx.userNote = note;
+      ctx.state.mirrorDeclined = undefined;
+      const one = await executeTool(ctx, 'set_mirror', { on: true, source: 's1' });
+      expect(one.isError).toBe(true);
+      expect(one.content).toMatch(/only they can flip it: the app now shows them a Flip it button/);
+      expect(ctx.state.mirrorDeclined).toEqual(['s1']);
+      const all = await executeTool(ctx, 'set_mirror', { on: true, source: null });
+      expect(JSON.parse(all.content).sources).toEqual(['s2']);         // the other take still flips
+      expect((await loadProject(dir)).sources.map((s) => s.mirror ?? null)).toEqual([null, true]);
+      expect((await executeTool(ctx, 'set_mirror', { on: false, source: null })).isError).toBe(false);   // undoing is always fine
+    }
+  });
+
   it('the prompts tell the editor when to flip, when not to, and how to say it', () => {
     const pr = new Prompts();
     const sys = pr.raw('system');
@@ -72,6 +107,23 @@ describe('set_mirror', () => {
 });
 
 describe('a note about a mirrored video', () => {
+  it('about something else: the editor may not re-flip a take the user kept, and the result says so for the app', async () => {
+    const { root, dir } = await makeProject();
+    const p = await loadProject(dir);
+    p.sources[0].mirrorCheck = { verdict: 'maybe-mirrored', answer: 'kept' };
+    await saveProject(dir, p);
+    const model = new ScriptedModel([
+      { toolCalls: [call('get_project'), call('get_transcript')] },
+      { toolCalls: [call('set_mirror', { on: true, source: null })] },
+      { toolCalls: [call('finish', { summary_for_user: 'I tightened the start.' })] },
+    ]);
+    const ai = createAI({ host: new FakeHost(root), settingsDir: tmpDir('settings '), providerOverride: model });
+    const r = await ai.applyNote(dir, 'make the start punchier', () => {});
+    expect(r.fast).toBeUndefined();                       // the editor ran (not the no-AI fast path)
+    expect(r.mirrorDeclined).toEqual(['s1']);
+    expect((await loadProject(dir)).sources[0].mirror).toBeUndefined();
+  });
+
   it('goes to the editor, which flips it and says so', async () => {
     const { root, dir } = await makeProject();
     const host = new FakeHost(root);

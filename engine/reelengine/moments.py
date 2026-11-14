@@ -58,7 +58,7 @@ EPS = 1e-6
 # whole video: a new field nobody taught this module about must never be read as "nothing changed".
 WHOLE = ("format", "sources")
 DIFFED = ("cut", "captions", "broll", "zooms")
-NOT_SEEN = ("music", "sfx", "post", "notes", "title", "cover", "updatedAt", "createdAt", "version", "id", "slug",
+NOT_SEEN = ("music", "sfx", "voice", "post", "notes", "title", "cover", "updatedAt", "createdAt", "version", "id", "slug",
             "schemaVersion", "transcript")
 # captions: these redraw every line; corrections, hidden lines, splits, joins and digits are compared line by line
 CAPTION_LOOK = ("style", "enabled")
@@ -150,9 +150,10 @@ def _key(obj) -> str:
 
 
 def _beats(proj: dict) -> bool:
-    """Whether cards land on the song's beats (music.accent_beats): then the music and the sound effects move them."""
+    """Whether the picture lands on the song's beats: cards with a cut style's beat accents (music.accent_beats), or
+    cuts, zooms or b-roll with music.onBeat (beats.py). Then the music and the sound effects move the picture."""
     from .cut_style import beat_accents_on
-    return beat_accents_on(proj)
+    return beat_accents_on(proj) or bool((proj.get("music") or {}).get("onBeat"))
 
 
 def _whole_picture(old: dict, new: dict) -> Optional[str]:

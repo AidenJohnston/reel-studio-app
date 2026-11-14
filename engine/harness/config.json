@@ -32,6 +32,8 @@
       "bitDepth": 10, "transfer": "hlg", "bitrate": "12M", "seed": 1}},
     {"id": "vfr", "synthetic": {"width": 1080, "height": 1920, "fps": 30, "seconds": 10, "codec": "h264",
       "vfr": true, "bitrate": "6M", "seed": 2}},
+    {"id": "high-rate", "synthetic": {"width": 1080, "height": 1920, "fps": 60, "seconds": 10, "codec": "h264",
+      "bitrate": "8M", "seed": 6}},
     {"id": "rotated", "synthetic": {"width": 1080, "height": 1920, "fps": 30, "seconds": 10, "codec": "h264",
       "rotation": 90, "bitrate": "6M", "seed": 3}},
     {"id": "long-take", "synthetic": {"width": 1080, "height": 1920, "fps": 30, "seconds": 90, "codec": "h264",

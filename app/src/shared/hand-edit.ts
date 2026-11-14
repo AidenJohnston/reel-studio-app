@@ -145,9 +145,14 @@ export function applyHandEdit(project: ProjectJson, e: HandEdit, words: Word[]):
   if (e.mirror.length) {
     const want = new Map(e.mirror.map((m) => [m.source, m.on]))
     p.sources = (p.sources ?? []).map((s) => {
-      if (!want.has(s.id)) return s
+      const on = want.get(s.id)
+      if (on === undefined) return s
       const { mirror: _old, ...rest } = s
-      return want.get(s.id) ? { ...rest, mirror: true } : rest
+      // a take the import check looked at keeps the person's choice, so nothing flips it back or asks again
+      // (shared/mirror.ts): the Flip switch in Cover, or Flip it / Undo flip in the notes
+      const out = s.mirrorCheck && on !== (s.mirror === true)
+        ? { ...rest, mirrorCheck: { ...s.mirrorCheck, answer: on ? ('flipped' as const) : ('undone' as const) } } : rest
+      return on ? { ...out, mirror: true } : out
     })
   }
   return p
