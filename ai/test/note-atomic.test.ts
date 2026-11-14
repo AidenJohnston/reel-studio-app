@@ -4,8 +4,8 @@ import { describe, it, expect } from 'vitest';
 import * as fs from 'node:fs';
 import * as fsp from 'node:fs/promises';
 import * as path from 'node:path';
-import { createAI, AIError, StyleStore, OWNER_LOCK, listVersions } from '../src';
-import { FakeHost, ScriptedModel, makeProject, call, tmpDir, firstVersion } from './helpers';
+import { createAI, AIError, StyleStore, OWNER_LOCK, listVersions, executeTool, newToolState, ToolContext } from '../src';
+import { FakeHost, ScriptedModel, makeProject, call, tmpDir, firstVersion, tinyPng } from './helpers';
 
 async function setup(opts: { firstVersion?: boolean } = {}) {
   const { root, dir } = await makeProject();
@@ -159,6 +159,23 @@ describe('a note that does not finish leaves the project as it was', () => {
       .rejects.toMatchObject({ code: 'ENGINE_STUCK' });
     expect(await read()).toBe(before);
   });
+
+  // a crash leaves a note's downloads in work/assets: only their note prefix says the note was never saved
+  it.each([
+    ['the engine saves', true, 'https://example.com/loaf.png'],
+    ['the in-app downloader saves from an address with no file name', false, 'https://example.com/?id=123'],
+  ])('a picture %s, under an empty name, is not offered after its note crashed', async (_, engine, url) => {
+    const { root, dir, host } = await setup();
+    host.engineAssets = engine;
+    const ctx = (id: string): ToolContext => ({
+      projectDir: dir, host, style: new StyleStore(() => root), emit: () => undefined, state: newToolState(), supportsImages: true,
+      note: { id, file: path.join(dir, 'project.json'), dir: tmpDir() },
+      lookupImpl: async () => ['93.184.215.14'], fetchImpl: (async () => new Response(tinyPng(), { headers: { 'content-type': 'image/png' } })) as any,
+    });
+    expect((await executeTool(ctx('crashed'), 'fetch_image', { url, name: '' })).isError).toBe(false);
+    const listed = JSON.parse((await executeTool(ctx('next'), 'list_library', { kind: 'images' })).content);
+    expect(listed.projectAssets).toEqual([]);
+  });
 });
 
 describe('a note that finishes is saved in one write', () => {
@@ -225,5 +242,17 @@ describe('a project.json some Windows editors saved with a byte-order mark', () 
     const reply = "It already looks right to me. (Your video didn't change, so there's no new version.)";
     expect(r).toMatchObject({ changed: [], summary: reply });
     expect(JSON.parse((await read()).replace(/^\uFEFF/, '')).notes.at(-1)).toMatchObject({ id: 'job-bom', reply });
+  });
+});
+
+describe('a project.json some Windows editors saved with a byte-order mark', () => {
+  it('takes a note like any other project', async () => {
+    const { dir, host, settingsDir, read } = await setup();
+    await fsp.writeFile(path.join(dir, 'project.json'), '﻿' + (await read()));
+    await createAI({ host, settingsDir, providerOverride: new ScriptedModel([
+      { toolCalls: [call('set_gap_cap', { seconds: 0.3 })] },
+      finish('I tightened the pauses.'),
+    ]) }).applyNote(dir, 'tighter', () => undefined);
+    expect(JSON.parse(await read()).cut.gapCap).toBe(0.3);
   });
 });

@@ -2520,6 +2520,10 @@ app.whenReady().then(async () => {
 })
 
 let quitting = false
+// killTree sends SIGKILL 1.5 s after SIGTERM (taskkill /F at once on Windows), so 2 s is enough for every
+// leftover engine to be sent it. No measurement chose the number. Without it a kill could hold quit for
+// 6.5 s (5 s on Windows) after the jobs' own 4 s.
+const QUIT_KILL_MS = 2000
 app.on('before-quit', (e) => {
   void stopPhoneShare() // the "Send to my phone" link never outlives the app
   void companion?.stop() // nor does the phone and browser connection
@@ -2533,7 +2537,10 @@ app.on('before-quit', (e) => {
   }
   // Ask once while a reel is being made (B section 7), then stop running work cleanly so the next start finds a tidy
   // project and continues what was being made, and give drive saves time to finish so the synced folder is not left
-  // with a temporary file. Both waits are capped (jobs.ts, phone-ipc.ts).
+  // with a temporary file. Both waits are capped (jobs.ts, phone-ipc.ts). The jobs get their 4 s (cancelAll) to clean
+  // up; one cut short leaves app.json saying it runs, which the next start settles (store.ts recoverInterrupted).
+  // Waiting for engines to die is cut short: one that will not stays on the engine list, and the next start stops it
+  // or keeps its video closed (orphans.ts).
   e.preventDefault()
   if (askingToQuit) return
   void (async () => {
@@ -2554,7 +2561,8 @@ app.on('before-quit', (e) => {
     quitting = true
     footageSources.stop()
     noteQueue.quit()
-    await Promise.allSettled([jobs.cancelAll().then(() => killAllEngines()), cloudSavesSettled(), footageIndex.stop(), outside?.close()]).finally(() => app.quit())
+    const engines = jobs.cancelAll().then(() => Promise.race([killAllEngines(), new Promise((r) => setTimeout(r, QUIT_KILL_MS))]))
+    await Promise.allSettled([engines, cloudSavesSettled(), footageIndex.stop(), outside?.close()]).finally(() => app.quit())
   })()
 })
 let askingToQuit = false

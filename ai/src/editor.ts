@@ -429,6 +429,8 @@ async function editNewVideo(deps: EditorDeps, provider: ModelProvider | null, pr
   const { p } = await load(ctx);
   const { rules, unreadable, measured } = await noteRules(deps, projectDir, 0);
   ctx.rules = rules;
+  // a first edit run again (a resumed job) may get back the version it already saved: never rewritten
+  const baseVersion = p.version;
   // a first look plays the analysis's default cut of the whole video, which a proposed reel's copied analysis still is
   if (deps.firstLook !== false && p.sources.length < 2 && !isProposedReel(p)) {
     ctx.renderGate = firstLook(deps, ctx, onEvent);
@@ -459,7 +461,7 @@ async function editNewVideo(deps: EditorDeps, provider: ModelProvider | null, pr
         onEvent({ type: 'status', message: 'Finishing your reel', pct: 94, phase: 'final' });
         const version = await finalize(deps, ctx, onEvent);
         const summary = withRulesReply(withStyleEcho(`I got most of the way through your edit. ${e.userMessage}`, ctx.state), ctx, unreadable);
-        await snapshotVersion(projectDir, await loadProject(projectDir), version, `# v${version}
+        if (version > baseVersion) await snapshotVersion(projectDir, await loadProject(projectDir), version, `# v${version}
 
 First edit (stopped early).
 
@@ -477,7 +479,7 @@ ${summary}
     // ctx.state.finished: a rules fix replaces the run's summary with what the reel now does
     const summary = withRulesReply(withStyleEcho(honestSummary({ ...run, finished: ctx.state.finished ?? run.finished }, ctx.state)
       ?? 'I could not finish your first edit this time, so this version is mostly your video as it was. Try again, or tell me what to change.', ctx.state), ctx, unreadable);
-    await snapshotVersion(projectDir, await loadProject(projectDir), version, `# v${version}\n\nFirst edit.\n\n${summary}\n`);
+    if (version > baseVersion) await snapshotVersion(projectDir, await loadProject(projectDir), version, `# v${version}\n\nFirst edit.\n\n${summary}\n`);
     await writeAiRun(projectDir, version, ctx.state.aiCalls);
     onEvent({ type: 'status', message: 'Done', pct: 100 });
     return { summary, version, styleRulesAdded: ctx.state.styleRulesAdded, ...(await checkedProposals(deps, ctx, measured)), changed: [...ctx.state.changed] };
@@ -1219,7 +1221,8 @@ export async function deterministicEdit(deps: EditorDeps, projectDir: string, re
   const summary = why
     ? `${why} So Version ${version} is a basic version: ${did}`
     : `Basic version: ${did} Connect an editor to pick your best takes and add pictures.`;
-  await snapshotVersion(projectDir, await loadProject(projectDir), version, `# v${version}\n\nSimple edit (no AI).\n\n${summary}\n`);
+  // the same edit run again gets back the version it saved (engine render), which is never rewritten
+  if (version > p.version) await snapshotVersion(projectDir, await loadProject(projectDir), version, `# v${version}\n\nSimple edit (no AI).\n\n${summary}\n`);
   onEvent({ type: 'status', message: 'Done', pct: 100 });
   return { summary, version, styleRulesAdded: [], styleSuggestions: [], changed };
 }

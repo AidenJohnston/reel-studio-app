@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { spawn } from 'node:child_process'
 import { once } from 'node:events'
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from 'node:fs'
@@ -10,6 +10,23 @@ import { createEngineRunner } from '../src/main/engine'
 import { clearStaleLocks, OWNER_LOCK } from '../src/main/owner'
 import { engineEnv, projectsDir } from '../src/main/paths'
 import { APP_DIR, PYTHON, setupPaths } from './helpers'
+
+// Off: the real renameSync. On: moving that one file is refused, as Windows refuses while another
+// program (a virus scanner, an indexer) has it open. Root on macOS/Linux is never refused for real.
+const refuseRename = vi.hoisted(() => ({ from: '', refused: 0 }))
+vi.mock(import('node:fs'), async (real) => {
+  const fs = await real()
+  return {
+    ...fs,
+    renameSync: (...args: Parameters<typeof fs.renameSync>) => {
+      if (String(args[0]) === refuseRename.from) {
+        refuseRename.refused++
+        throw Object.assign(new Error(`EPERM: operation not permitted, rename '${args[0]}'`), { code: 'EPERM' })
+      }
+      return fs.renameSync(...args)
+    }
+  }
+})
 
 describe('orphaned engine reaper', () => {
   it('names a running process', async () => {
@@ -185,6 +202,26 @@ describe('orphaned engine reaper', () => {
     other.kill()
   })
 
+  // Reported as stopped, a leftover engine taskkill could not end would be dropped from the list at start
+  // and its video opened while it still writes there
+  it.runIf(process.platform === 'win32')('a process taskkill could not stop is reported as still running', async () => {
+    const other = spawn(PYTHON, ['-c', 'import time; time.sleep(60)'], { stdio: 'ignore', windowsHide: true })
+    await once(other, 'spawn')
+    const path = process.env.PATH
+    // the taskkill found first on PATH cannot run, so nothing is stopped (the lookup checks the
+    // working folder, then PATH in order, and takes the first match)
+    const fake = mkdtempSync(join(tmpdir(), 'rs-no-taskkill-'))
+    writeFileSync(join(fake, 'taskkill.exe'), 'not a program')
+    process.env.PATH = fake
+    try {
+      expect(await killTree(other.pid!)).toBe(false)
+      expect(isAlive(other.pid!)).toBe(true)
+    } finally {
+      if (path !== undefined) process.env.PATH = path
+      other.kill()
+    }
+  }, 20000)
+
   it.skipIf(process.platform === 'win32')('an engine from a 0.1.x list (no video named) that would not stop keeps the video it works in closed', async () => {
     setupPaths()
     const settings = mkdtempSync(join(tmpdir(), 'rs-orphan-'))
@@ -304,6 +341,32 @@ describe('orphaned engine reaper', () => {
     }
     // still there, so the next start looks once more
     expect(existsSync(unreadable)).toBe(true)
+  }, 60000)
+
+  it('a list that cannot be set aside still has the next start look for running engines, after the list is rewritten', async () => {
+    setupPaths()
+    const settings = mkdtempSync(join(tmpdir(), 'rs-orphan-'))
+    const file = join(settings, 'engines.json')
+    const bread = join(projectsDir(), 'bread')
+    mkdirSync(join(bread, 'work'), { recursive: true })
+    writeFileSync(file, '[{"pid":4242,"proj')
+    // the crashed run's engine, still rendering bread
+    const engine = spawn(PYTHON, ['-s', '-E', '-m', 'reelengine', 'sleep', '--project', bread], { cwd: join(APP_DIR, 'test', 'fixtures', 'sleeper'), stdio: 'ignore', windowsHide: true, detached: process.platform !== 'win32' })
+    try {
+      await once(engine, 'spawn')
+      // the list cannot be moved aside, and this start rewrites it
+      refuseRename.from = file
+      refuseRename.refused = 0
+      try {
+        expect(await createPidRegistry(settings).reap()).toMatchObject({ unknown: true, stillRunning: [bread] })
+      } finally {
+        refuseRename.from = ''
+      }
+      expect(refuseRename.refused).toBe(1)
+      expect(await createPidRegistry(settings).reap()).toMatchObject({ unknown: true, stillRunning: [bread] })
+    } finally {
+      await killTree(engine.pid!)
+    }
   }, 60000)
 
   it('recognises only our engine command line', () => {
