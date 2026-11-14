@@ -72,7 +72,10 @@ function Words({
   const lines = useMemo(() => subtitleLines(d.captionLines, kept, base.p.captions, captions, heard), [d.captionLines, kept, base.p.captions, captions, heard])
   const firstSource = d.project.sources?.[0]?.id
   const cutNow = [...base.kept].some((id) => !kept.has(id))
-  const back = [...kept].some((id) => !base.kept.has(id))
+  // words cut in the version on screen that this edit brings back: named, so a click on a crossed-out filler by
+  // mistake shows, and Cut them again undoes them all at once (the runner's J2 by hand brought back two fillers unseen)
+  const broughtBack = d.words.filter((w) => kept.has(w.id) && !base.kept.has(w.id))
+  const back = broughtBack.length > 0
   const lower = caseOf(captions) === 'lower'
   const remembered = rules?.find((r) => r.payload?.kind === 'caption-case' && !r.paused)
 
@@ -147,11 +150,34 @@ function Words({
               })}
             </div>
           )}
-          {(cutNow || back) && (
+          {cutNow && (
             <p className="edit-hint" role="status" data-testid="cut-preview">
-              {cutNow && 'The player skips the words you cut. '}
-              {back && `Words you bring back are heard in Version ${next}.`}
+              The player skips the words you cut.
             </p>
+          )}
+          {back && (
+            <div className="edit-back" role="status" data-testid="brought-back">
+              <p className="edit-hint">
+                {broughtBack.length <= 4
+                  ? `You brought back ${broughtBack.map((w) => `“${w.w.trim().replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu, '')}”`).join(', ')}.`
+                  : `You brought back ${broughtBack.length} words.`}{' '}
+                {broughtBack.length === 1 ? 'It is' : 'They are'} heard in Version {next}.
+              </p>
+              <Button
+                size="small"
+                kind="tertiary"
+                data-testid="cut-again"
+                onClick={() =>
+                  change((x) => {
+                    const k = new Set(x.kept)
+                    for (const w of broughtBack) k.delete(w.id)
+                    return { ...x, kept: k }
+                  })
+                }
+              >
+                {broughtBack.length === 1 ? 'Cut it again' : 'Cut them again'}
+              </Button>
+            </div>
           )}
         </>
       ) : (

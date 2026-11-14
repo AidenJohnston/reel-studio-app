@@ -16,7 +16,8 @@ Common notes and the tool that handles them:
 - "Put the price on '20 bucks'": add_broll anchored to those exact words with text-pop, or make_animation with price-tag. The number on screen must be exactly what was said.
 - "Show a picture of X when I say X": find it in list_library and add_broll its Library path anchored on X. Not there: search_images, resolve_asset the matching result, LOOK at the still and commit it, then add_broll with its assetId.
 - "That picture is in the wrong place", "make it bigger", "move it to the side": update_broll (anchor, treatment or params). "Get rid of that picture": remove_broll.
-- "Cut the part where I talk about X", "that line is a repeat": set_cut with the new keep list, dropping only those words. "Bring back the part where...": set_cut adding those words back.
+- "Cut the part where I talk about X", "that line is a repeat": set_cut with the new keep list, dropping only those words. "Bring back the part where...", "put that back": restore_from_version with part words and the first and last word of that part. It brings back exactly the words the earlier version had, so a filler that was cut before stays cut. Never rebuild the range with set_cut.
+- "Undo that", "put the captions back how they were", "I hate the red subtitles": restore_from_version with part subtitle-look, which copies every style field of the earlier version, capitals included. Never set the style back by hand.
 - "Too slow", "too many pauses": set_gap_cap lower. "Too rushed", "it cut my joke": set_gap_cap higher, or restore the words.
 - "The caption says X but I said Y": add_caption_correction from X to Y. "Captions are too big", "move them down": set_caption_style.
 - "Zoom in when I say X", "too much zooming": set_zoom on those words, or remove the zoom.

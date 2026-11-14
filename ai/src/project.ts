@@ -612,6 +612,51 @@ export function clipProblem(sources: Source[], item: Pick<ClipItem, 'source' | '
   return null;
 }
 
+/**
+ * `keep` with the words `back` added, each where it sits in the take: on the end of the range that stops just before
+ * it, on the start of the one that begins just after it, or as a range of its own after the range holding the nearest
+ * kept word before it. Nothing else changes: words around it that `keep` leaves out stay out, and other ranges keep
+ * their order and joins. A word that bridges two ranges playing one after the other makes them one range. Clips are
+ * left alone. Used by restore_from_version, so bringing a part back returns exactly its words (rebuilding the range
+ * by hand with set_cut brought back the filler before it too).
+ */
+export function withWordsBack(t: Transcript, keep: CutItem[], back: string[]): CutItem[] {
+  const idx = wordIndex(t);
+  const out: CutItem[] = keep.map((a) => ({ ...a }));
+  const kept = new Set(keptWords(t, out).map((w) => w.id));
+  const rangeAt = (pred: (r: CutRange) => boolean) => out.findIndex((a) => !('clip' in a) && pred(a));
+  const rangeHolding = (id: string) => out.findIndex((a) => anchorWords(t, a).some((x) => x.id === id));
+  const order = back.map((id) => idx.byId.get(id)).filter((i): i is number => i !== undefined).sort((a, b) => a - b);
+  for (const pos of order) {
+    const w = idx.words[pos];
+    if (kept.has(w.id)) continue;
+    const prev = idx.words[pos - 1]?.source === w.source ? idx.words[pos - 1] : undefined;
+    const next = idx.words[pos + 1]?.source === w.source ? idx.words[pos + 1] : undefined;
+    const ends = prev ? rangeAt((r) => r.to === prev.id) : -1;
+    const starts = next ? rangeAt((r) => r.from === next.id) : -1;
+    if (ends >= 0) {
+      (out[ends] as CutRange).to = w.id;
+      if (starts === ends + 1) {
+        (out[ends] as CutRange).to = (out[starts] as CutRange).to;
+        out.splice(starts, 1);
+      }
+    } else if (starts >= 0) {
+      (out[starts] as CutRange).from = w.id;
+    } else {
+      let at = -1;
+      for (let i = pos - 1; i >= 0 && at < 0; i--) {
+        if (idx.words[i].source === w.source && kept.has(idx.words[i].id)) at = rangeHolding(idx.words[i].id) + 1;
+      }
+      for (let i = pos + 1; i < idx.words.length && at < 0; i++) {
+        if (idx.words[i].source === w.source && kept.has(idx.words[i].id)) at = rangeHolding(idx.words[i].id);
+      }
+      out.splice(at < 0 ? out.length : at, 0, { from: w.id, to: w.id });
+    }
+    kept.add(w.id);
+  }
+  return out;
+}
+
 /** Merge adjacent/overlapping ranges in transcript order is NOT done: keep is output order. Normalize = drop empties. */
 export function normalizeKeep(t: Transcript, keep: CutRange[]): { keep: CutRange[]; problems: string[] } {
   const idx = wordIndex(t);
@@ -648,6 +693,36 @@ export async function listVersions(projectDir: string): Promise<number[]> {
     const names = await fsp.readdir(path.join(projectDir, 'versions'));
     return names.map((n) => /^v(\d+)$/.exec(n)).filter(Boolean).map((m) => Number(m![1])).filter((n) => n <= version).sort((a, b) => a - b);
   } catch { return []; }
+}
+
+/**
+ * Version `n` and the versions it was made from, newest first, by each folder's version.json parent (a merge's first
+ * parent). A folder without that file has parent n-1, and Version 1 none (docs/versions.md 8). On a branch this skips
+ * the other branch's versions, which share the numbers in between. A version's parent is read only when the caller
+ * asks for the next one, so damage further back than what it needs never stops it. A missing folder, or a
+ * version.json that can't be read or names no earlier version, throws naming the version: guessing past it could land
+ * on the other branch.
+ */
+export async function* versionLine(projectDir: string, n: number): AsyncGenerator<number> {
+  let at: number | null = n;
+  while (at !== null) {
+    const dir = versionDir(projectDir, at);
+    if (!fs.existsSync(dir)) throw new ProjectError(`Version ${at} is missing from the versions folder.`);
+    yield at;
+    let meta: unknown;
+    try {
+      meta = await readJson(path.join(dir, 'version.json'));
+    } catch (e: any) {
+      if (e?.code !== 'ENOENT') throw new ProjectError(`Version ${at}'s version.json could not be read: ${e?.message ?? e}`);
+      at = at > 1 ? at - 1 : null;
+      continue;
+    }
+    const parent = meta && typeof meta === 'object' ? (meta as { parent?: unknown }).parent : undefined;
+    if (at === 1 ? parent !== null : !(typeof parent === 'number' && Number.isSafeInteger(parent) && parent >= 1 && parent < at)) {
+      throw new ProjectError(`Version ${at}'s version.json names no earlier version as its parent (${JSON.stringify(parent ?? null)}).`);
+    }
+    at = parent as number | null;
+  }
 }
 
 /** Snapshots project.json (+ optional notes.md text) into versions/vN/. Never overwrites an engine-written snapshot. */
