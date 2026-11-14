@@ -188,6 +188,9 @@ export function TrackTimeline(props: TrackTimelineProps) {
       el.removeEventListener('pointerup', onUp)
       el.removeEventListener('pointercancel', onCancel)
       setDrag(null)
+      // a trim edge or block takes no focus, so the press left it on the page: keep it in the timeline, where its keys
+      // (Undo among them) work
+      if (!root.current?.contains(document.activeElement)) root.current?.focus({ preventScroll: true })
       if (!cancelled) up(tAt(e.clientX), moved)
     }
     const onUp = (e: PointerEvent) => end(e, false)
@@ -327,7 +330,9 @@ export function TrackTimeline(props: TrackTimelineProps) {
     const mod = e.metaKey || e.ctrlKey
     const k = e.key.toLowerCase()
     if (mod && k === 'z' && !e.shiftKey) {
-      if (!props.onUndo) return
+      // only from inside the timeline: from the page or the panel, Undo is the panel's (ShowMeHow), which takes back
+      // its own changes, never a timeline gesture
+      if (!props.onUndo || !t || !root.current?.contains(t)) return
       props.onUndo()
     } else if (mod || e.altKey) return
     else if (k === 'k') {
@@ -378,7 +383,7 @@ export function TrackTimeline(props: TrackTimelineProps) {
   const tipX = (t: number): number => clamp(x(t), 60, Math.max(60, contentW - 60))
 
   return (
-    <div className="trk" ref={root} data-testid="track-timeline">
+    <div className="trk" ref={root} tabIndex={-1} data-testid="track-timeline">
       <div className="trk-bar">
         <div className="trk-pick" aria-live="polite">
           {picked && pickedPart ? (

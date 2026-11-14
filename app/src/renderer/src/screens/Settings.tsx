@@ -176,6 +176,8 @@ export function Settings({ info, onInfo, section }: { info: AppInfo; onInfo: (i:
     try {
       await reel.app.copyDiagnostics()
       setDiagnostics('copied')
+      // back to saying what it does, once the person has seen it worked
+      window.setTimeout(() => setDiagnostics((s) => (s === 'copied' ? 'idle' : s)), 2000)
       notify('Copied. Paste it into your bug report.')
     } catch (e) {
       setDiagnostics('idle')
@@ -420,7 +422,7 @@ export function Settings({ info, onInfo, section }: { info: AppInfo; onInfo: (i:
               />
               <SettingRow
                 id="diagnostics"
-                line="For a bug report: which version you have, what computer it runs on, how your AI editor answered and what the app did recently. Your user name, e-mail addresses and keys are taken out; your videos' file names can still show."
+                line="For a bug report: which version you have, what computer it runs on, how your AI editor answered and what the app did recently. Your user name, email addresses and keys are taken out; your videos' file names can still show."
                 control={
                   <button className="btn small" onClick={() => void copyDiagnostics()} disabled={diagnostics === 'busy'} data-testid="copy-diagnostics">
                     {diagnostics === 'copied' ? 'Copied' : diagnostics === 'busy' ? 'Copying…' : 'Copy diagnostics'}

@@ -167,7 +167,7 @@ html.companion :is(button, summary, .btn, .cp-card) { user-select: none; -webkit
 /* 16 px: under that, iPhone Safari zooms the page into the field and stays zoomed */
 .textarea.cp-note-text { min-height: 96px; padding: 12px 14px; border-radius: var(--r-lg); font-size: 16px; line-height: 22px; resize: none; }
 .cp-note-foot { display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 8px 12px; }
-.cp-here { display: flex; align-items: center; gap: 10px; min-height: 44px; margin-right: auto; cursor: pointer; font-weight: 560; font-variant-numeric: tabular-nums; animation: fade .15s ease-out; }
+.cp-here { display: flex; align-items: center; gap: 10px; min-height: 44px; margin-right: auto; cursor: pointer; font-weight: 560; font-variant-numeric: tabular-nums; animation: fade .15s var(--ease-out); }
 .cp-send { min-width: 104px; }
 
 /* ---- a wide window: the same page in a desktop browser ----
@@ -196,6 +196,6 @@ html.kb :is(.cp-pop, .cp-here) { animation: none; }
 /* Reduced motion: nothing scales or moves, but the version crossfade and the fades stay, because they say what changed. */
 @media (prefers-reduced-motion: reduce) {
   .cp-card, .cp-ver, .cp-tap { transition: none; }
-  .cp-pop { animation: fade .15s ease-out; }
+  .cp-pop { animation: fade .15s var(--ease-out); }
   .cp-card:not(.waiting):active, .cp-ver:active, .cp-tap:active { transform: none; }
 }

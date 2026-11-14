@@ -183,6 +183,13 @@ describe('version messages', () => {
     expect(describeChange(p, { ...patch, captions: { enabled: false } })).toBe('turned the subtitles off, and added the song “warm acoustic loop”, a picture and a sound effect')
   })
 
+  it('fails if turning script-following off or on in Edit it myself goes unsaid', () => {
+    const p = base({ captions: { enabled: true, style: {} } })
+    expect(describeChange(p, { captions: { enabled: true, style: {}, followScript: false } })).toBe('made the subtitles show what you said')
+    const off = base({ captions: { enabled: true, style: {}, followScript: false } })
+    expect(describeChange(off, { captions: { enabled: true, style: {}, followScript: true } })).toBe('made the subtitles follow your script')
+  })
+
   it('fails if changing only the Spoken word colour leaves the version undescribed', () => {
     const karaoke = { preset: 'karaoke', size: 105, position: 0.75, color: '#FFFFFF', highlight: '#FFD60A' }
     const p = base({ captions: { enabled: true, style: karaoke } })

@@ -28,7 +28,8 @@ import urllib.request
 from pathlib import Path
 from typing import Optional
 
-from . import audio_env, probe as probemod, project as projmod, tools, vocab as vocabmod
+
+from . import audio_env, probe as probemod, project as projmod, scriptalign, tools, vocab as vocabmod
 from .proto import NO_SPACE_MESSAGE, EngineError, disk_full, log, progress
 
 DEFAULT_MODEL = "small.en"          # measured: best WER on CPU int8 at RTF ~0.19
@@ -619,22 +620,6 @@ def _tokenizer_fn(model):
     return lambda text: hf.encode(text, add_special_tokens=False).ids
 
 
-def _script_text(project_dir: Path, proj: dict) -> str:
-    sc = proj.get("script")
-    if isinstance(sc, dict):
-        sc = sc.get("text") or sc.get("script") or ""
-    if isinstance(sc, str) and sc.strip():
-        return sc
-    for name in ("script.txt", "script.md"):
-        f = Path(project_dir) / name
-        try:
-            if f.is_file() and f.stat().st_size < 200_000:
-                return f.read_text(encoding="utf-8", errors="replace")
-        except OSError:
-            pass
-    return ""
-
-
 def _library_root(project_dir: Path) -> Optional[Path]:
     env = os.environ.get("REELSTUDIO_ROOT")
     if env:
@@ -695,7 +680,7 @@ def gather_vocab(project_dir: Path, proj: dict, max_projects: int = 200) -> dict
     if title.strip().lower() in ("my video", "untitled"):
         title = ""
     words = (proj.get("captions") or {}).get("vocabulary") or []
-    return {"title": title, "script": _script_text(project_dir, proj), "corrected": corrected,
+    return {"title": title, "script": scriptalign.script_text(project_dir, proj), "corrected": corrected,
             "library": library, "style": style_words,
             # for the after-transcription pass (vocab.py): the corrections as heard -> meant pairs, and
             # terms the user or the AI typed in (captions.vocabulary)
@@ -998,6 +983,11 @@ def run(project_dir: Path, model_name: Optional[str] = None, language: Optional[
         log(f"# re-pointed {moved} anchor(s) whose words changed in the new transcript")
     proj["transcript"] = {"file": projmod.TRANSCRIPT_REL, "language": lang, "model": name}
     projmod.save(project_dir, proj)
+    # captions follow the locked script: store its word mapping now, so the AI sees it before a render
+    try:
+        scriptalign.mapping(project_dir, proj, all_words)
+    except Exception as exc:  # noqa: BLE001 - the captions build it again; never fail the transcription
+        log(f"# script mapping skipped: {exc}")
     progress(STAGE, 100, "Finished listening", force=True)
     return {"words": len(all_words), "segments": len(all_segs), "language": lang, "model": name,
             "anchorsMoved": moved, "hintWords": len(hints["words"]), "respelled": len(respelled),

@@ -174,3 +174,14 @@ export function colorName(hex: string): string | null {
   // magenta: deep is purple (#800080), bright is pink (#FF2D92)
   return l < 0.4 ? 'purple' : 'pink'
 }
+
+/** Whether a reel has a script its subtitles can follow (project.json `script`, engine scriptalign.script_text): text,
+ * or the app's {hook, script} with any words in it. A script.txt beside project.json counts for the engine too, but
+ * only the app's own script shows the switch. */
+export function hasScript(script: unknown): boolean {
+  const words = (v: unknown) => typeof v === 'string' && v.trim() !== ''
+  if (words(script)) return true
+  if (!script || typeof script !== 'object') return false
+  const o = script as { text?: unknown; hook?: unknown; script?: unknown }
+  return words(o.text) || words(o.script)
+}
