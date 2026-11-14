@@ -243,7 +243,8 @@ function oneStopPerRadioGroup(items: HTMLElement[]): HTMLElement[] {
   })
 }
 
-/** A dialog. Esc and a click outside close it (when it can be closed); focus moves into it and Tab stays in it. */
+/** A dialog. Esc and a click outside close it (when it can be closed); focus moves into it, and Tab cycles through it and
+ * an error toast's buttons, never the page behind. */
 export function Modal({ children, onClose, wide, testid, labelledBy }: { children: ReactNode; onClose?: () => void; wide?: boolean; testid?: string; labelledBy?: string }) {
   const ref = useRef<HTMLDivElement>(null)
   // A layout effect: its cleanup runs before React removes the dialog, so holdBackground never sees a detached dialog
@@ -263,7 +264,11 @@ export function Modal({ children, onClose, wide, testid, labelledBy }: { childre
       // only the newest dialog moves focus: a dialog under another (the Post sheet under its Stop question) would
       // take the same Tab a second time
       if (e.key !== 'Tab' || !ref.current || openDialogs.at(-1) !== ref.current) return
-      const items = oneStopPerRadioGroup(Array.from(ref.current.querySelectorAll<HTMLElement>(FOCUSABLE)).filter((el) => el.offsetParent !== null))
+      // A toast over the dialogs is outside it and still has to be reachable: an error toast's buttons (Report a
+      // problem, Close) follow the dialog's own controls in the cycle, and Tab from them comes back in (#118, f17e7887).
+      const items = [ref.current, ...document.querySelectorAll<HTMLElement>('.toast[data-over-dialogs]')].flatMap((root) =>
+        oneStopPerRadioGroup(Array.from(root.querySelectorAll<HTMLElement>(FOCUSABLE)).filter((el) => el.offsetParent !== null))
+      )
       if (!items.length) {
         e.preventDefault()
         ref.current.focus()
