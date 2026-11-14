@@ -1,0 +1,4 @@
+#!/bin/sh
+# Leak check on the staged content, before it becomes a commit (docs/leak-check.md). git runs hooks from the top of
+# the working tree, so these paths are relative to it.
+exec sh scripts/leak-check/with-python.sh scripts/leak-check/check.py --staged

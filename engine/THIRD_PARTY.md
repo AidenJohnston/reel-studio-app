@@ -77,7 +77,7 @@ previews; all were trimmed, levelled and re-encoded as Opus. Licences checked on
 |---|---|
 | numpy | BSD-3-Clause |
 | pillow | MIT-CMU (HPND) |
-| opencv-python-headless | Apache 2.0 (OpenCV >= 4.5); wheel bundles FFmpeg (LGPL) |
+| opencv-python-headless | Apache 2.0 (OpenCV >= 4.5). Windows: PyPI's wheel, which bundles FFmpeg (LGPL). macOS: the same version built from source without FFmpeg (`packaging/build_opencv_mac.py`), because PyPI's macOS wheels also bundle GPL x264/x265. The engine does no media I/O through OpenCV (`tests/test_no_cv2_media_io.py`) |
 | faster-whisper | MIT (installed without PyAV: see `reelengine/nopyav.py`) |
 | ctranslate2 | MIT |
 | onnxruntime | MIT |

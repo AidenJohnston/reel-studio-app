@@ -1,0 +1,18 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "^Bash$",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh \"$(git rev-parse --show-toplevel)/scripts/leak-check/with-python.sh\" --agent-hook \"$(git rev-parse --show-toplevel)/scripts/leak-check/agent_hook.py\"",
+            "commandWindows": "for /f \"delims=\" %r in ('git rev-parse --show-toplevel') do @py -3 \"%r/scripts/leak-check/agent_hook.py\"",
+            "timeout": 30,
+            "statusMessage": "Leak check on gh text"
+          }
+        ]
+      }
+    ]
+  }
+}

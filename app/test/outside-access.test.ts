@@ -277,7 +277,9 @@ describe('the setup lines', () => {
       const argv = execFileSync('sh', ['-c', `printf '%s\\n' ${line.slice(tool.length + 1)}`], { encoding: 'utf8' }).trimEnd().split('\n')
       expect(argv.slice(argv.indexOf('--') + 1)).toEqual([command, script])
       expect(argv).toContain('ELECTRON_RUN_AS_NODE=1')
-      expect(argv[argv.indexOf('--') - 1]).toBe('reelstudio')
+      // Claude Code reads a name straight after --env as another pair, so its name sits right before `--`; codex takes
+      // the name as its first argument (`codex mcp add [OPTIONS] <NAME> -- <COMMAND>...`, one pair per --env)
+      expect(tool === 'claude' ? argv[argv.indexOf('--') - 1] : argv[2]).toBe('reelstudio')
     }
   })
 

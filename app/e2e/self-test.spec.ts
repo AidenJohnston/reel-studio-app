@@ -1,13 +1,13 @@
 import { test, expect, _electron as electron } from '@playwright/test'
-import { execFileSync } from 'node:child_process'
+import { execFileSync, spawn } from 'node:child_process'
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { isAlive } from '../src/main/proctree'
 
-test.skip(process.platform !== 'darwin', 'Mac self-test process-group regression')
-
 test('fails if the engine survives the self-test exit', async () => {
+  test.skip(process.platform !== 'darwin', 'Mac self-test process-group regression')
   test.setTimeout(180_000)
   const scratch = mkdtempSync(join(tmpdir(), 'rs-self-test-exit-'))
   const engine = join(scratch, 'engine')
@@ -52,6 +52,42 @@ while True:
       const pid = Number(readFileSync(pidFile, 'utf8'))
       if (pid > 0) process.kill(-pid, 'SIGKILL')
     } catch {}
+    rmSync(scratch, { recursive: true, force: true })
+  }
+})
+
+test('fails if a self-test that cannot write its result keeps running', async () => {
+  test.setTimeout(60_000)
+  const scratch = mkdtempSync(join(tmpdir(), 'rs-self-test-out-'))
+  // A file where --out needs a folder: making that folder fails on every system.
+  const blocker = join(scratch, 'not a folder')
+  writeFileSync(blocker, '')
+  const env = { ...process.env }
+  delete env.ELECTRON_RUN_AS_NODE
+  delete env.CLIPROXY_API_KEY
+  // Spawned directly, not through Playwright: this run can end before Playwright would have attached.
+  const electronBin = createRequire(__filename)('electron') as string
+  const child = spawn(electronBin, [resolve(__dirname, '..'), '--self-test', '--out', join(blocker, 'result.json')], {
+    stdio: ['ignore', 'ignore', 'pipe'],
+    env: {
+      ...env,
+      REELSTUDIO_USER_DATA: join(scratch, 'user data'),
+      REELSTUDIO_ROOT: join(scratch, 'projects'),
+      REELSTUDIO_MODELS_DIR: join(scratch, 'models'),
+      REELENGINE_CACHE: join(scratch, 'cache'),
+      // No engine and no python: the checks fail at once, and the run goes straight to writing its result.
+      REELSTUDIO_ENGINE_DIR: join(scratch, 'engine'),
+      REELSTUDIO_PYTHON: join(scratch, 'no python')
+    }
+  })
+  let stderr = ''
+  child.stderr.on('data', (d: Buffer) => (stderr += d.toString()))
+  try {
+    const code = await new Promise<number | null>((resolveExit) => child.once('exit', resolveExit))
+    expect(code).toBe(1)
+    expect(stderr).toContain('self-test failed')
+  } finally {
+    child.kill()
     rmSync(scratch, { recursive: true, force: true })
   }
 })

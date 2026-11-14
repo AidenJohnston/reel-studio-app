@@ -52,22 +52,34 @@ if ($j) {
   }
 }
 if (-not $KeepInstalled) {
+  # The installer drops a byte copy of itself in %LOCALAPPDATA%\<name>-updater\installer.exe (electron-builder's
+  # copyFile "$EXEPATH"), and electron-updater keeps downloaded updates in that folder's pending\. Other
+  # electron-builder apps keep their own *-updater folders, and an older build may have left one, so only the folder
+  # holding a copy of THIS installer counts.
+  $self = Get-Item $Installer
+  $selfHash = (Get-FileHash $Installer -Algorithm SHA256).Hash
+  function Get-OwnInstallerCopies {
+    @(Get-ChildItem $env:LOCALAPPDATA -Directory -Filter "*-updater" -ErrorAction SilentlyContinue |
+      ForEach-Object { Join-Path $_.FullName "installer.exe" } |
+      Where-Object { (Test-Path $_) -and (Get-Item $_).Length -eq $self.Length -and (Get-FileHash $_ -Algorithm SHA256).Hash -eq $selfHash })
+  }
+  # A download waiting to install, as an update leaves one: the uninstall must remove it too.
+  $pending = @(Get-OwnInstallerCopies | ForEach-Object { Join-Path (Split-Path $_) "pending" })
+  foreach ($dir in $pending) {
+    New-Item -ItemType Directory -Force -Path $dir | Out-Null
+    Set-Content -Path (Join-Path $dir "uninstall-check.exe") -Value "stands in for a downloaded update"
+  }
+  if (-not $pending.Count) { "no copy of this installer in %LOCALAPPDATA%\*-updater after install; the pending check did not run" }
+
   $un = Join-Path $InstallDir "Uninstall $([IO.Path]::GetFileNameWithoutExtension($ExeName)).exe"
   if (Test-Path $un) { Start-Process $un -ArgumentList @("/S") -Wait; "uninstalled" }
   # The NSIS uninstaller re-launches itself from %TEMP%, so -Wait can return before it has finished.
   for ($i = 0; $i -lt 120 -and (Test-Path $exe); $i++) { Start-Sleep -Milliseconds 500 }
   Start-Sleep 2
-  # The installer drops a byte copy of itself in %LOCALAPPDATA%\<name>-updater\installer.exe (electron-builder's
-  # copyFile "$EXEPATH"). Other electron-builder apps keep their own installer.exe in their own *-updater folder, and an
-  # older build may have left one, so only a copy of THIS installer counts.
-  $self = Get-Item $Installer
-  $selfHash = (Get-FileHash $Installer -Algorithm SHA256).Hash
-  $leftover = @(Get-ChildItem $env:LOCALAPPDATA -Directory -Filter "*-updater" -ErrorAction SilentlyContinue |
-    ForEach-Object { Join-Path $_.FullName "installer.exe" } |
-    Where-Object { (Test-Path $_) -and (Get-Item $_).Length -eq $self.Length -and (Get-FileHash $_ -Algorithm SHA256).Hash -eq $selfHash })
-  foreach ($f in $leftover) { "UNINSTALL LEFT {0} ({1:N0} MB)" -f $f, ((Get-Item $f).Length / 1MB) }
+  $leftover = @(Get-OwnInstallerCopies) + @($pending | Where-Object { Test-Path $_ })
+  foreach ($f in $leftover) { "UNINSTALL LEFT {0}" -f $f }
   if ($leftover.Count) { "UNINSTALL CHECK FAILED"; exit 1 }
-  "uninstall left no updater installer copy"
+  "uninstall left no updater installer copy or pending download"
 }
 if (-not $j -or -not $j.ok) { "SELF-TEST FAILED"; exit 1 }
 "SELF-TEST PASSED"
