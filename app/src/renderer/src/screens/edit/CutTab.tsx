@@ -35,7 +35,7 @@ export function CutTab(props: TabProps & {
   // one selector above both, so the arrow keys keep focus on it when the content under it changes
   return (
     <div className="edit-stack">
-      <Segmented testid="cut-mode" label="What to change in the cut" value={props.mode} options={MODES} onPick={props.onMode} />
+      <Segmented className="fill" testid="cut-mode" label="What to change in the cut" value={props.mode} options={MODES} onPick={props.onMode} />
       {props.mode === 'pace' ? <PaceControls {...props} /> : props.mode === 'joins' ? <JoinControls {...props} /> : <Words {...props} />}
     </div>
   )
