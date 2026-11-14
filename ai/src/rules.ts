@@ -103,7 +103,8 @@ export function checkFromMeasured(choice: CheckChoice, m: Partial<Measured> | nu
 /** One rule a render broke (rule_checks.py), and where. */
 export interface RulePlace { t0: number; t1: number; text?: string; words?: number; px?: number; db?: number; item?: string; treatment?: string; hides?: boolean; unmeasured?: boolean }
 export interface RuleFailure { id: string; kind: RuleKind; count: number; places: RulePlace[] }
-export interface RuleReport { ok: boolean; checked: number; failures: RuleFailure[]; measured: Measured }
+/** `checkedIds`: every rule this render measured. Missing from renders made before it existed. */
+export interface RuleReport { ok: boolean; checked: number; checkedIds?: string[]; failures: RuleFailure[]; measured: Measured }
 
 /** A checked rule to ask about: Yes = addStyleRule(text, check). The words are ruleText(check). */
 export interface StyleCheckProposal { text: string; check: RuleCheck }

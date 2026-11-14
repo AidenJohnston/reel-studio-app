@@ -155,9 +155,10 @@ function watchMoments(deps: EditorDeps, ctx: ToolContext): void {
 }
 
 /** What every editor prompt carries about the person: their My style rules and their niche, read together.
- * `ctx`: an AI edit, whose checked rules already failing in the version it starts from are marked as left alone. */
+ * `ctx`: an AI edit, whose checked rules already failing in the version it starts from, or never measured there, are
+ * marked as left alone. */
 async function promptVars(deps: EditorDeps, ctx?: ToolContext): Promise<{ styleRules: string; niche: string }> {
-  const [styleRules, niche] = await Promise.all([deps.style.asPromptText(ctx?.rules?.before), nicheVars(deps.host.reelStudioRoot())]);
+  const [styleRules, niche] = await Promise.all([deps.style.asPromptText(ctx?.rules), nicheVars(deps.host.reelStudioRoot())]);
   return { styleRules, ...niche };
 }
 
@@ -181,9 +182,13 @@ function honestSummary(r: Pick<RunAgentResult, 'finished' | 'stoppedBy'>, state:
   return `I ran out of time before I finished your first edit, so it may be only partly done. So far I: ${did.map((d) => d[0].toLowerCase() + d.slice(1)).join('; ')}. Tell me what still needs changing.`;
 }
 
-async function removeStyleRules(deps: EditorDeps, state: ToolState): Promise<void> {
+/** Undo what a failed edit did to My style: rules it saved are removed (not forgotten), paused rules it turned back
+ * on are paused again. A rule removed in My style since then stays removed. Only an edit without a note copy (a first
+ * edit) writes My style while it runs; a note saves its rules with the note itself (saveNote). */
+async function undoStyleRules(deps: EditorDeps, state: ToolState): Promise<void> {
   for (const id of state.styleRuleIds) await deps.style.remove(id, { forget: false }).catch(() => undefined);
-  state.styleRuleIds = []; state.styleRulesAdded = [];
+  for (const r of state.styleRulesResumed) await deps.style.update(r.id, { paused: true }).catch(() => undefined);
+  state.styleRuleIds = []; state.styleRulesAdded = []; state.styleRulesResumed = [];
 }
 
 /** Part of the engine would not stop and may still be writing: a failed note then touches nothing in the project. */
@@ -317,11 +322,23 @@ async function finalize(deps: EditorDeps, ctx: ToolContext, onEvent: (e: AgentEv
 /** The checked My style rules an AI edit measures, and what the version it starts from measured (its render.json). */
 async function noteRules(deps: EditorDeps, projectDir: string, version: number): Promise<{ rules: NoteRules; unreadable: StyleRule[]; measured: Measured | null }> {
   const { active, unreadable } = await deps.style.checks();
-  let before: RuleReport | null = null;
+  let start: RuleReport | null = null;
   if (version > 0) {
-    try { before = JSON.parse(await fsp.readFile(path.join(versionDir(projectDir, version), 'render.json'), 'utf8'))?.ruleChecks ?? null; } catch { /* rendered before rules were checked */ }
+    try { start = JSON.parse(await fsp.readFile(path.join(versionDir(projectDir, version), 'render.json'), 'utf8'))?.ruleChecks ?? null; } catch { /* rendered before rules were checked */ }
   }
-  return { rules: { active, before: new Set((before?.failures ?? []).map((f) => f.id)) }, unreadable, measured: before?.measured ?? null };
+  // render.json is read from disk: only well-formed failures count
+  const listed: unknown = start?.failures;
+  const failures = Array.isArray(listed) ? (listed as RuleFailure[]).filter((f) => typeof f?.id === 'string') : [];
+  const before = new Set(failures.map((f) => f.id));
+  // the reply can name only a failure with its places (an engine-written report always has them)
+  const startFailures = failures.filter((f) => Array.isArray(f.places));
+  // A rule with no failure in the report passed only if the report lists it. One saved or turned back on after that
+  // render, or a version rendered before checks, is unknown: a note about something else must not be sent to fix
+  // a break it didn't make. Measuring the version first would cost a whole render. A new video (version 0) has
+  // nothing to keep, so every rule holds for it.
+  const measuredIds = new Set(start?.checkedIds ?? []);
+  const unknown = new Set(version > 0 ? active.map((r) => r.id).filter((id) => !measuredIds.has(id) && !before.has(id)) : []);
+  return { rules: { active, before, unknown, startFailures }, unreadable, measured: start?.measured ?? null };
 }
 
 /** One short run with the failures in hand: no previews left, the final video is measured again. Fails soft: the AI
@@ -360,7 +377,8 @@ function rulesFixer(deps: EditorDeps, provider: ModelProvider, ctx: ToolContext,
 function rulesReply(ctx: Pick<ToolContext, 'rules' | 'state'>, unreadable: StyleRule[]): string {
   const byId = new Map((ctx.rules?.active ?? []).map((r) => [r.id, r]));
   const quote = (t: string) => `"${t.replace(/\.$/, '')}"`;
-  const failed = (ctx.state.ruleChecks?.failures ?? []).filter((f) => byId.has(f.id))
+  // with no render in this note, the reel is the version it started from, and that version's report holds
+  const failed = (ctx.state.ruleChecks?.failures ?? ctx.rules?.startFailures ?? []).filter((f) => byId.has(f.id))
     .map((f) => `I couldn't meet your My style rule ${quote(byId.get(f.id)!.text)}: ${failureText(f, byId.get(f.id)!.check)}.`);
   if (failed.length) failed.push('Tell me what to change, or pause the rule in My style.');
   const unchecked = unreadable.map((r) => `I couldn't check your My style rule ${quote(r.text)}: it needs a newer version of Reel Studio.`);
@@ -450,10 +468,10 @@ async function editNewVideo(deps: EditorDeps, provider: ModelProvider | null, pr
     } catch (e: any) {
       await ctx.moments?.stop();   // before the simple version or the final render below
       await ctx.renderGate?.catch(() => undefined);   // never two renders at once
-      if (signal?.aborted || e?.code === 'cancelled') { await removeStyleRules(deps, ctx.state); throw e; }
-      if (e instanceof AIError && !ctx.state.renders.length && deps.pauseOn?.(e)) { await removeStyleRules(deps, ctx.state); throw e; }
+      if (signal?.aborted || e?.code === 'cancelled') { await undoStyleRules(deps, ctx.state); throw e; }
+      if (e instanceof AIError && !ctx.state.renders.length && deps.pauseOn?.(e)) { await undoStyleRules(deps, ctx.state); throw e; }
       if (e instanceof AIError && !ctx.state.renders.length) {
-        await removeStyleRules(deps, ctx.state);
+        await undoStyleRules(deps, ctx.state);
         // The AI stopped (limit, sign-in, network). Make a simple version so the user still gets a video,
         // and say plainly why. No other paid service is used.
         const simple = await deterministicEdit(deps, projectDir, onEvent, signal, e.userMessage);
@@ -591,14 +609,14 @@ async function checkAndRepair(deps: EditorDeps, provider: ModelProvider, ctx: To
     const before = await fsp.readFile(editFile);
     const p0 = await loadProject(ctx.projectDir, ctx.note?.file);
     const changed = new Set(ctx.state.changed);
-    const [rules, saved, proposed] = [ctx.state.styleRuleIds.length, ctx.state.styleRulesAdded.length, ctx.state.styleSuggestions.length];
+    const [rules, saved, proposed, resumed] = [ctx.state.styleRuleIds.length, ctx.state.styleRulesAdded.length, ctx.state.styleSuggestions.length, ctx.state.styleRulesResumed.length];
     const said = summary;
     const renders = ctx.state.renders.length;
     undoRepair = async () => {
       // a download the repair made stays in work/assets and, like any unsaved note's, is not offered again
       await writeFileAtomic(editFile, before);
-      await removeStyleRules(deps, { ...ctx.state, styleRuleIds: ctx.state.styleRuleIds.slice(rules) });
-      ctx.state.styleRuleIds.splice(rules); ctx.state.styleRulesAdded.splice(saved); ctx.state.styleSuggestions.splice(proposed);
+      await undoStyleRules(deps, { ...ctx.state, styleRuleIds: ctx.state.styleRuleIds.slice(rules), styleRulesResumed: ctx.state.styleRulesResumed.slice(resumed) });
+      ctx.state.styleRuleIds.splice(rules); ctx.state.styleRulesAdded.splice(saved); ctx.state.styleSuggestions.splice(proposed); ctx.state.styleRulesResumed.splice(resumed);
       ctx.state.changed = changed;
       // a failed final render falls back to the last preview: never one of the undone repair, and never
       // an earlier one once the repair's preview has replaced it on disk

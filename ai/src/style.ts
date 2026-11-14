@@ -25,8 +25,8 @@ export interface StyleRule {
   /** Learned from another editor's export ("Learn from my past edits"): its file name, and its editor when one
    * file was read. */
   imported?: { file: string; editor?: 'Final Cut Pro' | 'Premiere Pro' | 'DaVinci Resolve' | 'CapCut' | 'EDL' };
-  /** the question the person said Yes to */
-  consent?: { proposal: string; at: string };
+  /** the question the person said Yes to; `also`: other questions about this rule they said Yes to after it was saved */
+  consent?: { proposal: string; at: string; also?: string[] };
   /** When its words last changed. Pausing does not count, so a paused rule keeps its place in My style. */
   updatedAt?: string;
   /** Typed in by the person with Add a rule, not learned from a note or an export. */
@@ -92,6 +92,13 @@ export const LOWERCASE_CAPTIONS = 'Use lowercase subtitles.';
 /** The typed rule's words before the app said "subtitles": saved rules and questions still on screen may carry them. */
 const OLD_LOWERCASE_TEXT = 'Use lowercase captions.';
 const isCaptionCase = (x: unknown): x is CaptionCaseRule => (x as CaptionCaseRule)?.kind === 'caption-case' && (x as CaptionCaseRule).case === 'lower';
+/** The later questions kept with a rule. My style.json can be edited by hand: anything but a list of IDs is none. */
+const alsoYes = (r: StyleRule): string[] => {
+  const also: unknown = r.consent?.also;
+  return Array.isArray(also) ? also.filter((x): x is string => typeof x === 'string') : [];
+};
+/** Every question the person said Yes to for this rule. */
+const answeredYes = (r: StyleRule): string[] => (r.consent ? [r.consent.proposal, ...alsoYes(r)] : []);
 
 /** A stored check's words, or null when this version can't read the check. */
 const checkedText = (c: unknown): string | null => { try { return ruleText(parseCheck(c)); } catch { return null; } };
@@ -302,8 +309,10 @@ export class StyleStore {
    * suggestion, an "always..." note, a rule typed in My style or kept from an export), so an equivalent paused rule
    * is turned back on (PR #83 review, option A). `from`: where it was learned.
    * `check`: a checked rule. Its words must be its check's (the question showed them), and it replaces any rule
-   * checking the same kind: "at most 2 words" and "at most 3 words" can't both hold. */
-  async add(text: string, from?: Pick<StyleRule, 'source' | 'imported' | 'byYou'>, check?: RuleCheck): Promise<{ added: boolean; rule: StyleRule }> {
+   * checking the same kind: "at most 2 words" and "at most 3 words" can't both hold.
+   * `resumed`: this call is what turned it back on, decided in the same write, so a caller undoing its own change
+   * never pauses a rule someone else turned on. */
+  async add(text: string, from?: Pick<StyleRule, 'source' | 'imported' | 'byYou'>, check?: RuleCheck): Promise<{ added: boolean; resumed: boolean; rule: StyleRule }> {
     if (check === undefined) return this.serial(() => this.addNow(text, from));
     const c = parseCheck(check);
     const words = ruleText(c);
@@ -311,14 +320,14 @@ export class StyleStore {
     return this.serial(async () => {
       const data = await this.read();
       const same = data.rules.find((r) => normalize(r.text) === normalize(words));
-      if (same && JSON.stringify(same.check) === JSON.stringify(c) && !same.paused) return { added: false, rule: same };
+      if (same && JSON.stringify(same.check) === JSON.stringify(c) && !same.paused) return { added: false, resumed: false, rule: same };
       const rule: StyleRule = {
         id: randomUUID(), text: words, createdAt: new Date().toISOString(), check: c,
         ...(from?.source ? { source: from.source } : {}), ...(from?.byYou ? { byYou: true as const } : {}),
       };
       const rest = data.rules.filter((r) => r.check?.kind !== c.kind && normalize(r.text) !== normalize(words));
       await this.write({ ...data, rules: [...rest, rule] });
-      return { added: true, rule };
+      return { added: true, resumed: false, rule };
     });
   }
 
@@ -340,16 +349,17 @@ export class StyleStore {
     return (await this.list()).find((r) => normalize(r.text) === n);
   }
 
-  private async addNow(text: string, from?: Pick<StyleRule, 'source' | 'imported' | 'byYou'>): Promise<{ added: boolean; rule: StyleRule }> {
+  private async addNow(text: string, from?: Pick<StyleRule, 'source' | 'imported' | 'byYou'>): Promise<{ added: boolean; resumed: boolean; rule: StyleRule }> {
     const clean = cleanRuleText(text);
     const data = await this.read();
     const dup = data.rules.find((r) => normalize(r.text) === normalize(clean));
     if (dup) {
-      if (dup.paused) {
+      const resumed = !!dup.paused;
+      if (resumed) {
         delete dup.paused;
         await this.write(data);
       }
-      return { added: false, rule: dup };
+      return { added: false, resumed, rule: dup };
     }
     const rule: StyleRule = {
       id: randomUUID(), text: clean, createdAt: new Date().toISOString(),
@@ -357,23 +367,36 @@ export class StyleStore {
       ...(from?.byYou ? { byYou: true as const } : {}),
     };
     await this.write({ ...data, rules: [...data.rules, rule] });
-    return { added: true, rule };
+    return { added: true, resumed: false, rule };
   }
 
   /** The person said Yes to `p`: the rule and its consent are saved in one write. Answering the same question
-   * again returns the same rule, and the question of a rule they removed cannot bring it back. */
+   * again returns the same rule, and the question of a rule they removed cannot bring it back. Yes is the person
+   * asking for the rule, so a paused typed rule is turned back on, as add() does, before "saved" promises it. */
   async approve(p: StyleProposal): Promise<Approval> {
     return this.serial(async () => {
       if (!p?.id || (p.text !== LOWERCASE_CAPTIONS && p.text !== OLD_LOWERCASE_TEXT) || !isCaptionCase(p.payload)) throw new Error('the question does not match the rule it would save');
       const data = await this.read();
       if (data.forgotten?.includes(p.id)) return { status: 'forgotten' };
-      const same = data.rules.find((r) => r.consent?.proposal === p.id);
+      const at = new Date().toISOString();
+      const same = data.rules.find((r) => answeredYes(r).includes(p.id));
       // Edited to new words since the Yes, the rule is a sentence the AI reads, so "Saved" would promise lowercase
       // videos the app no longer makes.
-      if (same) return { status: isCaptionCase(same.payload) ? 'saved' : 'exists', rule: same };
+      if (same && !isCaptionCase(same.payload)) return { status: 'exists', rule: same };
+      if (same) {
+        if (same.paused) { delete same.paused; await this.write(data); }
+        return { status: 'saved', rule: same };
+      }
       const typed = data.rules.find((r) => isCaptionCase(r.payload));
-      if (typed) return { status: 'exists', rule: typed };
-      const at = new Date().toISOString();
+      if (typed) {
+        // This question is kept with the rule, so removing the rule blocks it too, even when its reply was lost
+        // and its buttons are still there.
+        typed.consent = typed.consent ? { ...typed.consent, also: [...alsoYes(typed), p.id] } : { proposal: p.id, at };
+        const wasPaused = !!typed.paused;
+        delete typed.paused;
+        await this.write(data);
+        return { status: wasPaused ? 'saved' : 'exists', rule: typed };
+      }
       const fields = {
         text: LOWERCASE_CAPTIONS, payload: { kind: 'caption-case', case: 'lower' } as const,
         source: { project: String(p.source?.project ?? ''), title: String(p.source?.title ?? '').slice(0, 120), version: Number(p.source?.version) || 0 },
@@ -428,8 +451,7 @@ export class StyleStore {
       const index = data.rules.findIndex((r) => r.id === id);
       if (index < 0) return null;
       const rule = data.rules[index];
-      const asked = rule.consent?.proposal;
-      const forget = [...(asked ? [asked] : []), ...(options.forget === false ? [] : [normalize(rule.text)])];
+      const forget = [...answeredYes(rule), ...(options.forget === false ? [] : [normalize(rule.text)])];
       await this.write({ ...data, rules: data.rules.filter((r) => r.id !== id), ...(forget.length ? { forgotten: [...new Set([...(data.forgotten ?? []), ...forget])] } : {}) });
       return { rule, index };
     });
@@ -455,12 +477,14 @@ export class StyleStore {
     return out;
   }
 
-  /** `brokenBefore`: ids of checked rules the version being edited already broke. A note leaves those alone (editor.ts). */
-  async asPromptText(brokenBefore?: Set<string>): Promise<string> {
+  /** `start`: checked rules the version being edited already broke (`before`), or was never measured against
+   * (`unknown`). A note leaves those alone (editor.ts). */
+  async asPromptText(start?: { before: Set<string>; unknown: Set<string> }): Promise<string> {
     const rules = (await this.list()).filter((r) => !r.paused);
     const line = (r: StyleRule) => isCaptionCase(r.payload) ? CAPTION_CASE_PROMPT
       : checkedText(r.check) === null ? r.text
-      : brokenBefore?.has(r.id) ? `${r.text} (this reel already broke it before this note: leave that alone unless the note is about it)`
+      : start?.before.has(r.id) ? `${r.text} (this reel already broke it before this note: leave that alone unless the note is about it)`
+      : start?.unknown.has(r.id) ? `${r.text} (this reel was made before the app checked it: leave that alone unless the note is about it)`
       : `${r.text} (the app measures this on every render; a note can't finish while it fails)`;
     return rules.length ? rules.map((r) => `- ${line(r)}`).join('\n') : '(none yet)';
   }

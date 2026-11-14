@@ -32,10 +32,14 @@ export interface RenderInfo {
   checker?: boolean;
 }
 
-/** An AI edit's checked My style rules. `before`: the ones already failing in the version the edit started from.
- * Those are named in the reply, never chased: "make the subtitles blue" must not send the AI after b-roll placed
- * three notes ago. */
-export interface NoteRules { active: CheckedRule[]; before: Set<string> }
+/** An AI edit's checked My style rules. `before`: the ones already failing in the version the edit started from;
+ * `unknown`: ones that version was never measured against (rendered before checks, or before the rule was saved or
+ * turned back on); `startFailures`: that version's report of them. An edit has to meet neither: they are named in
+ * the reply, never chased, so "make the subtitles blue" must not send the AI after b-roll placed three notes ago. */
+export interface NoteRules { active: CheckedRule[]; before: Set<string>; unknown: Set<string>; startFailures: RuleFailure[] }
+
+/** A rule this edit need not meet: the reel already broke it, or may have. */
+const exempt = (rules: NoteRules | undefined, id: string) => !!rules && (rules.before.has(id) || rules.unknown.has(id));
 
 export interface ToolState {
   changed: Set<string>;
@@ -44,6 +48,8 @@ export interface ToolState {
   styleSuggestions: string[];
   /** ids of the rules above, so a failed note can take them back out of My style */
   styleRuleIds: string[];
+  /** paused rules this note turned back on, so a failed note can pause them again */
+  styleRulesResumed: { id: string; text: string }[];
   /** every user-facing tool summary, in order (an honest "what I changed" when the agent stops early) */
   summaries: string[];
   renders: RenderInfo[];
@@ -125,7 +131,7 @@ export interface ToolDef extends ToolSchema {
 }
 
 export function newToolState(): ToolState {
-  return { changed: new Set(), styleRulesAdded: [], styleSuggestions: [], styleRuleIds: [], summaries: [], renders: [], finished: null, toolCalls: 0, aiCalls: [], edits: 0, pictureEdit: 0 };
+  return { changed: new Set(), styleRulesAdded: [], styleSuggestions: [], styleRuleIds: [], styleRulesResumed: [], summaries: [], renders: [], finished: null, toolCalls: 0, aiCalls: [], edits: 0, pictureEdit: 0 };
 }
 
 /** A snapshot's version counter can lag its folder. Keep allocation and history from the live
@@ -680,7 +686,7 @@ export function visibleChangeSinceRender(ctx: ToolContext): boolean {
 /** `announce: false`: a note's final video is shown only once the note is saved (editor.ts). */
 /** The checked rules a render failed that this edit has to meet (not the ones failing before it). */
 export function unmetRules(ctx: ToolContext, report = ctx.state.ruleChecks): RuleFailure[] {
-  return (report?.failures ?? []).filter((f) => !ctx.rules?.before.has(f.id));
+  return (report?.failures ?? []).filter((f) => !exempt(ctx.rules, f.id));
 }
 
 /** `stopOnRules`: a final render that fails a rule this edit has to meet stops before its encode (the result says
@@ -693,7 +699,7 @@ export async function doRender(ctx: ToolContext, draft: boolean, announce = true
   const made = draft && drawn?.draft?.file ? drawn.draft : null;
   const args = [...(draft ? ['--draft', ...previewArgs(ctx)] : []), ...versionArgs(ctx)];
   if (ctx.rules && !made) {
-    const stopOn = opts.stopOnRules && !draft ? ctx.rules.active.filter((r) => !ctx.rules!.before.has(r.id)).map((r) => r.id) : [];
+    const stopOn = opts.stopOnRules && !draft ? ctx.rules.active.filter((r) => !exempt(ctx.rules, r.id)).map((r) => r.id) : [];
     const file = rulesFilePath(ctx);
     await fsp.mkdir(path.dirname(file), { recursive: true });
     await fsp.writeFile(file, rulesFile(ctx.rules.active, stopOn));
@@ -2332,16 +2338,20 @@ const tools: ToolDef[] = [
         if (!ctx.state.styleRulesAdded.includes(text)) ctx.state.styleRulesAdded.push(text);
         return { content: { ok: true, saved: text }, summary: `Saved to My style: "${text}"` };
       }
-      if (existing) {
-        // No note copy to save it with: add() turns it back on now. Not in styleRuleIds, because undoing this note
-        // must not delete a rule that was there before it.
-        const r = await ctx.style.add(text);
-        return { content: { ok: true, alreadySaved: r.rule.text, turnedBackOn: true }, summary: `Turned back on in My style: "${r.rule.text}"` };
-      }
       if (noteAsksToRemember(ctx.userNote)) {
+        // No note copy to save it with (a first edit), so My style is written now. One store call decides and
+        // writes, so only what this edit did is undone if it fails: a rule it saved is removed, and a paused rule it
+        // turned back on (not one that was already on) is paused again (editor.ts undoStyleRules).
         const r = await ctx.style.add(text);
-        if (r.added) { ctx.state.styleRulesAdded.push(r.rule.text); ctx.state.styleRuleIds.push(r.rule.id); }
-        return { content: { ok: true, saved: r.rule.text }, summary: r.added ? `Saved to My style: "${r.rule.text}"` : undefined };
+        if (r.added) {
+          ctx.state.styleRulesAdded.push(r.rule.text); ctx.state.styleRuleIds.push(r.rule.id);
+          return { content: { ok: true, saved: r.rule.text }, summary: `Saved to My style: "${r.rule.text}"` };
+        }
+        if (r.resumed) {
+          ctx.state.styleRulesResumed.push({ id: r.rule.id, text: r.rule.text });
+          return { content: { ok: true, alreadySaved: r.rule.text, turnedBackOn: true }, summary: `Turned back on in My style: "${r.rule.text}"` };
+        }
+        return { content: { ok: true, alreadySaved: r.rule.text } };
       }
       if (!ctx.state.styleSuggestions.includes(text)) ctx.state.styleSuggestions.push(text);
       return { content: { ok: true, proposed: text, note: 'NOT saved. The app will ask the user "Remember this for next time?". Do not say you saved it or that you will remember it.' } };

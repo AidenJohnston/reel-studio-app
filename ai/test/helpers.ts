@@ -196,7 +196,7 @@ export class FakeHost implements EngineHost {
             const place = this.ruleFails(r, p);
             return place ? [{ id: r.id, kind: r.check.kind, count: 1, places: [{ t0: 1, t1: 2, ...place }] }] : [];
           });
-          ruleChecks = { ok: !failures.length, checked: rules.rules.length, failures, measured: this.measured(p) };
+          ruleChecks = { ok: !failures.length, checked: rules.rules.length, checkedIds: rules.rules.map((r: any) => r.id), failures, measured: this.measured(p) };
           // render.py: a final render stops before its encode on a rule it was asked to stop on, leaving no version folder
           if (!draft && failures.some((f: any) => rules.stopOn.includes(f.id))) return { version: v, preview: false, draft, encoded: false, ruleChecks };
         }
