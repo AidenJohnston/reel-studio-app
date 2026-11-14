@@ -126,6 +126,7 @@ def test_a_still_without_a_draft_is_the_drafts_frame(tmp_path, monkeypatch):
     assert square >= SQUARE_DB > square_late, report
 
 
+
 def test_frames_reuses_a_render_only_while_it_shows_the_project(tmp_path, monkeypatch):
     """A preview whose picture no longer matches the project (captions, the transcript, the face track, a
     preview that stopped before its last step) must not be shown as the edit; a change that no frame shows
