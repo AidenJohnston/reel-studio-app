@@ -6,6 +6,7 @@
 import { execFile } from 'node:child_process'
 import { closeSync, existsSync, fsyncSync, openSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync, writeSync } from 'node:fs'
 import { join } from 'node:path'
+import { OWNER_LOCK } from './owner'
 import { projectsDir } from './paths'
 import { groupAlive, isAlive, killTree } from './proctree'
 
@@ -78,7 +79,8 @@ export function createPidRegistry(dir: string, stop: (pid: number) => Promise<bo
     /** Stops engines a previous run left behind. `stillRunning`: the projects of those that would not
      * stop or could not be shown to be ours (leftRunning), which stay registered for the next start.
      * While the list cannot be read, names an engine with no video, or holds one of those uncertain
-     * entries (`unknown`), it also has every project a running engine or ffmpeg names. */
+     * entries (`unknown`), it also has every project a running engine or ffmpeg names; otherwise every
+     * project with a leftover owner lock that one names. */
     async reap(): Promise<{ stopped: number; stillRunning: string[]; unknown: boolean }> {
       let old: { pid: number; project: string | null; startedAt?: number }[] = []
       let unknown = existsSync(unreadable)
@@ -116,7 +118,17 @@ export function createPidRegistry(dir: string, stop: (pid: number) => Promise<bo
         if (!project || left === 'unsure') unknown = true
       }
       save()
-      if (!unknown) return { stopped, stillRunning, unknown }
+      if (!unknown) {
+        // A readable list is not proof that nothing of the last run still writes: it crashed after starting an
+        // engine and before onSpawn recorded it (engine.ts), or while a refused write of the list waited for its
+        // retry. Its owner lock outlived it in every project that had a job then, so the scan looks in those.
+        const owned = projectFolders().filter((d) => existsSync(join(d, OWNER_LOCK)) && !stillRunning.includes(d))
+        if (!owned.length) return { stopped, stillRunning, unknown }
+        const working = await stillWorking(owned)
+        for (const d of working ?? []) scanned.add(d)
+        // with no process list nothing says which of them is safe: none of them opens at this start
+        return { stopped, stillRunning: [...stillRunning, ...(working ?? owned)], unknown }
+      }
       const folders = projectFolders()
       const working = await stillWorking(folders)
       if (working && !working.length) {

@@ -1,5 +1,6 @@
 // The checker (docs/versions.md, Checker): it gets the evidence in one message and has no tools,
 // so it cannot change the project.
+import * as fsp from 'node:fs/promises';
 import * as path from 'node:path';
 import { AIError, ChatMessage, ImagePart, ModelProvider, type ToolSchema } from './types';
 import { EditFact, Project, Transcript, WordAnchor, Zoom, anchorText, anchorWords, keptWords, versionDir, writeFileAtomic } from './project';
@@ -252,6 +253,17 @@ export function unresolvedLine(fixes: FixRequest[]): string {
   return `I checked the new version and could not fix everything: ${fixes.map((f) => f.problem).join(' ')}`;
 }
 
+/** Beside the version the note made. A version is never rewritten (docs/versions.md), so only the note that made it
+ * writes its check.json. */
 export async function saveCheck(projectDir: string, version: number, record: CheckRecord): Promise<void> {
   await writeFileAtomic(path.join(versionDir(projectDir, version), 'check.json'), JSON.stringify(record, null, 2) + '\n');
+}
+
+/** The check of a note that ended on a saved version it did not make (it changed only the post caption, so the engine
+ * gave that version's video back): work/checks/<note id>.json, naming the version, as provenance.ts writeKeptAiRun keeps
+ * that note's model calls. */
+export async function saveKeptCheck(projectDir: string, id: string, version: number, record: CheckRecord): Promise<void> {
+  const file = path.join(projectDir, 'work', 'checks', `${id}.json`);
+  await fsp.mkdir(path.dirname(file), { recursive: true });
+  await writeFileAtomic(file, JSON.stringify({ version, ...record }, null, 2) + '\n');
 }
