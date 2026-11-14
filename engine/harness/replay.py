@@ -431,7 +431,7 @@ def check_take(take: Take, refs: list, runs: list, ffmpeg: str, ffprobe: str, th
                 stills.append(_missing(f"no still for {t}s in every run"))
             else:
                 stills.append(_merge([checks.check_still(ffmpeg, ffprobe, export, f, t, caps, pv, still_want,
-                                                         ref["previewFps"])
+                                                         ref.get("previewFps"))
                                       for f in distinct(lambda r, name=name: r["files"][k][name])]))
         if not agree:
             stills.append(_missing("runs chose different moments for this note"))
@@ -445,7 +445,7 @@ def check_take(take: Take, refs: list, runs: list, ffmpeg: str, ffprobe: str, th
                 return (_missing(f"no {name} in every run") if required or any(name in run["files"][k] for run in runs)
                         else {"status": "none", "failures": [], "metrics": {}, "distinctChecked": 0})
             return _merge([checks.check_preview_video(ffmpeg, ffprobe, export, f, caps, pv, ref["fps"], want,
-                                                      preview_fps=ref["previewFps"], **span)
+                                                      preview_fps=ref.get("previewFps"), **span)
                            for f in distinct(lambda r: r["files"][k][name])])
         step_checks = {"draft": video("draft", needs_draft),
                        "window": video("window", needs_window, start=win[0], end=win[1]) if win
