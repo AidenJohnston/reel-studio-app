@@ -28,7 +28,7 @@ const WAITING = 20
 const REELS = 200
 const clip = (s: string, n: number): string => (s.length > n ? `${s.slice(0, n - 1)}…` : s)
 const WORKING: Record<JobKind, string> = {
-  'first-edit': 'making Version 1', note: 'running a note', rerender: 'making a version again', export: 'exporting', script: 'writing a plan', propose: 'looking for more reels'
+  'first-edit': 'making Version 1', note: 'running a note', rerender: 'making a version again', export: 'exporting', script: 'writing a plan', propose: 'looking for more reels', plan: 'planning the pictures'
 }
 
 export function createOutsideReels(deps: OutsideReelDeps): OutsideControls {

@@ -32,7 +32,7 @@ export function handEditJob(runEngine: RunEngine, slug: string, entry: QueuedNot
       const base = await readProject(slug)
       await fs.mkdir(work, { recursive: true })
       const edited = applyHandEdit(base, entry.hand.edit, await readWords(dir, base))
-      const changed = (Object.keys(edited) as (keyof ProjectJson)[]).filter((k) => JSON.stringify(edited[k]) !== JSON.stringify(base[k]))
+      const changed = Object.keys(edited).filter((k) => JSON.stringify(edited[k as keyof ProjectJson]) !== JSON.stringify(base[k as keyof ProjectJson]))
       await writeJson(file, follow ? await follow(dir, edited, changed) : edited)
       const look: any = await runEngine(
         'render',
