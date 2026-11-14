@@ -104,3 +104,12 @@ Updated as each group lands.
     - A tampered download through the real updater.
     - Windows update mode (`--updated`).
     - A hand-run engine killed outright leaves its lock. If its process id is reused, the video stays closed until the lock is deleted.
+- #171 and the design fixes landed (merge 55258085).
+  - #171: captions follow the locked script, with a "Follow my script" switch in Subtitles. The look sample, Fix words and the subtitle lane show the script's word wherever the export does. Until #182 writes the locked plan script, subtitles follow the plan copied into the project when the video arrived.
+  - Fable's four must-fixes are applied:
+    - Ctrl/Cmd+Z in the timeline takes back the timeline's last change, never the edit panel's.
+    - The Cut tab's four-way switch fits its column at 1100x720.
+    - Report a problem keeps one dialog across its steps.
+    - Field and control edges meet 3:1.
+  - The should-fix rows and the cheap convention fixes are applied too. The e2e checks added for undo routing and the Cut switch typecheck in CI but haven't run yet.
+  - Leak-check test race fixed: git's background maintenance in the temp repos is now off, so it can't race their cleanup.
