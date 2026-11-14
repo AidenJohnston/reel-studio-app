@@ -148,7 +148,13 @@ def check_preview_video(ffmpeg: str, ffprobe: str, ref: Path, cand: Path, captio
         failures.append(f"decoded {compared} comparable frames, expected {len(picked)}")
     rows = _preview_rows(tally, th)
     ra = media.audio_mono(ffmpeg, ref, start=start, duration=len(picked) / fps)
-    ca = media.audio_mono(ffmpeg, cand)
+    try:
+        ca = media.audio_mono(ffmpeg, cand)
+    except RuntimeError as e:
+        return _result(rows, failures + [f"candidate audio could not be decoded: {e}"],
+                       {"size": [w, h], "frames": len(cp)})
+    if not len(ca):
+        return _result(rows, failures + ["candidate audio is empty"], {"size": [w, h], "frames": len(cp)})
     if abs(len(ca) - len(ra)) > AUDIO_LENGTH_SLACK:
         failures.append(f"audio is {len(ca) / media.AUDIO_RATE:.3f}s, reference stretch {len(ra) / media.AUDIO_RATE:.3f}s")
     # where the samples sit, plus where the container says they start relative to the picture
@@ -170,7 +176,8 @@ def check_still(ffmpeg: str, ffprobe: str, ref: Path, png: Path, t: float, capti
     if bad:
         return bad
     rp = media.video_pts(ffprobe, ref)
-    idx = next((i for i, x in enumerate(rp) if x >= t - 1e-6), len(rp) - 1)
+    # frames.py rounds its FFmpeg seek to milliseconds, which can cross a fractional-rate frame.
+    idx = next((i for i, x in enumerate(rp) if x >= round(t, 3) - 1e-6), len(rp) - 1)
     a: Optional[object] = None
     for i, fr in enumerate(media.iter_frames(ffmpeg, ref, w, h)):
         if i == idx:
