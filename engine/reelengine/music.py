@@ -934,7 +934,11 @@ def track_start(mcfg: dict, duration: float, offset: float = 0.0) -> float:
 
 
 def accent_beats(ctx) -> list[float]:
-    """Detected beats on the full output clock, only for projects that request accents."""
+    """The song's beats on the full output clock, only for projects that request accents: the grid stored in
+    music.beats when it was measured on the file that plays (beats.output_grid), so every machine lands accents
+    on the same frames; detected here only when there is none (a song swapped by hand, or chosen before grids
+    were stored). A b-roll entrance already snapped to that grid (music.onBeat) is on one of these beats, so
+    accent_time leaves it where it is (architecture review 4)."""
     from .cut_style import beat_accents_on
     proj = ctx.project or {}
     if not beat_accents_on(proj):
@@ -946,6 +950,9 @@ def accent_beats(ctx) -> list[float]:
         # the file the mix plays (the frozen copy, song_ref), never the Library song it was copied from,
         # which may since have been replaced or deleted (audit 11)
         path = resolve_asset(ctx, song_ref(mcfg))
+        stored = beatmod.output_grid(proj, path)
+        if stored:
+            return [t for t in stored if t < ctx.duration]
         stat = path.stat()
         key = (str(path), stat.st_size, stat.st_mtime_ns)
         cached = getattr(ctx, "_accent_analysis", None)

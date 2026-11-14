@@ -47,6 +47,22 @@ def times(ctx):
     return [p["t"] for p in placed] + [p["t0"] for p in broll.plan_windows(ctx)]
 
 
+def test_a_stored_beat_grid_puts_accents_on_the_same_frames_whatever_the_detector_says(tmp_path, click_track,
+                                                                                       monkeypatch):
+    # Fails if accents re-detect the song's beats while project.music.beats stores them for this file: another
+    # machine, or a changed beat tracker, would move the cards and sound effects (architecture review 4).
+    from reelengine import beats
+    info = music.analyze_track_cached(click_track)
+    grid = beats.quantise(info["beats"], 30, info["duration"], beats.file_sha256(click_track))
+    stored = {"track": str(click_track), "startAt": 0, "enabled": True, "beats": grid}
+    first = times(context(tmp_path, click_track, beatAccents=True, music=stored)[0])
+    real = music.analyze_track_cached
+    # the other machine's tracker: every beat 90 ms later, inside the 120 ms an accent may move
+    monkeypatch.setattr(music, "analyze_track_cached",
+                        lambda path, ctx=None: dict(real(path, ctx), beats=[b + 0.09 for b in real(path, ctx)["beats"]]))
+    assert times(context(tmp_path, click_track, beatAccents=True, music=stored)[0]) == first
+
+
 def test_hits_and_broll_land_on_detected_beats(tmp_path, click_track):
     ctx, _ = context(tmp_path, click_track, beatAccents=True)
     got = times(ctx)
