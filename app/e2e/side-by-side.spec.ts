@@ -57,6 +57,23 @@ test('fails if Side by side does not play both versions in step with one sound, 
     // each one still playing is named in the failure
     expect(others.filter((v) => !v.paused)).toEqual([])
     await shot(page, 'side-by-side-01-playing')
+
+    // fails if Tab in a dialog stops on a choice its arrows own: the Sound switch's unpicked side is tabIndex -1, and
+    // taking it made a stop with no focus ring (prep-for-prod round 1, blocking 4). Every Tab lands on a stop.
+    const stops: (string | null)[] = []
+    await page.getByTestId('sbs-play').focus()
+    for (let i = 0; i < 12; i++) {
+      await page.keyboard.press('Tab')
+      stops.push(await page.evaluate(() => (document.activeElement instanceof HTMLElement && document.activeElement.tabIndex < 0 ? document.activeElement.getAttribute('data-testid') ?? document.activeElement.tagName : null)))
+    }
+    expect(stops.filter(Boolean)).toEqual([])
+
+    // fails if one Escape closes the dialogs under the top one too (blocking 5): Report a problem over Side by side
+    await page.evaluate(() => window.dispatchEvent(new CustomEvent('reel:report-problem', { detail: {} })))
+    await expect(page.getByTestId('report-problem')).toBeVisible()
+    await page.keyboard.press('Escape')
+    await expect(page.getByTestId('report-problem')).toHaveCount(0)
+    await expect(sbs).toBeVisible()
     // Keep Version 2 (the primary) leaves the newer one on screen; Keep Version 1 the older one
     await expect(page.getByTestId('sbs-done')).toHaveText('Keep Version 2')
     await page.getByTestId('sbs-done').click()

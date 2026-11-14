@@ -281,8 +281,10 @@ export function Modal({
       if (e.key !== 'Tab' || !ref.current || openDialogs.at(-1) !== ref.current) return
       // A toast over the dialogs is outside it and still has to be reachable: an error toast's buttons (Report a
       // problem, Close) follow the dialog's own controls in the cycle, and Tab from them comes back in (#118, f17e7887).
+      // Tab's stops only: a control at tabIndex -1 (a segmented control's unchecked choices, which its arrows reach) is
+      // not one, and taking it made a stop the focus ring never shows
       const items = [ref.current, ...document.querySelectorAll<HTMLElement>('.toast[data-over-dialogs]')].flatMap((root) =>
-        oneStopPerRadioGroup(Array.from(root.querySelectorAll<HTMLElement>(FOCUSABLE)).filter((el) => el.offsetParent !== null))
+        oneStopPerRadioGroup(Array.from(root.querySelectorAll<HTMLElement>(FOCUSABLE)).filter((el) => el.offsetParent !== null && el.tabIndex >= 0))
       )
       if (!items.length) {
         e.preventDefault()
@@ -305,7 +307,8 @@ export function Modal({
   useEffect(() => {
     if (!onClose) return
     const key = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
+      // only the newest dialog: one opened over another (Report a problem over Side by side) closes alone
+      if (e.key === 'Escape' && ref.current && openDialogs.at(-1) === ref.current) {
         e.stopPropagation()
         onClose()
       }
