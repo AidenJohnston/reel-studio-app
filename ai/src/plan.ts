@@ -304,7 +304,8 @@ export function syncPlan(p: Project, t: Transcript): Unbuilt[] {
   for (const r of plan.broll) {
     if (r.anchor && anchorProblem(idx, r.anchor)) delete r.anchor;
     if (r.words && (!r.anchor || !inCut(r.anchor))) {
-      const found = findPhrase(t, r.words, p.cut.keep);
+      // a clip from another source (multi-source) has no words to find a row's in
+      const found = findPhrase(t, r.words, p.cut.keep.flatMap((k) => ('from' in k ? [{ from: k.from, to: k.to }] : [])));
       if (found && (!r.anchor || inCut(found))) r.anchor = found;
     }
     const at = r.broll ? p.broll.findIndex((b) => b.id === r.broll) : -1;
