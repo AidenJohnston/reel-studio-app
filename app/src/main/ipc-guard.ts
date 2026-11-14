@@ -63,7 +63,7 @@ function validPatch(patch: unknown): boolean {
 export function validateIpcArgs(channel: string, args: unknown[]): void {
   const [first, second, third] = args
   const bad = { code: 'BAD_ARGS', userMessage: 'That request was not valid. Try again.' }
-  if ((channel.startsWith('projects:') && !['projects:list', 'projects:create', 'projects:search', 'projects:plan'].includes(channel)) || channel.startsWith('notes:') || channel === 'style:answer' || channel === 'style:rememberLowercase' || channel === 'phone:startPlan') {
+  if ((channel.startsWith('projects:') && !['projects:list', 'projects:create', 'projects:search', 'projects:plan'].includes(channel)) || channel.startsWith('notes:') || channel.startsWith('plan:') || channel === 'style:answer' || channel === 'style:rememberLowercase' || channel === 'phone:startPlan') {
     if (!text(first) || !/^[\p{L}\p{N}][\p{L}\p{N}._-]*$/u.test(first)) throw bad
   }
   let ok = true
@@ -73,6 +73,8 @@ export function validateIpcArgs(channel: string, args: unknown[]): void {
     case 'projects:search': ok = text(first) && first.length <= 200; break
     case 'projects:addVideo': ok = paths(second); break
     case 'projects:planSay': ok = text(second); break
+    // the Plan document's change (main/plan-ipc.ts checks its kind; the AI package checks the rest)
+    case 'plan:change': ok = object(second); break
     case 'projects:resume': ok = second === undefined || typeof second === 'boolean'; break
     case 'projects:update': ok = validPatch(second); break
     case 'projects:export': ok = finite(second) && Number.isInteger(second) && second >= 0; break

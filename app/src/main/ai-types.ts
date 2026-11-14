@@ -5,6 +5,7 @@ import type { PlanTurn } from '../shared/plan'
 import type { Niche, NicheTurn, NicheTurnResult } from '../shared/niche'
 import type { TryVariable } from '../shared/platforms'
 import type { EngineProgress } from './engine'
+import type { FirstEdit, Plan, PlanChange, PlanView } from '../shared/plan-doc'
 
 /** What @reelstudio/ai emits: the job contract minus `heard` (main adds that one itself). */
 export type AgentEvent = Exclude<JobUpdate, { type: 'heard' }>
@@ -203,6 +204,17 @@ export interface AI {
   proposeReels?(req: ProposeReelsRequest, signal?: AbortSignal, onEvent?: (e: AgentEvent) => void): Promise<ReelProposal>
   /** Reels across the whole footage archive (ai propose-archive.ts). Optional: older packages lack it. */
   proposeFromArchive?(req: ArchiveRequest, signal?: AbortSignal, onEvent?: (e: AgentEvent) => void): Promise<ArchiveProposal>
+  /** The AI proposes the Plan document before the first edit (it changes only `plan`). Optional: older packages and the mock lack it. */
+  proposePlan?(projectDir: string, onEvent: (e: AgentEvent) => void, signal?: AbortSignal, opts?: { owner?: string }): Promise<{ summary: string; plan: Plan }>
+  /** The creator's side of the Plan document. `change` writes project.json: main runs it as a held edit. Optional like proposePlan. */
+  plan?: {
+    /** `firstEdit`: the reel's first edit as main knows it, for the view's `stage`. */
+    get(projectDir: string, firstEdit?: FirstEdit): Promise<PlanView>
+    change(projectDir: string, change: PlanChange): Promise<PlanView>
+    markdown(projectDir: string): Promise<string>
+    /** A hand edit of the b-roll or the cut, before main saves it: returns the project with the plan's rows following it. */
+    followHandEdit(projectDir: string, project: ProjectJson): Promise<ProjectJson>
+  }
   styleRules(): Promise<StyleRule[]>
   /** The removed rule and where it was, for Undo; null when it was already gone. */
   /** The removed rule and where it was, for Undo; null when it was already gone. `forget` (default true): learning

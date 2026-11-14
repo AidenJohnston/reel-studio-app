@@ -5,7 +5,7 @@
 // `notes` is). A failure, Stop or quit before that leaves the project as it was.
 import { promises as fs } from 'node:fs'
 import { join } from 'node:path'
-import type { QueuedNote } from '../shared/api'
+import type { ProjectJson, QueuedNote } from '../shared/api'
 import { versionMessage } from '../shared/describe'
 import { applyHandEdit } from '../shared/hand-edit'
 import type { JobFn } from './jobs'
@@ -16,7 +16,11 @@ export const HAND_MESSAGE = 'Making your changes'
 /** Enough ids to outlast any queue; older ones only grow project.json. */
 const HANDS_KEPT = 20
 
-export function handEditJob(runEngine: RunEngine, slug: string, entry: QueuedNote & { hand: NonNullable<QueuedNote['hand']> }): JobFn {
+/** `follow`: a planned reel's plan rows following the edit (main/plan-ipc.ts withPlanFollowing), given the fields it
+ * changed; the rows are the reel's b-roll, so the copy that is rendered and saved carries them. */
+export type FollowPlan = (dir: string, p: ProjectJson, changed: string[]) => Promise<ProjectJson>
+
+export function handEditJob(runEngine: RunEngine, slug: string, entry: QueuedNote & { hand: NonNullable<QueuedNote['hand']> }, follow?: FollowPlan): JobFn {
   return async (emit, signal, { id, owner }) => {
     const dir = projectDir(slug)
     const work = join(dir, 'work', 'hand', entry.id)
@@ -27,7 +31,9 @@ export function handEditJob(runEngine: RunEngine, slug: string, entry: QueuedNot
       emit({ type: 'status', message: HAND_MESSAGE, pct: 1, phase: 'final', aggregate: true })
       const base = await readProject(slug)
       await fs.mkdir(work, { recursive: true })
-      await writeJson(file, applyHandEdit(base, entry.hand.edit, await readWords(dir, base)))
+      const edited = applyHandEdit(base, entry.hand.edit, await readWords(dir, base))
+      const changed = (Object.keys(edited) as (keyof ProjectJson)[]).filter((k) => JSON.stringify(edited[k]) !== JSON.stringify(base[k]))
+      await writeJson(file, follow ? await follow(dir, edited, changed) : edited)
       const look: any = await runEngine(
         'render',
         own(['--project', dir, '--project-file', rel, '--draft', '--no-cover']),

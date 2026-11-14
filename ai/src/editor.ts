@@ -9,14 +9,15 @@ import { Prompts } from './prompts';
 import { StyleStore, StyleProposal, StyleRule, captionCaseProposal } from './style';
 import { nicheVars } from './niche';
 import { Measured, RuleFailure, RuleReport, StyleCheckProposal, checkFromMeasured, failureText, isDefaultRule, ruleText, withDefaults as withDefaultChecks } from './rules';
-import { NoteRules, RenderInfo, ToolContext, ToolState, captionWithCredits, captionsForProofread, doRender, unsureWords, executeTool, load, newToolState, resolveAsset, cleanSummary, renderEvent, operationStatus, noteBase, stageMerge, ToolInputError, TOOL_NAMES, unmetRules, writeEdit } from './tools';
+import { NoteRules, RenderInfo, ToolContext, ToolState, captionWithCredits, captionsForProofread, doRender, unsureWords, executeTool, load, newToolState, resolveAsset, cleanSummary, renderEvent, operationStatus, noteBase, stageMerge, ToolInputError, TOOL_NAMES, unmetRules, writeEdit, plannedEditTools } from './tools';
+import { prepareFirstEdit, syncPlan } from './plan';
 import { planFastNote } from './fastnote';
 import { LEDGER } from './assets';
 import { Moments } from './moments';
 import { AttachmentInfo, attachmentStills, attachmentsSection, earlierUnplaced, placedAssets, validateAttachments } from './attachments';
 import {
   Analysis, EditReceipt, NoteEntry, PROJECT_FILE, Project, ProjectError, withDefaults, Transcript, WordAnchor, hasTranscript, loadProject, normalizeAnalysis, normalizeKeep, sameEdit, saveProject,
-  snapshotVersion, LIBRARY_FOLDERS, anchorText, writeFileAtomic, keptWords, projectBytes, versionDir,
+  snapshotVersion, LIBRARY_FOLDERS, anchorText, writeFileAtomic, keptWords, projectBytes, versionDir, loadTranscript,
 } from './project';
 import { extractJson } from './providers/cli';
 import { CheckRecord, CheckRound, MAX_REPAIRS, askChecker, askHarnessChecker, checkerEvidence, repairTask, saveCheck, unresolvedLine } from './checker';
@@ -162,7 +163,7 @@ async function promptVars(deps: EditorDeps, ctx?: ToolContext): Promise<{ styleR
   return { styleRules, ...niche };
 }
 
-async function systemPrompt(deps: EditorDeps, ctx?: ToolContext): Promise<string> {
+export async function systemPrompt(deps: EditorDeps, ctx?: ToolContext): Promise<string> {
   return `${deps.prompts.render('system', await promptVars(deps, ctx))}\n\n${DATA_BOUNDARY}\n`;
 }
 
@@ -452,6 +453,8 @@ function recordFirstEditRun(projectDir: string, version: number, baseVersion: nu
 }
 
 async function editNewVideo(deps: EditorDeps, provider: ModelProvider | null, projectDir: string, onEvent: (e: AgentEvent) => void, signal?: AbortSignal): Promise<EditResult> {
+  // the creator's plan (plan.ts): its approved b-roll rows go in before the AI starts, and only they do
+  const planned = await prepareFirstEdit(projectDir);
   if (!provider) return deterministicEdit(deps, projectDir, onEvent, signal);
   const ctx = newCtx(deps, projectDir, provider, onEvent, signal, 3);
   const { p } = await load(ctx);
@@ -466,10 +469,11 @@ async function editNewVideo(deps: EditorDeps, provider: ModelProvider | null, pr
   watchMoments(deps, ctx);
   // a run still drawing writes the edit's preview files: it is gone before the task ends, however it ends
   try {
-    const task = `${deps.prompts.render(p.sources.length > 1 ? 'multiClipEdit' : 'firstEdit')}\n\nVideo title: ${p.title}${plannedScript(p)}${proposedReel(p)}`;
+    const task = `${deps.prompts.render(p.sources.length > 1 ? 'multiClipEdit' : 'firstEdit')}\n\nVideo title: ${p.title}${plannedScript(p)}${proposedReel(p)}${planned.task}`;
     let run: Pick<RunAgentResult, 'finished' | 'stoppedBy'> = { finished: null, stoppedBy: null };
     try {
-      run = await runAgent({ provider, system: await systemPrompt(deps, ctx), task, ctx, onEvent, signal, maxSteps: deps.maxSteps ?? 45, tokenBudget: deps.tokenBudget, preload: ['get_project', 'get_transcript'] });
+      run = await runAgent({ provider, system: await systemPrompt(deps, ctx), task, ctx, onEvent, signal, maxSteps: deps.maxSteps ?? 45, tokenBudget: deps.tokenBudget, preload: ['get_project', 'get_transcript'],
+        ...(planned.planned ? { tools: plannedEditTools() } : {}) });
     } catch (e: any) {
       await ctx.moments?.stop();   // before the simple version or the final render below
       await ctx.renderGate?.catch(() => undefined);   // never two renders at once
@@ -506,7 +510,7 @@ ${summary}
     const version = await finalize(deps, ctx, onEvent, rulesFixer(deps, provider, ctx, onEvent, signal));
     // ctx.state.finished: a rules fix replaces the run's summary with what the reel now does
     const summary = withRulesReply(withStyleEcho(honestSummary({ ...run, finished: ctx.state.finished ?? run.finished }, ctx.state)
-      ?? 'I could not finish your first edit this time, so this version is mostly your video as it was. Try again, or tell me what to change.', ctx.state), ctx, unreadable);
+      ?? 'I could not finish your first edit this time, so this version is mostly your video as it was. Try again, or tell me what to change.', ctx.state), ctx, unreadable) + planned.summaryTail;
     if (version > baseVersion) await snapshotVersion(projectDir, await loadProject(projectDir), version, `# v${version}\n\nFirst edit.\n\n${summary}\n`);
     await recordFirstEditRun(projectDir, version, baseVersion, ctx.state.aiCalls);
     onEvent({ type: 'status', message: 'Done', pct: 100 });
@@ -1229,6 +1233,8 @@ export async function deterministicEdit(deps: EditorDeps, projectDir: string, re
   } else if (!proposed) await deps.host.runEngine('autocut', engineArgs(projectDir), progress(onEvent), signal);
   changed.push('cut');
   p = await loadProject(projectDir);
+  // the engine's cut keeps one take: the plan's rows move to it (plan.ts syncPlan)
+  if (p.plan) syncPlan(p, await loadTranscript(projectDir, p));
   if (!p.captions.enabled) { p.captions.enabled = true; changed.push('captions'); }
   let song: string | null = p.music.track;
   if (!song) {

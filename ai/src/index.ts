@@ -11,7 +11,7 @@ import { Prompts, defaultPromptsDir } from './prompts';
 import { StyleStore, StyleQuestion, StyleRule, type ProposalDraft } from './style';
 import { learn } from './learning';
 import type { RuleCheck } from './rules';
-import { loadProject, versionDir, writeFileAtomic } from './project';
+import { Project, loadProject, versionDir, writeFileAtomic } from './project';
 import { differingLayers, type MergeLayer } from './version-merge';
 import { planFastNote } from './fastnote';
 import { AnthropicProvider, DEFAULT_CLAUDE_MODEL, SMALL_CLAUDE_MODEL } from './providers/anthropic';
@@ -35,6 +35,8 @@ import { proposeTry, type TryProposal, type TryRequest } from './trial';
 import { proposeReels, type ProposeReelsRequest, type ReelProposal } from './propose';
 import { proposeFromArchive, type ArchiveProposal, type ArchiveRequest } from './propose-archive';
 import { refuseIfOpen } from './owner';
+import { FirstEdit, Plan, PlanChange, PlanView, emptyPlan, followHandEdit, readPlan, toMarkdown, updatePlan } from './plan';
+import { proposePlan } from './planAgent';
 
 export * from './types';
 export { StockSearch } from './stock';
@@ -72,6 +74,10 @@ export { classifyCodexLoginStatus, detectCodex, findCodex, codexCandidates, code
 export type { CodexLoginStatus, LocalCodex, CodexState } from './providers/localCodex';
 export { cliEnv } from './safety';
 export { pickTakes, formatForPicking, deterministicEdit } from './editor';
+export {
+  PLAN_SOURCES, ROW_STATUSES, PlanError, afterEdit, applyPlanChange, changePlan, emptyPlan, followHandEdit, fromMarkdown, planProblems, planStage, readPlan, syncPlan, toMarkdown, updatePlan,
+} from './plan';
+export type { EditBy, FirstEdit, Plan, PlanBeat, PlanChange, PlanRow, PlanScript, PlanSource, PlanStage, PlanView, RowStatus, Unbuilt } from './plan';
 export type { ApplyNoteOptions } from './editor';
 export type { Niche, NicheTurn, NicheTurnInput, NicheTurnResult } from './niche';
 export { checkTryProposal, TRY_VARIABLES } from './trial';
@@ -1202,6 +1208,23 @@ export function createAI(opts: CreateAIOptions) {
     /** Reels across the whole footage archive: line ranges from the indexed files, best first (propose-archive.ts). */
     async proposeFromArchive(req: ArchiveRequest, signal?: AbortSignal, onEvent?: (e: AgentEvent) => void): Promise<ArchiveProposal> {
       return proposeFromArchive(prompts, await modelProvider('finder'), req, signal, onEvent);
+    },
+    /** The AI proposes the plan (plan.ts) before the first edit; it changes only `plan`. */
+    async proposePlan(projectDir: string, onEvent: (e: AgentEvent) => void, signal?: AbortSignal, opts: { owner?: string } = {}): Promise<{ summary: string; plan: Plan }> {
+      return exclusive(projectDir, opts.owner, () => edit(opts.owner, async (d) => proposePlan(d, await modelProvider(), projectDir, onEvent, signal)));
+    },
+    /** The creator's side of the plan: read it, change it, and carry it as markdown. The app runs `change`
+     * and `importMarkdown` as held edits, so it is the project's only writer meanwhile. */
+    plan: {
+      /** `firstEdit`: the reel's first edit as the app knows it, for the plan's stage (plan.ts planStage). */
+      get: (projectDir: string, firstEdit?: FirstEdit): Promise<PlanView> => readPlan(projectDir, firstEdit),
+      change: (projectDir: string, change: PlanChange): Promise<PlanView> => updatePlan(projectDir, change),
+      async markdown(projectDir: string): Promise<string> {
+        const { plan } = await readPlan(projectDir);
+        return toMarkdown(plan ?? emptyPlan());
+      },
+      /** A hand edit of the b-roll or the cut, before main saves it: the plan's rows follow it in the same write. */
+      followHandEdit: (projectDir: string, project: Project): Promise<Project> => followHandEdit(projectDir, project),
     },
     async styleRules() { return style.list(); },
     async removeStyleRule(id: string, options?: { forget?: boolean }) { return style.remove(id, options); },

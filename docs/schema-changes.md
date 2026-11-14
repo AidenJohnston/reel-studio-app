@@ -246,3 +246,14 @@ Existing project shapes remain valid. New shapes can require a newer engine, as 
 - `music.fadeIn` (number, 0 to 30 seconds, absent = 0.6, or 0.05 with `level: "loud-intro"`): how long the song takes
   to come in. Below 0.01 s it is 0.01 s, so the first sample never clicks. Until now the fade-in was fixed; `fadeOut`
   was already a field. Set by "Edit it myself" (0 to 2 seconds there).
+
+## 2026-11-12 (the Plan document)
+
+- `plan` (object, optional): the Plan document ([plan.md](plan.md)). `script` {`draft`, `rewrite` (text or null),
+  `locked`, `lockedAt`, `hook`, `onScreenText`}, `beats[]` {`line`, `visual`, `sound`}, `broll[]` {`id` (`p1`...),
+  `words`, `anchor` (word range), `visual`, `source` (own-file | library | fetched | card | animation |
+  screen-recording), `asset`, `treatment`, `status` (proposed | approved | rejected), `hold` (seconds, a hint),
+  `note`, `broll` (the b-roll item it built), `look` ({`leadIn`, `params`}: its picture's look while it is out of
+  the video)}, `music`, `cover` (one line each), `buildProposed` (build proposed
+  rows as if approved). The engine renders only `broll`, which the AI layer derives from the rows; its edit
+  signature counts only `plan.script`.

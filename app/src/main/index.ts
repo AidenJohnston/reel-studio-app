@@ -167,6 +167,7 @@ import { electronUpdaterBackend, macBundleCheck, windowsInstaller } from './upda
 import { disabledReason, updateMode } from './update-machine'
 import { feedFromFile } from './update-feed'
 import { createJobFeedback, createMainWindow, feedbackLog, installMenu, showTimelineInMenu, startDragOut, windowStateFile, type AppCommand, titleBarOverlay } from './window'
+import { registerPlanIpc, withPlanFollowing } from './plan-ipc'
 import { takeNote } from './note-intake'
 import { PROTOCOL, createUpdateKeyService } from './update-key'
 import { setupPosting } from './posting-ipc'
@@ -536,7 +537,7 @@ async function startNote(slug: string, { id: noteId, text: own, attachments, mom
 }
 /** A change from "Edit it myself", when its turn comes: render only, never the editor (hand-edit.ts). */
 const startHand: StartHand = async (slug, entry, record) =>
-  jobs.start(slug, 'rerender', handEditJob(runEngine, slug, entry), { note: HAND_MESSAGE, record })
+  jobs.start(slug, 'rerender', handEditJob(runEngine, slug, entry, (dir, p, changed) => withPlanFollowing(ai, dir, p, changed)), { note: HAND_MESSAGE, record })
 const noteQueue = createNoteQueue({ jobs, startNote, startHand, changed: (slug) => broadcast('queue:change', slug), log, words: (q) => aiNoteText(q.text, q.moment) })
 
 const models = createModelManager({
@@ -1400,6 +1401,16 @@ function registerIpc(): void {
     openExternal: (url) => shell.openExternal(url),
     log
   })
+  // the Plan document (main/plan-ipc.ts)
+  registerPlanIpc({
+    handle, ai: () => ai, projectDir, hold: jobs.hold, start: jobs.start,
+    firstEdit: async (slug) => {
+      if (jobs.forSlug(slug)?.kind === 'first-edit') return 'running'
+      if (((await readProject(slug).catch(() => null))?.version ?? 0) > 0) return 'done'
+      const status = (await readAppState(slug).catch(() => null))?.status
+      return status === 'failed' || status === 'interrupted' ? 'failed' : 'none'
+    }
+  })
   // pictures, GIFs and clips on a note (main/attachments.ts)
   registerAttachmentIpc({
     handle,
@@ -1802,7 +1813,7 @@ function registerIpc(): void {
       return detail(slug)
     }
     return jobs.hold(slug, async () => {
-      const p = await readProject(slug)
+      let p = await readProject(slug)
       // a cut with clips from other sources (multi-source) is the AI's to change, not Edit it myself's word list
       if (patch?.cut !== undefined) assertWordCutEditable(p.cut?.keep)
       for (const k of Object.keys(patch ?? {}) as (keyof ProjectJson)[]) {
@@ -1814,6 +1825,8 @@ function registerIpc(): void {
         if (!EDITABLE.includes(k)) continue
         ;(p as any)[k] = (patch as any)[k]
       }
+      // a planned project's rows follow a hand edit of its pictures or cut, in this same write (main/plan-ipc.ts)
+      p = await withPlanFollowing(ai, projectDir(slug), p, Object.keys(patch ?? {}))
       await writeProject(slug, p)
       return detail(slug)
     })

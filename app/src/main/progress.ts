@@ -52,6 +52,7 @@ const PLAN: Record<string, Timed[]> = {
   'first-edit': ['listen', 'analyze', 'edit', 'final'],
   'first-edit-basic': ['listen', 'analyze', 'final'],
   note: ['edit', 'final'],
+  plan: ['listen', 'analyze', 'edit'],
   rerender: ['final']
 }
 

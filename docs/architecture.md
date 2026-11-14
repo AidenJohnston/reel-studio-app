@@ -248,6 +248,7 @@ backwards in the frames it looks at, or when a note says the video is mirrored),
 most one every 2 seconds, under the voice),
 `set_cover(atSourceTime, text)`, `write_post(caption, hashtags[5], keywords)`, `add_style_rule(rule, check)`,
 `lint_edit` (deterministic repairs and issues, see `docs/edit-lint.md`), `render_draft` (runs the same lint before encoding), `look_at_frames(times)` (returns images for vision models), `finish(summary_for_user)`.
+Only the runs that name them get `propose_plan` and `update_plan_row`, the Plan document's tools ([plan.md](plan.md)).
 
 `make_variant(variable, hook?, cover?, caption?, brightness?)` saves a trial changing one of
 `seed`, `hook`, `cover`, `caption`, or `brightness`. The editor supplies the alternative hook word

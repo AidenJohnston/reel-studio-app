@@ -90,6 +90,7 @@ export async function firstVersion(dir: string, host: FakeHost, render = true): 
 /** engine/reelengine/project.py edit_signature: what changes the rendered video. */
 function editSignature(p: Record<string, unknown>): string {
   const { updatedAt: _u, version: _v, notes: _n, post: _p, createdAt: _c, ...edit } = p;
+  if (edit.plan && typeof edit.plan === 'object') edit.plan = { script: (edit.plan as { script?: unknown }).script };
   return JSON.stringify(edit);
 }
 
