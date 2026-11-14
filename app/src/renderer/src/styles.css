@@ -19,6 +19,9 @@
 :root {
   --paper: #F1F2EF; --paper-2: #F7F8F6; --side: #E9EBE6; --surface: #FFFFFF; --sunk: #E8EAE6; --sunk-2: #F6F7F5;
   --line: #E0E2DD; --line-strong: #CBCFC9;
+  /* the edge of a control with nothing inside it to name it (a field, a switch, the picked segment): 3:1 or more on
+     paper and white, as WCAG 1.4.11 asks; --line-strong is 1.4:1. Pills with words on them keep the hairline. */
+  --edge: #7F8580;
   --ink: #161917; --ink-2: #474D49; --ink-3: #5A615B; --ink-4: #9CA29D;
   --green: #1E5E4B; --green-hover: #184F3F; --green-press: #133F33; --green-tint: #E2EDE7; --green-ink: #164A3B;
   --marker: #F4DF6E; --marker-soft: #FAEFB4; --marker-ink: #4A3E00;
@@ -368,13 +371,13 @@ html.kb .switch { transition: none; }
 .segmented.fill > button { min-width: 0; padding: 0 4px; }
 .seg-thumb {
   position: absolute; top: 2px; bottom: 2px; left: 2px; border-radius: 999px; background: var(--surface); pointer-events: none;
-  box-shadow: 0 1px 2px rgba(22, 30, 26, .12), 0 0 0 .5px rgba(22, 30, 26, .08); transition: transform 180ms cubic-bezier(.2, .8, .2, 1);
+  box-shadow: 0 1px 2px rgba(22, 30, 26, .12), 0 0 0 1px var(--edge); transition: transform 180ms cubic-bezier(.2, .8, .2, 1);
 }
 html.kb .seg-thumb { transition: none; }
 @media (prefers-reduced-motion: reduce) { .seg-thumb { transition: none; } }
 .pick-words { line-height: 2.1; font-size: var(--fs-md); max-height: 220px; overflow-y: auto; overflow-x: hidden; padding: 4px 0; }
 .input, .textarea, select.input {
-  width: 100%; font: inherit; color: var(--ink); background: var(--surface); border: 1px solid var(--line-strong);
+  width: 100%; font: inherit; color: var(--ink); background: var(--surface); border: 1px solid var(--edge);
   border-radius: var(--r-md); padding: 0 12px; height: 36px; outline: none;
 }
 .input:focus, .textarea:focus, select.input:focus { border-color: var(--ink-3); box-shadow: var(--focus); }
