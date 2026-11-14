@@ -21,7 +21,7 @@ import {
   type Dismissal,
   type UpdateMemory
 } from './update-machine'
-import { initialUpdateState, updateAction, type UpdateActionResult, type UpdateBusy, type UpdateMode, type UpdateState } from '../shared/update'
+import { initialUpdateState, showsUpdateButton, updateAction, type UpdateActionResult, type UpdateBusy, type UpdateMode, type UpdateState } from '../shared/update'
 
 /**
  * Why an update this copy could install opens the download page instead.
@@ -425,7 +425,9 @@ export async function menuCheckForUpdates(
     if (r.response === 0) await (page ? u.openRelease() : u.download())
     else if (page && s.keyNeeded && r.response === 1) await u.openAutoUpdatesPage()
   } else if (action === 'install') {
-    await ui.show({ type: 'info', title: 'Update ready', message: `Reel Studio ${v} is downloaded`, detail: 'Restart from the update button in the sidebar to install it.', buttons: ['OK'] })
+    // After "Not now" the sidebar button stays hidden, even through this check; Settings always offers the restart.
+    const detail = showsUpdateButton(s) ? 'Restart from the update button in the sidebar to install it.' : 'To install it, open Settings and choose Restart to update.'
+    await ui.show({ type: 'info', title: 'Update ready', message: `Reel Studio ${v} is downloaded`, detail, buttons: ['OK'] })
   } else if (s.status === 'up-to-date') {
     await ui.show({ type: 'info', title: "You're up to date", message: "You're up to date", detail: `Reel Studio ${s.currentVersion} is the newest version.`, buttons: ['OK'] })
   } else if (s.status === 'error') {
