@@ -20,6 +20,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+from typing import Optional
 
 from . import __version__, tools
 
@@ -35,10 +36,6 @@ CAPTION_MARGIN = 0.1
 ENCODERS_PER_PASS = 4
 # Chunks from older edits are kept for undo, up to this many times the chunks of the current video.
 KEEP_FACTOR = 3
-PART_HASH_LIMIT = 64 << 20  # files up to this size are hashed whole; larger ones (a 4K take) are sampled
-SAMPLE_BLOCK = 1 << 16
-SAMPLE_BLOCKS = 64
-SAMPLE_EDGE = 4 << 20
 
 
 def gop_frames(fps: float) -> int:
@@ -69,24 +66,15 @@ def runs(indices: list, limit: int) -> list:
 
 
 def file_identity(path) -> str:
-    """A content hash of a file. Small files are hashed whole. A large one (a source take) is hashed from
-    its size, its first and last few MiB and evenly spaced blocks between: a different take, or the same
-    take re-exported, differs there."""
-    p = Path(path)
-    size = p.stat().st_size
-    h = hashlib.sha256(str(size).encode("ascii"))
-    with open(p, "rb") as fh:
-        if size <= PART_HASH_LIMIT:
-            for block in iter(lambda: fh.read(1 << 20), b""):
-                h.update(block)
-        else:
-            h.update(fh.read(SAMPLE_EDGE))
-            span = size - 2 * SAMPLE_EDGE - SAMPLE_BLOCK
-            for k in range(SAMPLE_BLOCKS):
-                fh.seek(SAMPLE_EDGE + span * k // (SAMPLE_BLOCKS - 1))
-                h.update(fh.read(SAMPLE_BLOCK))
-            fh.seek(size - SAMPLE_EDGE)
-            h.update(fh.read(SAMPLE_EDGE))
+    """The SHA-256 of a file's whole content. Sampling a large take let a chunk outlive changed pixels between
+    the samples (Astra engine review 2). Hashing reads every byte: about 3 GB/s from memory on an Apple M4 Pro,
+    so a 2 GB 4K take adds about 0.7 s per export there plus its disk read (unmeasured); a CPU without SHA
+    instructions may take several times longer. Each file is hashed once per export (render.chunked_video
+    passes `known`)."""
+    h = hashlib.sha256()
+    with open(Path(path), "rb") as fh:
+        for block in iter(lambda: fh.read(1 << 20), b""):
+            h.update(block)
     return h.hexdigest()
 
 
@@ -126,12 +114,19 @@ def caption_events(ass: str, t0: float, t1: float) -> tuple:
     return "\n".join(header), events
 
 
-def even_frames(ffprobe: str, path: Path, store: Path) -> bool:
+def even_frames(ffprobe: str, path: Path, store: Path, hashes: Optional[dict] = None) -> bool:
     """Whether a take's frames are evenly spaced. A chunk that starts inside a cut segment draws the frames
     the single pass draws there only when the take's frames sit on a fixed grid: on a variable-rate take
     the single pass's frame clock depends on every frame time before it. Read from the packet timestamps
-    (no decoding) and remembered in `store` by the take's content."""
-    ident = file_identity(path)
+    (no decoding) and remembered in `store` by the take's content. `hashes`: identities already taken in this
+    render, by path (command_identity's `known`)."""
+    key = str(Path(path))
+    if hashes is not None and key in hashes:
+        ident = hashes[key]
+    else:
+        ident = file_identity(path)
+        if hashes is not None:
+            hashes[key] = ident
     try:
         known = json.loads(store.read_text(encoding="utf-8"))
     except (OSError, ValueError):

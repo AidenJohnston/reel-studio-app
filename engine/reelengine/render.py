@@ -1272,7 +1272,8 @@ def chunked_video(ctx: RenderCtx, tl, segments: list, src_meta: dict, src_paths:
     if any(abs(float(src_meta[sid].get("fps") or 0.0) - fps) > 1e-3 for sid in takes):
         log("# a take's frame rate differs from the project's: the final is rendered in one pass")
         return None
-    if not all(chunkmod.even_frames(ctx.ffprobe, src_paths[sid], timing) for sid in takes):
+    known: dict = {}       # each file's content hash, taken once for this export (chunks.command_identity)
+    if not all(chunkmod.even_frames(ctx.ffprobe, src_paths[sid], timing, known) for sid in takes):
         log("# a take's frames are unevenly spaced: the final is rendered in one pass")
         return None
     W, H = int(ctx.fmt["width"]), int(ctx.fmt["height"])
@@ -1289,7 +1290,7 @@ def chunked_video(ctx: RenderCtx, tl, segments: list, src_meta: dict, src_paths:
                                      "libx264", False)
         return cmd, chains, dur, shift
 
-    keys, known = [], {}
+    keys = []
     for f0, f1 in spans:
         cmd, chains, dur, shift = picture(f0, f1)
         keys.append(chunkmod.chunk_key({
