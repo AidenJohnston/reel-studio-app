@@ -1260,13 +1260,21 @@ def chunked_video(ctx: RenderCtx, tl, segments: list, src_meta: dict, src_paths:
     joined by the concat demuxer, copying the picture, and the sound is encoded whole beside it as the single pass
     encodes it. `segments` is the picture's timeline (a camera choice included, use_angles).
     -> {total, encoded: [indices of the chunks encoded]}, or None when a take's frames are unevenly spaced
-    (chunks.even_frames): that final is rendered in one pass."""
+    (chunks.even_frames) or its frame rate is not the project's: that final is rendered in one pass."""
     cache = chunkmod.Cache(rwork / chunkmod.DIR)
     timing = cache.dir / "frame-timing.json"
-    if not all(chunkmod.even_frames(ctx.ffprobe, src_paths[sid], timing) for sid in {seg.source for seg in segments}):
+    takes = {seg.source for seg in segments}
+    fps = float(ctx.fmt["fps"])
+    # A take at another rate than the project's is resampled by the `fps` filter, whose rounding phase is set by
+    # where the graph starts: a chunk drawn alone picks other source frames than the same chunk drawn inside a
+    # longer run (Astra engine review 1: 4 frames differed before encoding, 24 fps into 30). Nothing yet keeps the
+    # whole timeline's phase in a chunk, so such a final is rendered in one pass.
+    if any(abs(float(src_meta[sid].get("fps") or 0.0) - fps) > 1e-3 for sid in takes):
+        log("# a take's frame rate differs from the project's: the final is rendered in one pass")
+        return None
+    if not all(chunkmod.even_frames(ctx.ffprobe, src_paths[sid], timing) for sid in takes):
         log("# a take's frames are unevenly spaced: the final is rendered in one pass")
         return None
-    fps = float(ctx.fmt["fps"])
     W, H = int(ctx.fmt["width"]), int(ctx.fmt["height"])
     n_frames = max(1, int(round(tl.duration * fps)))
     spans = chunkmod.plan(n_frames, fps)
