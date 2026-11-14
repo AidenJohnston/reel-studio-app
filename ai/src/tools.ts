@@ -2554,17 +2554,8 @@ const tools: ToolDef[] = [
       // Some engine builds do not draw every layer yet. Never delete the user's edit because a frame lacks it.
       if (p.broll.length && r.layers === 0) notes.push('This preview engine did not draw the b-roll layers. They are saved in the project and will appear when supported, so do not remove them because frames lack them.');
       if (p.zooms.length && r.zooms === 0) notes.push('This preview engine did not apply zooms yet; they are saved in the project.');
-      // b-roll the engine had to show differently (e.g. no room beside a close-up face): tell the user, don't loop
-      const shown = Array.isArray(r.broll) ? r.broll.filter((b: any) => b?.fallback || b?.skipped) : [];
-      if (shown.length) notes.push('Some b-roll could not be shown exactly as asked (see brollShownDifferently). That is the engine being honest about the framing: do not retry the same placement; tell the user in plain words in your summary.');
-      // An animation's box is fixed when it is made; a later cut can move the face/captions under it.
-      // The engine flags it (`remake`); hand the editor the exact call that makes it again.
-      const remake = Array.isArray(r.broll) ? r.broll.filter((b: any) => b?.remake && !b?.skipped) : [];
-      const remakeAnimations = remake.map((b: any) => {
-        const item = p.broll.find((x) => x.id === b.id);
-        return { id: b.id, problem: b.remake, covers: b.clash ?? [],
-          fix: item ? { tool: 'update_broll', args: { id: b.id, anchor: { from: item.anchor.from, to: item.anchor.to } } } : null };
-      });
+      const { shownNote, remakeNote, content: brollContent } = brollFindings(r, p);
+      if (shownNote) notes.push(shownNote);
       const cadence = p.cutStyle ? CUT_STYLES[p.cutStyle.preset].secondsPerVisualChange : undefined;
       // The rendered meter includes cuts; the anchor estimate only sees b-roll and zooms.
       const cadenceMet = p.cutStyle && visualChanges?.overall?.verdict === 'in band';
@@ -2586,13 +2577,12 @@ const tools: ToolDef[] = [
       const moments = brollMoments(p);
       const want = p.sources.length > 1 ? 0 : Math.round((typeof r.duration === 'number' ? r.duration : 60) / 6);
       if (!p.cutStyle && moments < Math.round(want * 0.75)) notes.push(`Only ${moments} b-roll moments (pictures, animations, labels; the hook title not counted) for a ${Math.round(r.duration ?? 60)} s video: hand edits carry about ${want}. Before finishing, add pictures or animations for the named things, places, numbers and examples still bare: search_images for them now, all in one reply.`);
-      if (remakeAnimations.length) notes.push(`Animation${remakeAnimations.length > 1 ? 's' : ''} ${remakeAnimations.map((a: any) => a.id).join(', ')} now cover${remakeAnimations.length > 1 ? '' : 's'} the face or captions because the edit changed after ${remakeAnimations.length > 1 ? 'they were' : 'it was'} made. Remake each one now with its "fix" call (update_broll with the same anchor re-renders it into the free space), then render_draft again.`);
+      if (remakeNote) notes.push(remakeNote);
       const rules = rulesFeedback(ctx);
       if (rules.note) notes.unshift(rules.note);
       return { content: { ok: true, version: info.version, issues: r.issues ?? [], fixed: r.fixed ?? [], duration: r.duration ?? null, verify: r.verify ?? null, warnings: r.warnings ?? null,
         ...(r.variation ? { variation: r.variation } : {}),
-        ...(shown.length ? { brollShownDifferently: shown.map((b: any) => ({ id: b.id, treatment: b.treatment, ...(b.fallback ? { shownAs: b.shownAs, why: b.fallback } : { skipped: b.skipped }) })) } : {}),
-        ...(remakeAnimations.length ? { remakeAnimations } : {}),
+        ...brollContent,
         ...(bare.length ? { faceOnly: bare } : {}),
         ...(noPicture.length ? { noPicture } : {}),
         ...(pops.length > 2 ? { wordCards: pops } : {}),
@@ -2696,6 +2686,28 @@ async function lookAtEdit(ctx: ToolContext, args: { times?: number[] | null; wor
 }
 
 /** The frames the engine wrote, read back as images for a model that can see them. */
+/** What an engine result's b-roll report (render_draft, frames) means for the editor: pictures it showed
+ * differently or skipped, and animations a later cut now puts over the face or captions. */
+function brollFindings(r: any, p: Project) {
+  // b-roll the engine had to show differently (e.g. no room beside a close-up face): tell the user, don't loop
+  const shown: any[] = Array.isArray(r?.broll) ? r.broll.filter((b: any) => b?.fallback || b?.skipped) : [];
+  const shownNote = shown.length ? 'Some b-roll could not be shown exactly as asked (see brollShownDifferently). That is the engine being honest about the framing: do not retry the same placement; tell the user in plain words in your summary.' : null;
+  // An animation's box is fixed when it is made; a later cut can move the face/captions under it.
+  // The engine flags it (`remake`); hand the editor the exact call that makes it again.
+  const remake: any[] = Array.isArray(r?.broll) ? r.broll.filter((b: any) => b?.remake && !b?.skipped) : [];
+  const remakeAnimations = remake.map((b: any) => {
+    const item = p.broll.find((x) => x.id === b.id);
+    return { id: b.id, problem: b.remake, covers: b.clash ?? [],
+      fix: item ? { tool: 'update_broll', args: { id: b.id, anchor: { from: item.anchor.from, to: item.anchor.to } } } : null };
+  });
+  const remakeNote = remakeAnimations.length ? `Animation${remakeAnimations.length > 1 ? 's' : ''} ${remakeAnimations.map((a: any) => a.id).join(', ')} now cover${remakeAnimations.length > 1 ? '' : 's'} the face or captions because the edit changed after ${remakeAnimations.length > 1 ? 'they were' : 'it was'} made. Remake each one now with its "fix" call (update_broll with the same anchor re-renders it into the free space), then render_draft again.` : null;
+  const content = {
+    ...(shown.length ? { brollShownDifferently: shown.map((b: any) => ({ id: b.id, treatment: b.treatment, ...(b.fallback ? { shownAs: b.shownAs, why: b.fallback } : { skipped: b.skipped }) })) } : {}),
+    ...(remakeAnimations.length ? { remakeAnimations } : {}),
+  };
+  return { shownNote, remakeNote, content };
+}
+
 async function framesSeen(ctx: ToolContext, r: any, pick: number[], moved: Moved[]): Promise<ToolOutput> {
   const frames: { time: number; path: string }[] = (Array.isArray(r) ? r : (r?.frames ?? [])).map((f: any, i: number) =>
     typeof f === 'string' ? { time: pick[i], path: f } : { time: f.time ?? f.t ?? pick[i], path: f.path ?? f.file });
@@ -2708,11 +2720,18 @@ async function framesSeen(ctx: ToolContext, r: any, pick: number[], moved: Moved
     } catch { /* missing frame reported below */ }
   }
   ctx.emit({ type: 'status', message: 'Checking how it looks' });
+  // The same b-roll report and warnings a preview gives: a picture the frames lack may have been skipped or
+  // shown differently, and an animation may need remaking (engine frames.py, render.stills).
+  const { shownNote, remakeNote, content: brollContent } = brollFindings(r, (await load(ctx)).p);
+  const warnings = Array.isArray(r?.warnings) && r.warnings.length ? r.warnings : null;
+  const imagesNote = ctx.supportsImages ? `${images.length} image(s) attached in order.` : 'This model cannot see images; trust the project instead.';
   return {
     content: {
       frames: frames.map((f) => ({ time: f.time, file: path.basename(f.path) })),
       ...(moved.length ? { animationsSampledAtEnd: moved } : {}),
-      note: ctx.supportsImages ? `${images.length} image(s) attached in order.` : 'This model cannot see images; trust the project instead.',
+      ...(warnings ? { warnings } : {}),
+      ...brollContent,
+      note: [imagesNote, shownNote, remakeNote].filter(Boolean).join(' '),
     },
     images: ctx.supportsImages ? images : undefined,
   };

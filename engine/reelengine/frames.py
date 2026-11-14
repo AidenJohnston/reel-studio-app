@@ -26,7 +26,8 @@ def run(project_dir: Path, times: list, render_id: Optional[str] = None, file: O
         bound = render_identity.resolve(project_dir, render_id) if render_id else render_identity.for_file(file)
         times = [*times, *render.word_times(bound["manifest"].get("words") or [], words)]
         _need(times)
-        return dict(from_video(bound["video"], times, width, out_dir), renderId=bound["manifest"]["renderId"])
+        return dict(from_video(bound["video"], times, width, out_dir), renderId=bound["manifest"]["renderId"],
+                    **_reports(bound["manifest"]))
     bound = render.current_render(project_dir, project_file)
     if bound is None:
         return dict(render.stills(project_dir, times, width, project_file=project_file, words=words), source="edit")
@@ -35,7 +36,13 @@ def run(project_dir: Path, times: list, render_id: Optional[str] = None, file: O
     _need(times)
     pick, moved = render.settle_on_animations(man.get("layerItems") or [], times)
     return dict(from_video(bound["video"], pick, width, out_dir), renderId=man["renderId"],
-                animationsSampledAtEnd=moved, source="render")
+                animationsSampledAtEnd=moved, source="render", **_reports(man))
+
+
+def _reports(manifest: dict) -> dict:
+    """The render's own b-roll report and warnings, as render_draft gave them: a picture the frames lack may
+    have been skipped or shown differently, and an animation may need remaking."""
+    return {"warnings": manifest.get("warnings") or [], "broll": manifest.get("broll") or []}
 
 
 def _need(times: list) -> None:

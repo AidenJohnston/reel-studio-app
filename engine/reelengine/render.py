@@ -1863,6 +1863,8 @@ def stills(project_dir: Path, times: list, width: int, root: Optional[Path] = No
             on_still(out[-1])
         progress("frames", 100 * (n + 1) / len(times), "Looking at your video")
     return {"frames": out, "animationsSampledAtEnd": moved, "warnings": warnings,
+            # pictures shown differently or skipped, and animations to remake, as render_draft reports them
+            "broll": [r for r in broll_report if r.get("fallback") or r.get("skipped") or r.get("remake")],
             "timings": timings,
             # per take: what every still read, or "mixed" when a slow retry read the original for some
             "videoFrom": {sid: (vals.pop() if len(vals) == 1 else "mixed")

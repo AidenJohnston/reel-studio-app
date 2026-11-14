@@ -105,6 +105,8 @@ export class FakeHost implements EngineHost {
   engineAssets = false;
   songInfo: any = { duration: 120, bpm: 92, energy: 'calm', tags: ['calm', 'warm'], suggestedStartAt: 7.5, arrivals: [{ at: 30, riseDb: 6 }], curve: [[0, -20]] };
   renderExtra: any = {};
+  /** merged into every `frames` answer: what the engine adds about the picture it looked at */
+  framesExtra: any = {};
   /** every rules file a render was given (`--rules`) */
   rulesFiles: any[] = [];
   /** where a checked rule fails on this project, or null: the stand-in for rule_checks.py's checkers */
@@ -246,7 +248,7 @@ export class FakeHost implements EngineHost {
         await fsp.mkdir(fd, { recursive: true });
         const frames = [];
         for (const t of times) { const f = path.join(fd, `f_${t}.png`); await fsp.writeFile(f, tinyPng()); frames.push({ time: t, path: f }); }
-        return { frames };
+        return { frames, ...this.framesExtra };
       }
       case 'inspect-video':
       case 'inspect-audio':

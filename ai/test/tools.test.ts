@@ -709,6 +709,25 @@ describe('tool implementations', () => {
     expect(r.note).toMatch(/Remake each one now/);
   });
 
+  it('look_at_frames passes on what its stills could not show, as render_draft does', async () => {
+    // Fails if look_at_frames drops the engine's b-roll report or warnings (frames.py, render.stills): the editor
+    // would never learn a picture was skipped or an animation needs remaking unless it also rendered a draft.
+    const { ctx, host, dir } = await ctxFor();
+    const p = await loadProject(dir);
+    p.broll.push({ id: 'b7', anchor: { from: 'w29', to: 'w30' }, leadIn: 0.13, treatment: 'text-pop', asset: null, params: { text: 'Done' } });
+    await saveProject(dir, p);
+    host.framesExtra = { source: 'edit', warnings: ['music skipped: no such file'], broll: [
+      { id: 'b1', treatment: 'side-card', skipped: "That picture couldn't be downloaded." },
+      { id: 'b7', treatment: 'animation', remake: 'This animation now covers your face.', clash: ['face'] }] };
+    const r = JSON.parse((await executeTool(ctx, 'look_at_frames', { times: [1.0] })).content);
+    expect(r.warnings).toEqual(['music skipped: no such file']);
+    expect(r.brollShownDifferently).toEqual([{ id: 'b1', treatment: 'side-card', skipped: "That picture couldn't be downloaded." }]);
+    expect(r.remakeAnimations).toEqual([{ id: 'b7', problem: 'This animation now covers your face.', covers: ['face'],
+      fix: { tool: 'update_broll', args: { id: 'b7', anchor: { from: 'w29', to: 'w30' } } } }]);
+    expect(r.note).toMatch(/do not retry/);
+    expect(r.note).toMatch(/Remake each one now/);
+  });
+
   it('search_images degrades gracefully when the engine has no search', async () => {
     const { ctx, host } = await ctxFor();
     host.runEngine = async () => { throw { code: 'UNKNOWN_COMMAND', userMessage: 'no search' }; };
