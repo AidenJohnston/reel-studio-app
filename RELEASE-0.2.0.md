@@ -34,7 +34,7 @@ Recommendation: close each with a comment pointing at the release PR once it mer
 
 | Group | Branch | PRs |
 |---|---|---|
-| Notes and AI core | `port/0.2.0/notes-core` | #137 #138 #139 #140 (atomic notes, one writer per project), #144, #143, #135, #117, #129, #145, #127, #128, #153, #34 |
+| Notes and AI core (landed) | `port/0.2.0/notes-core` | #137 #138 #139 #140 (atomic notes, one writer per project), #144, #143, #135, #117, #129, #145, #127, #128, #153, #34 |
 | Render engine | `port/0.2.0/engine` | #124, #116, #146, #156, #151, #149, #154, #155, #172, #173, #178, #180 |
 | UI | `port/0.2.0/ui` | #3, #133 (for #4), #17, #126, #130, #131, #132, #118, #147, #134, #142, #152, #174, #185 |
 | CI, updater, packaging (landed) | `port/0.2.0/ship` | CI green on all three OSes, #120, #121, #179, #123, #125, #136, #168, #169, #177 |
@@ -60,3 +60,11 @@ Updated as each group lands.
 
 - Base: `release/0.2.0` at adf5f035. Baseline runs for the redesign alone: 43591769985 (`ui/capcut-timeline`) and 43592236522 (`port/baseline-9dc6a8f0`).
 - CI, updater and packaging landed (merge 1e0e4a0d). CI at the port's head passes on Node (ubuntu, macOS, Windows), Engine and Animations (run 43594737341). Installers built and passed their bundled-engine check on Windows and macOS (run 43594423556). #120, #121, #179, #123 and #125 are ported. #168, #169 and #177 are merged. #136 was already in. Version is 0.2.0 in the root, app and ai packages. Every CI failure fixed there was already on the redesign except two: the context budget, which came from main's #160, and the HDR draft filter-chain test, which #186 changed.
+- Notes and AI core landed (merge 089ec374). CI at the port's head 4261e37e passes on every job (run 43596100498). Results:
+  - #137 to #140 (atomic notes) came in through #140, which carries rebased copies of the other three. Their own heads are not ancestors, so GitHub won't show them as merged.
+  - #144 was already in the redesign.
+  - #143 is ported so that a saved version's `ai-run.json` is written once, by the run that makes the version. Later runs record their AI calls in `work/ai-runs/<note id>.json`. This also fixes a resumed first edit overwriting v1's `ai-run.json` and `notes.md`.
+  - #135, #117, #129, #145, #153 (with #127 and #128) and #34 are merged.
+  - #138's attachment sharing is dropped. The redesign's staging (#58) replaces it: an attachment waits in the note queue instead of being refused.
+  - #153's "couldn't undo My style" error is dropped. The redesign saves My style only with a committed note, so a failed note can't leave it half-changed.
+  - New test `app/test/jobs.property.test.ts` runs seeded random jobs and hand edits on two reels. After every step it checks against a model that a project has at most one writer.
