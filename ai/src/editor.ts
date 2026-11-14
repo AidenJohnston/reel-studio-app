@@ -19,7 +19,7 @@ import {
   snapshotVersion, LIBRARY_FOLDERS, anchorText, writeFileAtomic, keptWords, projectBytes, versionDir,
 } from './project';
 import { extractJson } from './providers/cli';
-import { CheckRecord, CheckRound, MAX_REPAIRS, askChecker, askHarnessChecker, checkerEvidence, repairTask, saveCheck, unresolvedLine } from './checker';
+import { CheckRecord, CheckRound, MAX_REPAIRS, askChecker, askHarnessChecker, checkerEvidence, repairTask, saveCheck, saveKeptCheck, unresolvedLine } from './checker';
 import { writeAiRun, writeKeptAiRun } from './provenance';
 import * as fsp from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
@@ -856,7 +856,9 @@ export async function applyNote(deps: EditorDeps, provider: ModelProvider | null
     published = true;
     if (review && result.version !== undefined) {
       try {
-        await saveCheck(projectDir, result.version, review.record);
+        // a version this note got back (only its caption changed) keeps the check of the note that made it
+        if (result.version > baseVersion) await saveCheck(projectDir, result.version, review.record);
+        else await saveKeptCheck(projectDir, id, result.version, review.record);
       } catch (e) {
         console.warn(`Could not save check.json for v${result.version}; keeping the committed note.`, e);
       }
