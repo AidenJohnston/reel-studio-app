@@ -188,7 +188,8 @@ describe('a note and the checked rules', () => {
     const post = call('write_post', { caption: 'Bread takes patience', hashtags: ['a', 'b', 'c', 'd', 'e'], keywords: [] });
     const r = await ai(new ScriptedModel([{ toolCalls: [words(4), post] }, finish('First cut.'), { toolCalls: [words(2)] }, finish('Two words at a time.')]))
       .firstEdit(dir, () => undefined);
-    expect(host.rulesFiles.filter((f) => !f.draft).map((f) => f.stopOn.length)).toEqual([1, 0]);
+    // a new video also stops on Reel Studio's defaults (it has nothing to keep): count the person's rule
+    expect(host.rulesFiles.filter((f) => !f.draft).map((f) => f.stopOn.filter((id: string) => !isDefaultRule(id)).length)).toEqual([1, 0]);
     expect((await loadProject(dir)).captions.style.maxWords).toBe(2);
     expect(r.summary).toMatch(/^Two words at a time\./);
   });
@@ -276,12 +277,13 @@ describe("Reel Studio's default taste", () => {
     host.ruleFails = shrinksBigCaptions;
     const model = new ScriptedModel([
       { toolCalls: [call('set_caption_style', { size: 140 })] }, { toolCalls: [call('render_draft')] }, finish(),
-      { toolCalls: [call('set_caption_style', { size: 105 })] }, finish('Bigger, and every caption the same size.'),
+      // bigger than at the start, and small enough that no subtitle is shrunk: the note still changed the video
+      { toolCalls: [call('set_caption_style', { size: 115 })] }, finish('Bigger, and every caption the same size.'),
     ]);
     const r = await ai(model).applyNote(dir, 'captions a bit bigger', () => undefined);
     expect(sent(model)[2]).toContain(SAME_SIZE);
     expect(sent(model)[3]).toContain('Not finished: the newest render breaks this rule');
-    expect((await loadProject(dir)).captions.style.size).toBe(105);
+    expect((await loadProject(dir)).captions.style.size).toBe(115);
     expect(r.summary).toBe('Bigger, and every caption the same size.');
   });
 

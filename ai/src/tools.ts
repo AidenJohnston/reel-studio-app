@@ -2707,7 +2707,7 @@ const tools: ToolDef[] = [
       const plan = ctx.project!.plan!;
       return {
         content: { ok: true, rows: plan.broll.map((r) => ({ id: r.id, words: r.words ?? null, visual: r.visual, status: r.status })) },
-        summary: `Proposed a plan with ${rows.length} b-roll idea${rows.length === 1 ? '' : 's'}`,
+        summary: `Proposed a plan with ${rows.length} picture idea${rows.length === 1 ? '' : 's'}`,
       };
     },
   },
@@ -2737,7 +2737,7 @@ const tools: ToolDef[] = [
       const placed = !!row.broll;
       return {
         content: { ok: true, id, status: row.status, placed, ...(placed ? {} : { why: row.anchor ? 'it needs a file' : 'its words are not in the transcript yet' }) },
-        summary: placed ? `Placed the planned visual on "${quote(t, row.anchor!)}"` : `Updated b-roll plan row ${id}`,
+        summary: placed ? `Placed the planned visual on "${quote(t, row.anchor!)}"` : `Updated a picture in the plan (${id})`,
       };
     },
   },

@@ -697,13 +697,13 @@ describe('tool implementations', () => {
   });
 
   it('render_draft asks to lengthen a picture that flashes by, never a video clip meant to be short', async () => {
-    const { ctx, dir } = await ctxFor();
+    const { ctx, dir, host } = await ctxFor();
     const p = await loadProject(dir);
     p.broll.push({ id: 'still', anchor: { from: 'w29', to: 'w30' }, treatment: 'card-above-head', asset: 'work/assets/flour.png', params: {} } as any,
       { id: 'clip', anchor: { from: 'w31', to: 'w32' }, treatment: 'full-frame', asset: 'Library/B-roll/pour.MP4', params: {} } as any);
     await saveProject(dir, p);
-    await fsp.mkdir(path.join(dir, 'work', 'layers'), { recursive: true });
-    await fsp.writeFile(path.join(dir, 'work', 'layers', 'layers.json'), JSON.stringify({ items: [
+    // the engine's report of where each layer was, beside the preview it describes (docs/versions.md)
+    host.afterRenderFiles = ({ dir: vd }) => fsp.writeFile(path.join(vd, 'layers.json'), JSON.stringify({ items: [
       { id: 'still', treatment: 'card-above-head', t0: 2.0, t1: 2.8 }, { id: 'clip', treatment: 'full-frame', t0: 5.0, t1: 5.8 }] }));
     const r = JSON.parse((await executeTool(ctx, 'render_draft', {})).content);
     expect(r.tooShort.map((f: { id: string }) => f.id)).toEqual(['still']);

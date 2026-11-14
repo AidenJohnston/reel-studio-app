@@ -24,10 +24,12 @@ describe('My style Undo', () => {
     const root = mkdtempSync(path.join(tmpdir(), 'rs-style-'));
     const store = new StyleStore(() => root);
     const p = captionCaseProposal({ project: 'bread', title: 'Bread', version: 1 });
-    const saved = await store.approve(p);
-    if (saved.status !== 'saved') throw new Error('not saved');
-    const gone = await store.remove(saved.rule.id);
+    expect(await store.answer(p, true)).toEqual({ status: 'saved' });
+    const [saved] = await store.list();
+    const gone = await store.remove(saved.id);
     await store.restore(gone!.rule, gone!.index);
-    expect(await store.approve(p)).toEqual({ status: 'saved', rule: saved.rule });
+    // its question counts as answered for this same rule again, not as forgotten
+    expect(await store.answer(p, true)).toEqual({ status: 'saved' });
+    expect((await store.list()).map((r) => r.id)).toEqual([saved.id]);
   });
 });

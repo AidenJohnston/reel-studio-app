@@ -3,7 +3,7 @@
 import { describe, expect, it } from 'vitest';
 import * as fsp from 'node:fs/promises';
 import * as path from 'node:path';
-import { createAI, FirstEdit, Plan, PlanRow, Project, changePlan, emptyPlan, fromMarkdown, planProblems, planStage, syncPlan, toMarkdown, updatePlan, withDefaults } from '../src';
+import { createAI, executeTool, newToolState, StyleStore, FirstEdit, Plan, PlanRow, Project, changePlan, emptyPlan, fromMarkdown, planProblems, planStage, syncPlan, toMarkdown, updatePlan, withDefaults } from '../src';
 import { afterEdit, aiUpdateRow, followBroll, followHandEdit, proposeRows, readPlan } from '../src/plan';
 import { PLAN_TOOLS } from '../src/planAgent';
 import { FakeHost, ScriptedModel, call, firstVersion, makeProject, makeTranscript, SAMPLE_LINES, tinyPng, tmpDir } from './helpers';
@@ -271,9 +271,9 @@ describe('the flow', () => {
   });
 
   it('the first edit builds only approved rows, and add_broll is refused', async () => {
-    const { dir, host, settingsDir, read } = await planned(withRows([{ ...FLOUR }, { ...HOURS }, { ...BRICK }]));
+    const { root, dir, host, settingsDir, read } = await planned(withRows([{ ...FLOUR }, { ...HOURS }, { ...BRICK }]));
     const model = new ScriptedModel([
-      { toolCalls: [KEEP, call('add_broll', { anchor: { from: 'w38', to: 'w38' }, treatment: 'text-pop', asset: null, search: null, animation: null, params: { text: 'LOAF', tilt: null, scale: null, side: null, style: null } })] },
+      { toolCalls: [KEEP, call('add_broll', { anchor: { from: 'w38', to: 'w38' }, treatment: 'text-pop', asset: null, animation: null, params: { text: 'LOAF', tilt: null, scale: null, side: null, style: null } })] },
       { toolCalls: [finish()] },
     ]);
     const r = await createAI({ host, settingsDir, providerOverride: model }).firstEdit(dir, () => undefined);
@@ -285,11 +285,17 @@ describe('the flow', () => {
     const task = (model.requests[0].messages[0] as any).content[0].text as string;
     expect(task).toContain('## The creator\'s plan');
     expect(task).toContain('p1 "fancy flour"');
+    // the run was not given add_broll, so the agent loop refuses it before it runs
     expect(toolResult(model, 'add_broll')).toMatchObject({ isError: true });
-    expect(toolResult(model, 'add_broll').content).toContain('cannot be added outside the plan');
     const p = await read();
     expect(p.broll.map((b) => [b.id, b.asset])).toEqual([['p1', 'Library/Images/flour.png']]);
     expect(r.summary).toBe('Done.');
+    // and the tool itself refuses a picture outside the plan when called anyway (outside a note)
+    const ctx = { projectDir: dir, host, style: new StyleStore(() => root), emit: () => undefined, state: newToolState(), supportsImages: true };
+    const direct = await executeTool(ctx, 'add_broll', { anchor: { from: 'w38', to: 'w38' }, treatment: 'text-pop', asset: null, animation: null, params: { text: 'LOAF', tilt: null, scale: null, side: null, style: null } });
+    expect(direct).toMatchObject({ isError: true });
+    expect(direct.content).toContain('cannot be added outside the plan');
+    expect((await read()).broll.map((b) => b.id)).toEqual(['p1']);
   });
 
   it('with no row approved the first edit has no b-roll and asks for approval', async () => {
@@ -411,7 +417,7 @@ describe('the flow', () => {
     // the creator's approval placed p1 (the app's plan IPC)
     await updatePlan(dir, { kind: 'rowStatus', id: 'p1', status: 'approved' });
     const ai = createAI({ host, settingsDir, providerOverride: new ScriptedModel([
-      { toolCalls: [call('add_broll', { anchor: { from: 'w40', to: 'w41' }, treatment: 'text-pop', asset: null, search: null, animation: null, params: { text: 'BRICK', tilt: null, scale: null, side: null, style: null } })] },
+      { toolCalls: [call('add_broll', { anchor: { from: 'w40', to: 'w41' }, treatment: 'text-pop', asset: null, animation: null, params: { text: 'BRICK', tilt: null, scale: null, side: null, style: null } })] },
       { toolCalls: [finish('I put BRICK on screen.')] },
     ]) });
     await ai.applyNote(dir, 'put the word BRICK on screen when I say a brick', () => undefined);
@@ -429,7 +435,7 @@ describe('the flow', () => {
 // builds exactly what they approved. The first edit's own state is the app's to know: the tests pass it in.
 describe('plan, approve, then the first edit', () => {
   const stage = async (dir: string, firstEdit: FirstEdit = 'none') => (await readPlan(dir, firstEdit)).stage;
-  const LOAF = call('add_broll', { anchor: { from: 'w38', to: 'w38' }, treatment: 'text-pop', asset: null, search: null, animation: null, params: { text: 'LOAF', tilt: null, scale: null, side: null, style: null } });
+  const LOAF = call('add_broll', { anchor: { from: 'w38', to: 'w38' }, treatment: 'text-pop', asset: null, animation: null, params: { text: 'LOAF', tilt: null, scale: null, side: null, style: null } });
 
   it('fails if a stage is skipped, or the first edit builds a picture the creator did not approve', async () => {
     const { dir, host, settingsDir, read } = await planned(emptyPlan());
