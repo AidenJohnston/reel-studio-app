@@ -258,7 +258,8 @@ Existing project shapes remain valid. New shapes can require a newer engine, as 
   says them. Where the speaker went off-script (an ad-lib, a skipped line) captions show the transcript.
   Corrections (`captions.corrections`) still win over both. `false` turns it off for the project.
 - `work/script-align.json` (written by the engine): the mapping. `groups` (`{ids, words}`: transcript word ids drawn
-  as these script words), `spans` (`[first id, last id]`: the stretches of speech that follow the script), the
-  `script` it was made from, and `key` (a hash of the mapping version, the script and the transcript words; the
-  file is rebuilt when it no longer matches). Anchors stay on transcript word ids: only the text drawn for them
-  changes.
+  as these script words, also where both read the same, so a number the script spells out stays spelled out),
+  `spans` (`[first id, last id]`: the stretches of speech that follow the script), the `script` it was made from,
+  and `key` (a hash of the mapping `version`, the script and the transcript words). The file is rebuilt when the
+  key no longer matches and removed when the project no longer has a script; the AI shows it only while the key
+  matches the current script. Anchors stay on transcript word ids: only the text drawn for them changes.

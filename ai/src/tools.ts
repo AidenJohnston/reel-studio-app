@@ -9,12 +9,13 @@ import { StockSearch, StockProvider } from './stock';
 import { readAttachment } from './attachments';
 import {
 
-  Analysis, Broll, CaptionStyle, ClipItem, CutItem, LIBRARY_FOLDERS, LibraryKind, MusicFrozen, MusicLevel, Project, ScriptAlign, Sfx, Transcript, TREATMENTS, Word, WordAnchor, Zoom,
-  anchorText, anchorWords, approxDuration, approxOutputTimes, keptWords, loadAnalysis, loadProject, loadScriptAlign, loadTranscript,
+  Analysis, Broll, CaptionStyle, ClipItem, CutItem, LIBRARY_FOLDERS, LibraryKind, MusicFrozen, MusicLevel, Project, Sfx, Transcript, TREATMENTS, Word, WordAnchor, Zoom,
+  anchorText, anchorWords, approxDuration, approxOutputTimes, keptWords, loadAnalysis, loadProject, loadTranscript,
   captionsUnderInstagram, nextBrollId, clipProblem, normalizeKeep, captionCorrectionProblem, saveProject, validateProject, wordIndex, anchorProblem, PROJECT_FILE, versionDir, JOIN_TRANSITIONS, SEARCHED_JOINS, listVersions, versionLine, withWordsBack,
 } from './project';
 import { MERGE_FIELDS, MergeRequest, MergeResult, mergeVersions, validateMergeRequest } from './version-merge';
 import { S, JSONSchema, validate, fillNulls } from './schema';
+import { ScriptFollow, scriptFollow, scriptSection } from './script-follow';
 import { SFX_SOUNDS } from './sfx.generated';
 import { ANIMATION_IDS, ENGINE_FED, TimedWord, alignWordTimes, animationParamsSchema, cleanParams, composeProblems, composeTimingProblem, itemTimes, phraseTime, templateSpec, timeComposeParts } from './animations';
 import { chooseReadableLayout, minHeroPx } from './readable';
@@ -407,7 +408,7 @@ ${asData(JSON.stringify(view, null, 1))}
 </reference_data>`;
 }
 
-function formatTranscript(t: Transcript, p: Project, a: Analysis | null, follow: ScriptAlign | null = null): string {
+function formatTranscript(t: Transcript, p: Project, a: Analysis | null, follow: ScriptFollow | null = null): string {
   const lines: string[] = [];
   let cur: string[] = []; let start = 0; let src = '';
   let prev: any = null;
@@ -448,19 +449,7 @@ function formatTranscript(t: Transcript, p: Project, a: Analysis | null, follow:
       + 'if the topic makes a different word or name certain (a sound-alike that fits the sentence), fix it with add_caption_correction on the whole misheard phrase; if the word as heard fits, leave it\n';
     out += unsure.map((u) => `${u.id}: "${asData(u.context)}"`).join('\n');
   }
-  if (follow && p.captions.followScript !== false) {
-    // the engine draws the script's words over the words that follow it (scriptalign.py)
-    const said = new Map(t.words.map((w) => [w.id, String(w.w).trim()]));
-    out += "\n\nLOCKED SCRIPT (the captions show the script's words wherever the speech follows it, at the audio's times; ad-libs and skipped lines show as said; caption corrections still win)\n"
-      + `<script_data>\n${asData(follow.script.trim().slice(0, 2000))}\n</script_data>`;
-    if (follow.spans.length) out += `\nFOLLOWS THE SCRIPT: ${follow.spans.slice(0, 40).map(([x, y]) => (x === y ? x : `${x}-${y}`)).join(', ')}`;
-    if (follow.groups.length) {
-      out += '\nCAPTIONS SHOW THE SCRIPT HERE (ids: heard -> shown)\n' + follow.groups.slice(0, 40).map((g) => {
-        const ids = g.ids.length > 1 ? `${g.ids[0]}-${g.ids[g.ids.length - 1]}` : g.ids[0];
-        return `${asData(ids)}: "${asData(g.ids.map((i) => said.get(i) ?? '').join(' '))}" -> "${asData(g.words.join(' '))}"`;
-      }).join('\n');
-    }
-  }
+  if (follow) out += scriptSection(t, p, follow, asData);
   const longPauses = (a?.pauses ?? []).filter((x: any) => (x.dur ?? (x.e - x.s)) > 0.8);
   if (longPauses.length) {
     out += `\n\nLONG PAUSES: ${longPauses.slice(0, 60).map((x: any) => `${x.after ?? '?'}..${x.before ?? '?'} ${(x.dur ?? (x.e - x.s)).toFixed(1)}s`).join(', ')}`;
@@ -1509,7 +1498,7 @@ const tools: ToolDef[] = [
     parameters: S.obj(READ_PAGING),
     async run(ctx, args) {
       const { p, t } = await load(ctx);
-      const follow = await loadScriptAlign(ctx.projectDir);
+      const follow = await scriptFollow(ctx.projectDir, p, t);
       return { content: readPage(`${formatTranscript(t, p, ctx.analysis ?? null, follow)}\n\nCURRENT CUT\n${JSON.stringify(cutSummary(t, p))}`, args) };
     },
   },

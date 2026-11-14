@@ -4,6 +4,7 @@ import * as path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { TOOLS, TOOL_NAMES, executeTool, newToolState, loadProject, StyleStore, ToolContext, AgentEvent } from '../src';
 import { lowestCaptionPosition, saveProject } from '../src/project';
+import { mappingKey } from '../src/script-follow';
 import { planFastNote } from '../src/fastnote';
 import { isStrict, validate } from '../src/schema';
 import { FakeHost, makeProject, tinyPng, commitImage, tinyMp3, commitLocalAsset } from './helpers';
@@ -385,7 +386,11 @@ describe('tool implementations', () => {
 
   it('get_transcript shows the locked script and where the captions draw its words', async () => {
     const { ctx, dir } = await ctxFor();
-    const align = { script: 'Nobody tells you this.', groups: [{ ids: ['w1', 'w2'], words: ['tells'] }], spans: [['w0', 'w4']] };
+    const script = 'Nobody tells you this.';
+    const p = await loadProject(dir);
+    await saveProject(dir, { ...p, script });
+    const t = JSON.parse(await fsp.readFile(path.join(dir, 'work', 'transcript.json'), 'utf8'));
+    const align = { key: mappingKey(script, t.words), script, groups: [{ ids: ['w1', 'w2'], words: ['tells'] }], spans: [['w0', 'w4']] };
     await fsp.writeFile(path.join(dir, 'work', 'script-align.json'), JSON.stringify(align));
     const r = await executeTool(ctx, 'get_transcript', {});
     expect(r.content).toMatch(/LOCKED SCRIPT[^\n]*\n<script_data>\nNobody tells you this\.\n<\/script_data>/);
