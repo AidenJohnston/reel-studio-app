@@ -131,3 +131,33 @@ export function sampleLook(style: CaptionStyle, sample: { text: string; words: n
   if (tokens.length !== sample.words || !tokens.every((t) => /\w/.test(t))) look.highlight = null
   return look
 }
+
+/**
+ * A colour's common name, lowercase ("red", "light blue"), or null when it has none worth saying (a muted or
+ * in-between shade), so a description can say "a new colour" rather than name one the reel does not show.
+ * Bands are by hue, lightness and saturation; they are judgement calls, not measured against how people name colours.
+ */
+export function colorName(hex: string): string | null {
+  const m = /^#?([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})/i.exec(hex.trim())
+  if (!m) return null
+  const [r, g, b] = m.slice(1, 4).map((x) => parseInt(x, 16) / 255)
+  const max = Math.max(r, g, b)
+  const min = Math.min(r, g, b)
+  const l = (max + min) / 2
+  const d = max - min
+  const s = d === 0 ? 0 : d / (1 - Math.abs(2 * l - 1))
+  if (l >= 0.93) return 'white'
+  if (l <= 0.1) return 'black'
+  if (s < 0.12) return 'grey'
+  if (s < 0.4) return null
+  const h = d === 0 ? 0 : max === r ? (60 * ((g - b) / d) + 360) % 360 : max === g ? 60 * ((b - r) / d) + 120 : 60 * ((r - g) / d) + 240
+  if (h < 15 || h >= 345) return l > 0.75 ? 'pink' : 'red'
+  if (h < 40) return l < 0.35 ? 'brown' : 'orange'
+  if (h < 70) return 'yellow'
+  if (h < 165) return 'green'
+  if (h < 195) return 'turquoise'
+  if (h < 255) return l > 0.7 ? 'light blue' : 'blue'
+  if (h < 290) return 'purple'
+  // magenta: deep is purple (#800080), bright is pink (#FF2D92)
+  return l < 0.4 ? 'purple' : 'pink'
+}

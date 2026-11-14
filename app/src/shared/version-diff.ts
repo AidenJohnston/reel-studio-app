@@ -1,7 +1,7 @@
 // What a version changed, as before → after rows, read from the project.json each version saved
 // (versions/vN/project.json, docs/versions.md) and each render's length. Keep free of Node and DOM imports.
 import type { ProjectJson } from './api'
-import { look, name, pos, size } from './describe'
+import { look, name, OTHER_COLOR, pos, size } from './describe'
 import { clock } from './progress'
 import { gainOf, gainText, levelOf, momentKey, musicFades, secondsText, SFX_LEVELS, sfxName } from './sfx'
 
@@ -17,7 +17,9 @@ export interface VersionRow {
 type Style = Record<string, unknown>
 const SIZE = (s: Style): string => (size(s) < 95 ? 'Small' : size(s) > 115 ? 'Big' : 'Medium')
 const POSITION = (s: Style): string => (pos(s) < 0.69 ? 'Higher' : 'Lower')
-const LOOK: Record<string, string> = { white: 'Plain', yellow: 'Yellow', box: 'Black box' }
+// the colour the words are drawn in, as colorName says it; white stays 'Plain', the look with nothing added
+const LOOK = (l: string): string =>
+  l === 'box' ? 'Black box' : l === 'white' ? 'Plain' : l === OTHER_COLOR ? 'Another colour' : l.charAt(0).toUpperCase() + l.slice(1)
 const subtitlesOn = (p: ProjectJson | null): boolean => !!p && p.captions?.enabled !== false
 const song = (p: ProjectJson | null): string => (p?.music?.enabled && p.music.track ? `“${name(p.music.track)}”` : 'None')
 const count = (n: number, one: string, many: string): string => (n === 0 ? 'None' : n === 1 ? `1 ${one}` : `${n} ${many}`)
@@ -50,7 +52,7 @@ export function versionRows(before: ProjectJson | null, after: ProjectJson, leng
     const b = (after.captions?.style ?? {}) as Style
     add('Subtitle size', SIZE(a), SIZE(b))
     add('Subtitle position', POSITION(a), POSITION(b))
-    add('Subtitle look', LOOK[look(a)], LOOK[look(b)])
+    add('Subtitle look', LOOK(look(a)), LOOK(look(b)))
     const fixed = (after.captions?.corrections?.length ?? 0) - (before.captions?.corrections?.length ?? 0)
     if (fixed > 0) rows.push({ label: 'Words fixed', before: '', after: String(fixed) })
   }
@@ -108,7 +110,7 @@ export function versionFact(rows: VersionRow[]): string {
     if (r.label === 'Length') facts.push(seconds(r.after) < seconds(r.before) ? 'shorter' : 'longer')
     else if (r.label === 'Subtitles') facts.push(r.after === 'None' ? 'no subtitles' : 'subtitles')
     else if (r.label === 'Subtitle size') sub.size = SIZE_ORDER.indexOf(r.after) > SIZE_ORDER.indexOf(r.before) ? 'bigger' : 'smaller'
-    else if (r.label === 'Subtitle look') sub.look = r.after === 'Black box' ? 'boxed' : r.after.toLowerCase()
+    else if (r.label === 'Subtitle look') sub.look = r.after === 'Black box' ? 'boxed' : r.after === 'Another colour' ? 'recoloured' : r.after.toLowerCase()
     else if (r.label === 'Subtitle position') sub.place = r.after === 'Higher' ? 'higher' : 'lower'
     else if (r.label === 'Words fixed') facts.push(r.after === '1' ? '1 word fixed' : `${r.after} words fixed`)
     else if (r.label === 'Music') facts.push(r.after === 'None' ? 'no song' : r.before === 'None' ? 'song' : 'new song')
